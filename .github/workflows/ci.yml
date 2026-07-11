@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # reused as the release gate (.github/workflows/release.yml)
 
 jobs:
   test:
@@ -12,7 +13,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: ShellCheck
-        run: shellcheck configure.sh stack build/tor/entrypoint.sh tests/*.sh
+        run: shellcheck configure.sh stack build/tor/entrypoint.sh scripts/*.sh tests/*.sh
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:

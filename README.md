@@ -50,7 +50,7 @@ Details in [Hardware Requirements](docs/hardware.md).
 
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
-cd bitcoin-starter-stack
+cd bitcoin-starter-stack   # or unpack the tarball from the latest release
 cp config.example.json config.json
 nano config.json    # set node_username and node_password (letters/numbers only)
 ./configure.sh      # writes .env, creates the data dir
