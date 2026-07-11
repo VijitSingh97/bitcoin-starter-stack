@@ -21,6 +21,11 @@ All notable changes to this project are documented here. Format follows
   the bitcoin and dashboard containers terminates inside the stack subnet;
   the Tor-only claim is now tested, not just configured.
 - `VERSION` file (rendered into the stack for the update checker).
+- **Release automation** — `scripts/release.sh` preflight (clean tree,
+  semver, tag collision, changelog section) + a tag-triggered workflow
+  that re-runs the full test gate and publishes the GitHub Release with
+  notes extracted from this file and a source tarball. Documented in
+  [Releasing](docs/releasing.md).
 
 ### Changed
 
