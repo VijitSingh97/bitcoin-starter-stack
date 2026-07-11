@@ -1,3 +1,11 @@
+# Keep unbounded container logs from eating the disk; bitcoind also writes
+# its own debug.log in the datadir (rotated by bitcoind itself).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   tor:
     build: ./build/tor
@@ -5,6 +13,7 @@ services:
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
       interval: 60s
@@ -16,18 +25,19 @@ services:
         ipv4_address: 172.29.0.25
 
   bitcoin:
-    image: lncm/bitcoind:v28.0
+    image: bitcoin/bitcoin:31.1@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63
     container_name: bitcoin
     user: "1000:1000"
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
       DBCACHE: ${BITCOIN_DBCACHE:-3000}
+      PRUNE: ${BITCOIN_PRUNE:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
-    # Credentials and dbcache come from the environment, written by configure.sh.
+    # Credentials, dbcache, and prune come from the environment (via configure.sh).
     # The exec line must stay a single line: a YAML line break here becomes a
     # shell line break, silently dropping every flag after it (see tests/test_e2e.sh).
     entrypoint:
@@ -36,10 +46,11 @@ services:
       - |
         find /data -name '*.lock' -delete
         find /data -name 'LOCK' -delete
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}"
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}" -prune="$${PRUNE}"
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "bitcoin-cli -rpcuser=$${RPC_USER} -rpcpassword=$${RPC_PASSWORD} getblockchaininfo >/dev/null"]
       interval: 60s
@@ -61,6 +72,7 @@ services:
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"]
       interval: 60s

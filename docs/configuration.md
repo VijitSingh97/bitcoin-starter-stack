@@ -16,7 +16,8 @@ The template ([config.example.json](../config.example.json)):
         "node_username": "create_a_username_for_node",
         "node_password": "create_a_password_for_node",
         "data_dir": "./data/bitcoin",
-        "dbcache_mb": 3000
+        "dbcache_mb": 3000,
+        "prune_mb": 0
     }
 }
 ```
@@ -27,6 +28,7 @@ The template ([config.example.json](../config.example.json)):
 | `node_password` | — (required) | RPC password. Letters and numbers only — it passes through shell and env-file layers. |
 | `data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
+| `prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
 
 `configure.sh` refuses to run while the placeholder credentials are still
 in place, and applies the defaults above for any omitted key.
@@ -38,6 +40,32 @@ nano config.json
 ./configure.sh
 docker compose up -d    # recreates only the containers whose config changed
 ```
+
+## Pruned node
+
+Set `prune_mb` to run with a fraction of the disk. The node still
+downloads and **fully validates** every block — it just discards old block
+files afterwards, keeping roughly the configured amount:
+
+```json
+"prune_mb": 10000
+```
+
+keeps ~10 GB of recent blocks; with the chainstate (~12 GB) and overhead,
+total disk lands around 25–30 GB instead of ~800 GB.
+`configure.sh` rejects values between 1 and 549 because bitcoind does.
+
+Know the trade-offs before enabling:
+
+- **Enabling is one-way-ish.** Turning pruning on for an existing full
+  datadir prunes it down in place. Going back to `prune_mb: 0` later
+  requires re-downloading the entire chain.
+- A pruned node can't serve historical blocks to other software (some
+  wallets and explorers need `txindex`, which pruning excludes).
+- The dashboard's "Node Data Size" will show the pruned footprint.
+
+Apply like any other change: edit `config.json`, `./configure.sh`,
+`docker compose up -d`.
 
 ## Reusing an existing node
 

@@ -24,6 +24,7 @@ fail() {
 export BITCOIN_RPC_USER=e2euser
 export BITCOIN_RPC_PASSWORD=e2epass
 export BITCOIN_DBCACHE=300
+export BITCOIN_PRUNE=550 # exercises the pruned path and keeps the test datadir small
 BITCOIN_DATA_DIR=$(mktemp -d)
 export BITCOIN_DATA_DIR
 chmod 777 "$BITCOIN_DATA_DIR" # bitcoind runs as uid 1000; CI runners often aren't

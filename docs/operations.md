@@ -24,14 +24,17 @@ shows recent probe output when diagnosing.
 
 ## Upgrading
 
-- **Bitcoin Core:** bump the `lncm/bitcoind` tag in `docker-compose.yml`,
-  then `docker compose up -d`. Chain data upgrades in place; downgrades
-  across major versions are not generally supported, so read the release
-  notes first.
+- **Bitcoin Core:** the stack uses the official
+  [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) image,
+  pinned to an exact version and digest in `docker-compose.yml`. Dependabot
+  files a PR when a new release is published; CI boots the stack against it
+  before you merge. To upgrade manually, bump the tag+digest and
+  `docker compose up -d`. Chain data upgrades in place; downgrades across
+  major versions are not generally supported, so read the release notes.
 - **Dashboard / Tor images:** `git pull`, then
   `docker compose up -d --build`.
-- Dependabot files PRs for base images, pip packages, and GitHub Actions
-  weekly.
+- Everything is pinned (image digests, pip versions, action SHAs) and
+  Dependabot maintains all of it with weekly PRs.
 
 ## Backup
 
@@ -68,6 +71,6 @@ credentials, make sure you re-ran `./configure.sh` *and*
 **Node syncs but peer count is 0 after hours** — tor container unhealthy or
 restarted with a new identity mid-session. `docker compose restart tor bitcoin`.
 
-**Disk filling up** — the dashboard's disk row is the early warning. Options:
-bigger disk, or accept pruning by forking `bitcoin.conf` (`prune=` is
-incompatible with some wallet/RPC uses; not a supported configuration here).
+**Disk filling up** — the dashboard's disk row is the early warning.
+Options: a bigger disk, or switch to a pruned node via `prune_mb` in
+`config.json` — see [Configuration → Pruned node](configuration.md#pruned-node).

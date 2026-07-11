@@ -23,6 +23,14 @@ rpc_user=$(jq -r '.bitcoin.node_username // empty' config.json)
 rpc_password=$(jq -r '.bitcoin.node_password // empty' config.json)
 data_dir=$(jq -r '.bitcoin.data_dir // "./data/bitcoin"' config.json)
 dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' config.json)
+prune=$(jq -r '.bitcoin.prune_mb // 0' config.json)
+
+# bitcoind rejects prune targets between 1 and 549 MB
+case "$prune" in *[!0-9]*) prune=-1 ;; esac
+if [ "$prune" -lt 0 ] || { [ "$prune" -ne 0 ] && [ "$prune" -lt 550 ]; }; then
+  echo "prune_mb must be 0 (full node) or at least 550."
+  exit 1
+fi
 
 if [ -z "$rpc_user" ] || [ -z "$rpc_password" ]; then
   echo "config.json is missing bitcoin.node_username or bitcoin.node_password."
@@ -41,6 +49,7 @@ BITCOIN_RPC_USER=$rpc_user
 BITCOIN_RPC_PASSWORD=$rpc_password
 BITCOIN_DATA_DIR=$data_dir
 BITCOIN_DBCACHE=$dbcache
+BITCOIN_PRUNE=$prune
 EOF
 chmod 600 .env
 

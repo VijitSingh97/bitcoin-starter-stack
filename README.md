@@ -21,8 +21,9 @@ watching sync progress, peers, and disk usage.
 
 ## What it does
 
-- 🟠 **Full Bitcoin node.** Bitcoin Core v28 validating the full chain, data persisted on disk
-  across restarts, health-checked by Docker.
+- 🟠 **Full Bitcoin node.** The official Bitcoin Core image (digest-pinned, Dependabot-updated)
+  validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
+  config key.
 - 🧅 **Tor-only networking.** All outbound P2P connections go through the Tor container
   (`onlynet=onion`) — your home IP is never associated with your node. No inbound
   connections, no clearnet.
@@ -38,7 +39,8 @@ watching sync progress, peers, and disk usage.
 ## 🚀 Quick Start
 
 **Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
-`jq`, an SSD with ~1 TB free (the chain is ~800 GB and grows), and 8 GB+ RAM.
+`jq`, an SSD with ~1 TB free (the chain is ~800 GB and grows — or ~30 GB
+[pruned](docs/configuration.md#pruned-node)), and 8 GB+ RAM.
 Details in [Hardware Requirements](docs/hardware.md).
 
 ```bash

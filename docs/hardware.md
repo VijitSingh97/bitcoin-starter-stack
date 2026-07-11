@@ -11,6 +11,10 @@ The single number that matters most. As of mid-2026 the full chain is
 
 - **Minimum:** 1 TB free — works today, forces a resize within a year or two.
 - **Recommended:** 2 TB — years of headroom.
+- **Pruned alternative:** ~30 GB total. Set `prune_mb` in `config.json`
+  ([Configuration → Pruned node](configuration.md#pruned-node)) — full
+  validation, a fraction of the disk, at the cost of not serving
+  historical blocks.
 - **SSD required.** Chainstate access is random-I/O heavy; initial sync on a
   spinning disk takes weeks instead of days.
 

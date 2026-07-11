@@ -28,7 +28,13 @@ echo '{"bitcoin": {"node_username": "u"}}' >"$tmp/config.json"
 echo '{"bitcoin": {"node_username": "u", "node_password": "p`whoami`"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "special characters in password were accepted"
 
-# 5. Happy path renders .env with defaults applied
+# 5. Refuses prune targets bitcoind would reject (1-549) and non-numbers
+echo '{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": 100}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "prune_mb=100 was accepted"
+echo '{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": "lots"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric prune_mb was accepted"
+
+# 6. Happy path renders .env with defaults applied
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "myuser", "node_password": "mypass123"}}
 EOF
@@ -38,6 +44,7 @@ grep -q '^BITCOIN_RPC_USER=myuser$' "$tmp/.env" || fail "username not rendered"
 grep -q '^BITCOIN_RPC_PASSWORD=mypass123$' "$tmp/.env" || fail "password not rendered"
 grep -q '^BITCOIN_DATA_DIR=./data/bitcoin$' "$tmp/.env" || fail "data_dir default not applied"
 grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applied"
+grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
 
 # 6. .env is private
@@ -45,13 +52,14 @@ grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applie
 perms=$(ls -l "$tmp/.env" | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail ".env permissions are $perms, expected -rw-------"
 
-# 7. Custom data_dir and dbcache are honored
+# 7. Custom data_dir, dbcache, and prune are honored
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512}}
+{"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir not rendered"
 grep -q '^BITCOIN_DBCACHE=512$' "$tmp/.env" || fail "custom dbcache not rendered"
+grep -q '^BITCOIN_PRUNE=550$' "$tmp/.env" || fail "custom prune not rendered"
 [ -d "$tmp/elsewhere" ] || fail "custom data dir not created"
 
 echo "PASS: test_configure.sh"

@@ -18,6 +18,7 @@ export BITCOIN_RPC_USER=testuser
 export BITCOIN_RPC_PASSWORD=testpass
 export BITCOIN_DATA_DIR=./data/bitcoin
 export BITCOIN_DBCACHE=1234
+export BITCOIN_PRUNE=555
 
 rendered=$(docker compose --env-file /dev/null config)
 
@@ -25,13 +26,14 @@ rendered=$(docker compose --env-file /dev/null config)
 echo "$rendered" | grep -q 'RPC_USER: testuser' || fail "RPC_USER not interpolated"
 echo "$rendered" | grep -q 'RPC_PASSWORD: testpass' || fail "RPC_PASSWORD not interpolated"
 echo "$rendered" | grep -q 'DBCACHE: "1234"' || fail "DBCACHE not interpolated"
+echo "$rendered" | grep -q 'PRUNE: "555"' || fail "PRUNE not interpolated"
 
 # Entrypoint defers credential expansion to container runtime ($$ escaped),
 # so plaintext credentials are never baked into the rendered command line.
 # All flags must sit on ONE line with the exec: a YAML-induced line break
 # after -conf silently drops them (found the hard way; see tests/test_e2e.sh).
 # shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
-echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}"' ||
+echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}" -prune="$${PRUNE}"' ||
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcuser=testuser" && fail "credentials baked into rendered command line"
 
