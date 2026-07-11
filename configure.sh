@@ -28,6 +28,10 @@ dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' config.json)
 prune=$(jq -r '.bitcoin.prune_mb // 0' config.json)
 inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == true then 1 else 0 end' config.json)
 dashboard_password=$(jq -r '.dashboard.password // empty' config.json)
+dashboard_onion=$(jq -r 'if .dashboard.onion == true then 1 else 0 end' config.json)
+telegram_bot_token=$(jq -r '.notifications.telegram_bot_token // empty' config.json)
+telegram_chat_id=$(jq -r '.notifications.telegram_chat_id // empty' config.json)
+healthchecks_url=$(jq -r '.notifications.healthchecks_url // empty' config.json)
 
 if [ -z "$rpc_user" ] || [ -z "$rpc_password" ]; then
   echo "config.json is missing bitcoin.node_username or bitcoin.node_password."
@@ -40,6 +44,29 @@ case "$rpc_user$rpc_password$dashboard_password" in
     exit 1
     ;;
 esac
+
+# Notification values pass through .env — reject anything env-file-unsafe
+case "$telegram_bot_token$telegram_chat_id$healthchecks_url" in
+  *[\ \	\'\"\$]*)
+    echo "Notification settings must not contain spaces, quotes, or \$."
+    exit 1
+    ;;
+esac
+
+if [ -n "$healthchecks_url" ]; then
+  case "$healthchecks_url" in
+    http://* | https://*) ;;
+    *)
+      echo "healthchecks_url must be a full URL (paste it from healthchecks.io)."
+      exit 1
+      ;;
+  esac
+fi
+
+if [ "$dashboard_onion" = "1" ] && [ -z "$dashboard_password" ]; then
+  echo "WARNING: dashboard.onion is enabled without dashboard.password —"
+  echo "         anyone who learns the onion address can view the dashboard."
+fi
 
 # bitcoind rejects prune targets between 1 and 549 MB
 case "$prune" in *[!0-9]*) prune=-1 ;; esac
@@ -65,6 +92,11 @@ BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
 DASHBOARD_PASSWORD=$dashboard_password
+DASHBOARD_ONION=$dashboard_onion
+TELEGRAM_BOT_TOKEN=$telegram_bot_token
+TELEGRAM_CHAT_ID=$telegram_chat_id
+HEALTHCHECKS_URL=$healthchecks_url
+NODE_NAME=$(hostname)
 EOF
 chmod 600 .env
 

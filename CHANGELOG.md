@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-07-11
+
+### Added
+
+- **Telegram alerts** (`notifications.telegram_bot_token` / `telegram_chat_id`):
+  debounced one-way alerts — node down/recovered, initial sync complete,
+  disk low, startup heartbeat. Sent over Tor (`socks5h`), so alerts are
+  never a clearnet beacon. No commands, nothing controls the node.
+- **Healthchecks.io dead-man's switch** (`notifications.healthchecks_url`):
+  a ping every 5 minutes (`/fail` variant while the node's RPC is down),
+  also over Tor — an outside service alerts you when the whole box goes
+  dark, the one failure an on-box monitor can't report.
+- **Dashboard over Tor** (`dashboard.onion`): publishes the dashboard as an
+  onion service for remote access with no port-forwarding; `configure.sh`
+  warns if enabled without `dashboard.password`.
+- Monitor unit tests, e2e assertion for the onion provisioning, and a
+  [notifications guide](docs/notifications.md).
+
 ## [1.0.0] - 2026-07-11
 
 First tagged release.
@@ -50,4 +68,5 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.1.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.1.0
 [1.0.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.0.0

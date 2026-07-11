@@ -49,7 +49,12 @@ simple and deterministic.
 - **The only published port is the dashboard's `8000`.** RPC (`8332`),
   SOCKS (`9050`), and the tor control port (`9051`) exist only on the
   internal network; `rpcallowip` restricts RPC to Docker's address space
-  as a second layer.
+  as a second layer. The optional dashboard onion service adds reachability
+  through Tor only — still no host port.
+- **Notification egress rides Tor too.** Telegram messages and
+  Healthchecks.io pings (both opt-in) go through the tor container's SOCKS
+  proxy (`socks5h`, so even DNS resolves through Tor) — enabling alerts
+  never turns the stack into a clearnet beacon.
 
 ## Trust boundaries — and non-boundaries
 

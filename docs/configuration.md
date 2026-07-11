@@ -21,7 +21,13 @@ The template ([config.example.json](../config.example.json)):
         "inbound_onion": false
     },
     "dashboard": {
-        "password": ""
+        "password": "",
+        "onion": false
+    },
+    "notifications": {
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "healthchecks_url": ""
     }
 }
 ```
@@ -35,6 +41,10 @@ The template ([config.example.json](../config.example.json)):
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node serves blocks to the network — see [Inbound onion service](#inbound-onion-service). |
 | `dashboard.password` | `""` (no auth) | Non-empty enables HTTP basic auth on the dashboard (any username, this password). Letters and numbers only. |
+| `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
+| `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
+| `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
+| `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 
 `configure.sh` refuses to run while the placeholder credentials are still
 in place, and applies the defaults above for any omitted key.

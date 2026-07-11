@@ -29,6 +29,7 @@ export BITCOIN_DBCACHE=300
 export BITCOIN_PRUNE=550 # exercises the pruned path and keeps the test datadir small
 export BITCOIN_INBOUND_ONION=1
 export DASHBOARD_PASSWORD=e2edash
+export DASHBOARD_ONION=1
 
 # Same rpcauth derivation as configure.sh
 BITCOIN_RPCAUTH_SALT=$(openssl rand -hex 16)
@@ -85,5 +86,9 @@ for _ in $(seq 1 24); do
   sleep 10
 done
 [ -n "$onion_ok" ] || fail "bitcoind never registered an onion service with tor"
+
+# The dashboard hidden service is provisioned (keys + hostname generated)
+docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' ||
+  fail "dashboard onion hostname was not provisioned"
 
 echo "PASS: test_e2e.sh"

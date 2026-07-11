@@ -31,6 +31,8 @@ echo "$rendered" | grep -q 'RPCAUTH_HASH: deadbeef' || fail "RPCAUTH_HASH not in
 echo "$rendered" | grep -q 'DBCACHE: "1234"' || fail "DBCACHE not interpolated"
 echo "$rendered" | grep -q 'PRUNE: "555"' || fail "PRUNE not interpolated"
 echo "$rendered" | grep -q 'INBOUND_ONION: "0"' || fail "INBOUND_ONION default not applied"
+echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION default not applied"
+echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 
 # The plaintext RPC password reaches ONLY the dashboard (bitcoind gets the
 # rpcauth hash) — exactly one occurrence in the whole rendered config

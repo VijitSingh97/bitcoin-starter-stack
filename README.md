@@ -36,6 +36,10 @@ watching sync progress, peers, and disk usage.
   `rpcauth` hash, never the plaintext.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
   the multi-day initial download.
+- 📟 **Opt-in alerts & remote access.** Telegram alerts (node down, sync complete, disk
+  low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
+  box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
+  over Tor. See [Notifications](docs/notifications.md).
 
 ## 🚀 Quick Start
 

@@ -162,4 +162,12 @@ def index():
     """, stats=stats)
 
 if __name__ == '__main__':
+    import threading
+    import monitor
+    if monitor.enabled():
+        threading.Thread(
+            target=monitor.monitor_loop,
+            args=(lambda: get_rpc_data("getblockchaininfo"),),
+            daemon=True,
+        ).start()
     app.run(host='0.0.0.0', port=8000)

@@ -51,6 +51,10 @@ grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applie
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
 grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion default not applied"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
+grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
+grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
+grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
+grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
 
 # 8. rpcauth is a real salted HMAC of the password (re-derive to check)
@@ -68,7 +72,8 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 # 10. Custom values are honored
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true},
- "dashboard": {"password": "dashpass1"}}
+ "dashboard": {"password": "dashpass1", "onion": true},
+ "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid"}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir not rendered"
@@ -76,6 +81,29 @@ grep -q '^BITCOIN_DBCACHE=512$' "$tmp/.env" || fail "custom dbcache not rendered
 grep -q '^BITCOIN_PRUNE=550$' "$tmp/.env" || fail "custom prune not rendered"
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion=true not rendered as 1"
 grep -q '^DASHBOARD_PASSWORD=dashpass1$' "$tmp/.env" || fail "dashboard password not rendered"
+grep -q '^DASHBOARD_ONION=1$' "$tmp/.env" || fail "dashboard onion not rendered"
+grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token not rendered"
+grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
+grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
 [ -d "$tmp/elsewhere" ] || fail "custom data dir not created"
+
+# 11. Rejects env-file-unsafe notification values and non-URL healthchecks
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"node_username": "u", "node_password": "p"},
+ "notifications": {"telegram_bot_token": "has space"}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "telegram token with a space was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"node_username": "u", "node_password": "p"},
+ "notifications": {"healthchecks_url": "hc-ping.com/uuid"}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-URL healthchecks_url was accepted"
+
+# 12. Warns when the onion dashboard has no password
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"onion": true}}
+EOF
+out=$(cd "$tmp" && ./configure.sh)
+echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
 
 echo "PASS: test_configure.sh"

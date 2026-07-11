@@ -21,6 +21,11 @@ Please don't open public issues for security problems.
 - **Credentials from git.** RPC credentials live only in gitignored files —
   `config.json` and the rendered `.env` (mode 600) — and are never written
   into tracked files.
+- **Your IP from notification services.** Opt-in Telegram alerts and
+  Healthchecks.io pings route through the stack's Tor proxy (`socks5h`),
+  so those endpoints see a Tor exit, never your address. (The Telegram bot
+  token in `.env`/dashboard env can send messages as your bot if leaked —
+  it cannot read other chats or control the node.)
 - **The plaintext RPC password from the bitcoin container.** bitcoind gets
   only a salted HMAC (`rpcauth`); `docker inspect bitcoin` reveals no
   password. The plaintext exists in the dashboard's environment (it must

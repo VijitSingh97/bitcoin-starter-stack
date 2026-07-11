@@ -8,6 +8,12 @@
         "inbound_onion": false
     },
     "dashboard": {
-        "password": ""
+        "password": "",
+        "onion": false
+    },
+    "notifications": {
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "healthchecks_url": ""
     }
 }
