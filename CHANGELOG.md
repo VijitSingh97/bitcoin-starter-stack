@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-07-11
+
+### Added
+
+- Dashboard shows the stack version (from the `VERSION` file, via
+  `STACK_VERSION`) in the footer and on the sync/loading page.
+- Dashboard header badge now always states the node mode — **Full** or
+  **Pruned · N GB** — instead of showing a badge only when pruned.
+
+### Changed
+
+- The dashboard's "Version:" row is relabelled **Bitcoin Core:** to
+  distinguish the node version from the new stack version.
+
 ## [1.2.1] - 2026-07-11
 
 ### Fixed
@@ -106,6 +120,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.3.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.3.0
 [1.2.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.1
 [1.2.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.0
 [1.1.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.1.0

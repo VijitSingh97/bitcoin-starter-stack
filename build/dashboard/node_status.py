@@ -17,6 +17,12 @@ DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 RPC_URL = 'http://172.29.0.26:8332'
 BITCOIN_DIR = '/data'
 DISK_WARN_FREE_GB = 50
+STACK_VERSION = os.environ.get("STACK_VERSION", "dev")
+
+
+def version_label():
+    # "v1.3.0" for a real release, "dev" for an unversioned checkout
+    return f"v{STACK_VERSION}" if STACK_VERSION and STACK_VERSION != "dev" else "dev"
 
 
 @app.before_request
@@ -107,10 +113,11 @@ def index():
                     <div class="spinner"></div>
                     <p>Connecting to RPC at 172.29.0.26...</p>
                     <p style="color: #888; font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
+                    <p style="color: #444; font-size: 0.7rem;">{{version}}</p>
                 </div>
             </body>
             </html>
-        """)
+        """, version=version_label())
 
     # Calculate Inbound vs Outbound
     inbound, outbound = 0, 0
@@ -136,6 +143,7 @@ def index():
         "outbound": outbound,
         "pruned": blockchain.get("pruned", False),
         "prune_target_gb": round(blockchain.get("prune_target_size", 0) / (1024**3), 1),
+        "stack_version": version_label(),
         "node_gb": round(node_bytes / (1024**3), 2),
         "total_gb": round(total / (1024**3), 2),
         "free_gb": free_gb,
@@ -172,8 +180,8 @@ def index():
     </head>
     <body>
         <div class="card">
-            <h2>Bitcoin Node Status{% if stats.pruned %}<span class="badge">Pruned &middot; {{stats.prune_target_gb}} GB</span>{% endif %}</h2>
-            <div class="row"><span class="label">Version:</span> <span>{{stats.version}}</span></div>
+            <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
+            <div class="row"><span class="label">Bitcoin Core:</span> <span>{{stats.version}}</span></div>
             <div class="row"><span class="label">Uptime:</span> <span>{{stats.uptime}}</span></div>
             <div class="row"><span class="label">Total Connections:</span> <span>{{stats.total_peers}}</span></div>
             <div class="peer-box">
@@ -192,6 +200,7 @@ def index():
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
+                <span>{{stats.stack_version}}</span>
                 <span>Auto-refresh: 30s</span>
             </div>
         </div>
