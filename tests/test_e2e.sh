@@ -28,7 +28,14 @@ BITCOIN_DATA_DIR=$(mktemp -d)
 export BITCOIN_DATA_DIR
 chmod 777 "$BITCOIN_DATA_DIR" # bitcoind runs as uid 1000; CI runners often aren't
 
-trap 'docker compose --env-file /dev/null down -v --remove-orphans >/dev/null 2>&1 || true; rm -rf "$BITCOIN_DATA_DIR"' EXIT
+# bitcoind writes as uid 1000, which the invoking user may not be able to
+# delete — clean the datadir through a root container instead of rm -rf
+cleanup() {
+  docker compose --env-file /dev/null down -v --remove-orphans >/dev/null 2>&1 || true
+  docker run --rm -v "$BITCOIN_DATA_DIR":/cleanup alpine:3.22 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
+  rmdir "$BITCOIN_DATA_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 docker compose --env-file /dev/null up -d --build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"

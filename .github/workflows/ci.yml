@@ -14,9 +14,6 @@ jobs:
       - name: ShellCheck
         run: shellcheck configure.sh tests/*.sh
 
-      - name: Stack tests (configure.sh + compose contract)
-        run: tests/run.sh
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -26,11 +23,7 @@ jobs:
           pip install -r build/dashboard/requirements.txt pytest
           python -m pytest build/dashboard/tests -q
 
-      - name: Build images
-        env:
-          BITCOIN_RPC_USER: ci
-          BITCOIN_RPC_PASSWORD: ci
-        run: docker compose build
-
-      - name: End-to-end boot test
-        run: tests/test_e2e.sh
+      # Runs the configure.sh e2e, the compose contract test, and the
+      # full-stack boot test (which builds the images) — same as local.
+      - name: Stack tests
+        run: tests/run.sh
