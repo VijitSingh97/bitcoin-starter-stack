@@ -10,7 +10,12 @@ class Capture:
 
     def install(self, monkeypatch, free_gb=1000):
         monkeypatch.setattr(monitor, "send_telegram", self.telegrams.append)
-        monkeypatch.setattr(monitor, "ping_healthchecks", self.pings.append)
+
+        def ping(healthy):  # record it, report success (see retry test for failures)
+            self.pings.append(healthy)
+            return True
+
+        monkeypatch.setattr(monitor, "ping_healthchecks", ping)
         monkeypatch.setattr(
             monitor.shutil, "disk_usage",
             lambda path: types.SimpleNamespace(free=int(free_gb * 1024**3)),
@@ -127,6 +132,40 @@ def test_healthchecks_fail_ping_when_node_down(monkeypatch):
     cap = Capture()
     run_ticks(cap, monkeypatch, [None])
     assert cap.pings == [False]
+
+
+def test_ping_cadence_is_five_minutes():
+    # matches the recommended Healthchecks.io period; a change here should be
+    # a deliberate one that updates docs/notifications.md too
+    assert monitor.PING_EVERY_TICKS * monitor.TICK_SECONDS == 300
+
+
+def test_healthchecks_retries_every_tick_until_a_ping_succeeds(monkeypatch):
+    # a failed ping must not wait a full 5-minute cycle — it retries next tick,
+    # so a single Tor hiccup can't trip a tight grace window
+    cap = Capture()
+    cap.install(monkeypatch)
+    attempts = []
+    outcomes = iter([False, False, True])  # first two fail, third gets through
+
+    def flaky(healthy):
+        attempts.append(healthy)
+        return next(outcomes)
+
+    monkeypatch.setattr(monitor, "ping_healthchecks", flaky)
+    state = {}
+    for _ in range(3):  # three consecutive ticks
+        state = monitor.tick(lambda: HEALTHY, state)
+    assert len(attempts) == 3  # retried on each tick, not throttled to 5
+
+
+def test_healthchecks_throttles_after_a_success(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)  # always succeeds
+    state = {}
+    for _ in range(monitor.PING_EVERY_TICKS):  # 5 ticks after the first success
+        state = monitor.tick(lambda: HEALTHY, state)
+    assert len(cap.pings) == 1  # only the first tick pinged; the rest are throttled
 
 
 def test_send_telegram_routes_over_tor(monkeypatch):
