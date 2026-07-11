@@ -1,0 +1,5 @@
+# Alpine/apk and the pip layer intentionally don't pin every OS package
+# version (rolling base, digest-pinned images already lock the base layer).
+ignored:
+  - DL3018 # pin apk package versions
+  - DL3013 # pin pip package versions (we pin in requirements.txt instead)

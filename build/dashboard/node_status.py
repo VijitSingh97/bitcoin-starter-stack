@@ -35,8 +35,8 @@ def check_auth():
     return Response("Authentication required", 401,
                     {"WWW-Authenticate": 'Basic realm="Bitcoin Node Status"'})
 
-def get_rpc_data(method):
-    payload = json.dumps({"jsonrpc": "1.0", "id": "dashboard", "method": method, "params": []})
+def get_rpc_data(method, params=None):
+    payload = json.dumps({"jsonrpc": "1.0", "id": "dashboard", "method": method, "params": params or []})
     try:
         response = requests.post(RPC_URL, auth=(RPC_USER, RPC_PASSWORD), data=payload, timeout=3)
         if response.status_code == 200:
@@ -45,6 +45,14 @@ def get_rpc_data(method):
     except Exception as e:
         print(f"RPC Error ({method}): {e}")
         return None
+
+def fee_sat_vb(blocks):
+    # estimatesmartfee returns BTC/kvB (or an error during sync / with too
+    # little data); convert to sat/vB, or None when unavailable
+    est = get_rpc_data("estimatesmartfee", [blocks])
+    rate = est.get("feerate") if isinstance(est, dict) else None
+    return round(rate * 100000) if rate else None
+
 
 def format_uptime(seconds):
     if seconds is None or not isinstance(seconds, (int, float)):
@@ -83,6 +91,18 @@ def metrics():
         lines.append("# TYPE bitcoin_peers gauge")
         lines.append(f'bitcoin_peers{{direction="in"}} {inbound}')
         lines.append(f'bitcoin_peers{{direction="out"}} {len(peers) - inbound}')
+
+        # mempool + fees, once synced
+        if not blockchain.get("initialblockdownload", False):
+            mp = get_rpc_data("getmempoolinfo")
+            if isinstance(mp, dict):
+                m("bitcoin_mempool_txs", mp.get("size", 0))
+                m("bitcoin_mempool_bytes", mp.get("bytes", 0))
+            lines.append("# TYPE bitcoin_fee_sat_vb gauge")
+            for n in (1, 3, 6):
+                rate = fee_sat_vb(n)
+                if rate is not None:
+                    lines.append(f'bitcoin_fee_sat_vb{{blocks="{n}"}} {rate}')
     return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
 
 
@@ -137,6 +157,12 @@ def index():
     free_gb = round(free / (1024**3), 2)
     last_update = datetime.now().strftime("%H:%M:%S")
 
+    # Mempool + fee estimates — only once synced (estimatesmartfee has no data
+    # during initial block download)
+    ibd = blockchain.get("initialblockdownload", False)
+    mempool = get_rpc_data("getmempoolinfo") if not ibd else None
+    fees = {n: fee_sat_vb(n) for n in (1, 3, 6)} if not ibd else {}
+
     stats = {
         "version": network.get("subversion", "Unknown") if network else "Unknown",
         "uptime": format_uptime(uptime_seconds),
@@ -154,6 +180,12 @@ def index():
         "free_gb": free_gb,
         "disk_warn": free_gb < DISK_WARN_FREE_GB,
         "disk_percent": round((node_bytes / total) * 100, 2) if total > 0 else 0,
+        "show_mempool": bool(mempool),
+        "mempool_txs": mempool.get("size") if mempool else None,
+        "mempool_mb": round(mempool.get("bytes", 0) / (1024**2), 1) if mempool else None,
+        "fee_next": fees.get(1),
+        "fee_30m": fees.get(3),
+        "fee_hour": fees.get(6),
         "last_update": last_update,
         # not "update": Jinja resolves stats.update to the dict METHOD, which
         # is always truthy and renders as its repr
@@ -191,6 +223,11 @@ def index():
             <div class="row"><span class="label">Disk Capacity:</span> <span>{{stats.total_gb}} GB</span></div>
             <div class="row"><span class="label">Disk Usage:</span> <span>{{stats.disk_percent}}%</span></div>
             <div class="row"><span class="label">Disk Free:</span> <span {% if stats.disk_warn %}class="warn"{% endif %}>{{stats.free_gb}} GB{% if stats.disk_warn %} &#9888; LOW{% endif %}</span></div>
+            {% if stats.show_mempool %}
+            <hr>
+            <div class="row"><span class="label">Mempool:</span> <span>{{stats.mempool_txs}} tx &middot; {{stats.mempool_mb}} MB</span></div>
+            <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{stats.fee_next or '—'}} / {{stats.fee_30m or '—'}} / {{stats.fee_hour or '—'}}</span></div>
+            {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
