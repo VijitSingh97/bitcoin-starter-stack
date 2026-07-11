@@ -151,6 +151,29 @@ def test_theme_wired_on_both_pages(monkeypatch):
         assert '#0f0f0f' not in body  # colours live in the stylesheet now
 
 
+def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
+    # the tower canvas + module are present, the live panel is swappable,
+    # and the page updates by polling (no full-page meta refresh that would
+    # reset the animation)
+    full = render_index(monkeypatch).data.decode()
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    loading = node_status.app.test_client().get("/").data.decode()
+    for body in (full, loading):
+        assert '<canvas id="tower">' in body
+        assert '/static/tower.js' in body
+        assert 'id="live"' in body
+        assert '/static/refresh.js' in body
+        assert 'http-equiv="refresh"' not in body
+
+
+def test_tower_and_refresh_assets_served():
+    client = node_status.app.test_client()
+    tower = client.get("/static/tower.js")
+    assert tower.status_code == 200
+    assert b"project" in tower.data
+    assert client.get("/static/refresh.js").status_code == 200
+
+
 def test_static_css_and_js_are_served():
     client = node_status.app.test_client()
     css = client.get("/static/dashboard.css")

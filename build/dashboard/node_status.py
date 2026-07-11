@@ -101,13 +101,14 @@ def index():
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <meta http-equiv="refresh" content="5">
                 <title>Bitcoin Node Status</title>
                 <link rel="stylesheet" href="/static/dashboard.css">
                 <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
             </head>
             <body class="center-screen">
+                <canvas id="tower"></canvas>
                 <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+                <div id="live">
                 <div class="loading-card">
                     <h2>Bitcoin Node Initializing</h2>
                     <div class="spinner"></div>
@@ -115,7 +116,10 @@ def index():
                     <p style="color: var(--muted); font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
                     <p style="color: var(--faint); font-size: 0.7rem;">{{version}}</p>
                 </div>
+                </div>
+                <script type="module" src="/static/tower.js"></script>
                 <script type="module" src="/static/theme.js"></script>
+                <script type="module" src="/static/refresh.js"></script>
             </body>
             </html>
         """, version=version_label())
@@ -162,12 +166,13 @@ def index():
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Bitcoin Node Status</title>
-        <meta http-equiv="refresh" content="30">
         <link rel="stylesheet" href="/static/dashboard.css">
         <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
     </head>
     <body class="center">
+        <canvas id="tower"></canvas>
         <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+        <div id="live">
         <div class="card">
             <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
             <div class="row"><span class="label">Bitcoin Core:</span> <span>{{stats.version}}</span></div>
@@ -193,7 +198,10 @@ def index():
                 <span>Auto-refresh: 30s</span>
             </div>
         </div>
+        </div>
+        <script type="module" src="/static/tower.js"></script>
         <script type="module" src="/static/theme.js"></script>
+        <script type="module" src="/static/refresh.js"></script>
     </body>
     </html>
     """, stats=stats)
