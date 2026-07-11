@@ -142,7 +142,9 @@ def index():
         "disk_warn": free_gb < DISK_WARN_FREE_GB,
         "disk_percent": round((node_bytes / total) * 100, 2) if total > 0 else 0,
         "last_update": last_update,
-        "update": monitor.update_available,
+        # not "update": Jinja resolves stats.update to the dict METHOD, which
+        # is always truthy and renders as its repr
+        "update_note": monitor.update_available,
     }
 
     return render_template_string("""
@@ -187,7 +189,7 @@ def index():
             <div class="row"><span class="label">Disk Capacity:</span> <span>{{stats.total_gb}} GB</span></div>
             <div class="row"><span class="label">Disk Usage:</span> <span>{{stats.disk_percent}}%</span></div>
             <div class="row"><span class="label">Disk Free:</span> <span {% if stats.disk_warn %}class="warn"{% endif %}>{{stats.free_gb}} GB{% if stats.disk_warn %} &#9888; LOW{% endif %}</span></div>
-            {% if stats.update %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update}}</div>{% endif %}
+            {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
                 <span>Auto-refresh: 30s</span>

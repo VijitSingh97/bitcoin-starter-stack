@@ -98,6 +98,17 @@ def test_index_renders_node_stats(monkeypatch):
     assert "800.0 GB" in body  # size on disk
     assert "Pruned" not in body  # full node: no badge
     assert "LOW" not in body  # 1 TB free: no warning
+    # regression: "update" as a stats key shadowed dict.update in Jinja and
+    # rendered "<built-in method update of dict object ...>" on every page
+    assert "🆕" not in body
+    assert "built-in method" not in body
+
+
+def test_update_badge_shows_when_update_available(monkeypatch):
+    monkeypatch.setattr(node_status.monitor, "update_available", "Bitcoin Core 99.0 available (running 31.1.0)")
+    body = render_index(monkeypatch).data.decode()
+    assert "🆕 Bitcoin Core 99.0 available" in body
+    assert "built-in method" not in body
 
 
 # --- pruned badge and disk warning ---
