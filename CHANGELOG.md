@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-07-11
+
+### Added
+
+- **The loading block pulses** in the tower — the cube for the block being
+  mined now flashes while it waits, instead of sitting static.
+- **Time-of-day estimate marker.** A faint outlined cube marks where the
+  day's fill "should" be by now at Bitcoin's ~10-minute spacing, so you can
+  see at a glance whether blocks are running ahead of or behind schedule.
+  It uses UTC time-of-day, matching the UTC day boundary (Bitcoin block
+  timestamps are Unix/UTC time).
+
 ## [1.9.0] - 2026-07-11
 
 ### Added
@@ -206,6 +218,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.10.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.0
 [1.9.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.9.0
 [1.8.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.8.0
 [1.7.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.7.0

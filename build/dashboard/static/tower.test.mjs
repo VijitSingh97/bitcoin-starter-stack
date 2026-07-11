@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, smooth, towerLayout, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, smooth, towerLayout, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -35,6 +35,15 @@ test("nextDisplayed catches up a big gap (fresh page mid-day)", () => {
 test("nextDisplayed drifts a single new block in over ~0.8s", () => {
   assert.ok(Math.abs(nextDisplayed(50, 51, 800) - 51) < 1e-9);
   assert.ok(nextDisplayed(50, 51, 400) < 51);
+});
+
+test("expectedFill: ~one block per 10 UTC minutes, capped at a full day", () => {
+  assert.equal(expectedFill(0), 0);       // 00:00
+  assert.equal(expectedFill(600), 60);    // 10:00 -> 60 blocks
+  assert.equal(expectedFill(720), 72);    // 12:00 -> half a day
+  assert.equal(expectedFill(1440), 144);  // 24:00 -> full layer
+  assert.equal(expectedFill(2000), 144);  // never exceeds a layer
+  assert.equal(expectedFill(-5), 0);      // never negative
 });
 
 test("project: height moves the point up; the diamond is symmetric", () => {

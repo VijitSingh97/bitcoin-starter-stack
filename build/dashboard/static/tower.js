@@ -23,6 +23,13 @@ export function isRollover(target, displayed) {
   return target < displayed - ROLLOVER_DROP;
 }
 
+// Where the day's fill "should" be by `utcMinutes` past UTC midnight, at
+// Bitcoin's ~10-minute target spacing (block timestamps are Unix/UTC time).
+// Drives the faint estimate marker; capped at a full layer.
+export function expectedFill(utcMinutes) {
+  return Math.max(0, Math.min(PER_LAYER, Math.floor(utcMinutes / 10)));
+}
+
 // Ease the shown fill toward the target: snap a small dip, rip up a big jump
 // (a fresh page mid-day), drift a single new block in over ~0.8s.
 export function nextDisplayed(current, target, dtMs) {
@@ -81,8 +88,20 @@ if (typeof document !== "undefined") {
     }
     function palette() {
       return effectiveLight()
-        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", alpha: 0.55, glow: 0 }
-        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", alpha: 0.95, glow: 10 };
+        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", marker: "#6b4400", alpha: 0.55, glow: 0 }
+        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", marker: "#fff2cf", alpha: 0.95, glow: 10 };
+    }
+
+    function outline(pts, stroke, width, glow) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      if (glow) { ctx.shadowBlur = glow; ctx.shadowColor = stroke; }
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = width;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
     const liveData = () => {
@@ -158,20 +177,34 @@ if (typeof document !== "undefined") {
 
       // today's layer: a 12x12 grid filling one cube per block
       const done = Math.floor(fill);
-      const frac = fill - done;
-      for (let idx = 0; idx < PER_LAYER; idx++) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 300); // ~2s flash on the loading block
+      const cellFace = (idx) => {
         const { gx, gy } = gridCell(idx);
-        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
+        return [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
+      };
+      for (let idx = 0; idx < PER_LAYER; idx++) {
+        const face = cellFace(idx);
         if (idx < done) {
           ctx.globalAlpha = pal.alpha;
           poly(face, pal.top, pal.edge, pal.glow);
         } else if (idx === done) {
-          ctx.globalAlpha = pal.alpha * frac; // the arriving block fades in
-          poly(face, pal.top, pal.edge, pal.glow);
+          // the block being mined right now — pulses while it loads
+          ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
+          poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
         } else {
           ctx.globalAlpha = pal.alpha * 0.5;
           poly(face, pal.empty, pal.grid, 0);
         }
+      }
+
+      // faint marker for where the day "should" be by now at 10-min spacing
+      // (UTC, matching block timestamps) — sits ahead of the fill when blocks
+      // run slow, behind when they run fast
+      const d = new Date();
+      const exp = expectedFill(d.getUTCHours() * 60 + d.getUTCMinutes());
+      if (exp !== done && exp < PER_LAYER) {
+        ctx.globalAlpha = pal.alpha * (0.35 + 0.4 * pulse);
+        outline(cellFace(exp), pal.marker, 1.5, pal.glow);
       }
       ctx.globalAlpha = 1;
 
