@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-07-11
+
+### Fixed
+
+- Dashboard rendered `🆕 <built-in method update of dict object ...>` on
+  every page: the stats key `update` shadowed Python's `dict.update` in
+  Jinja attribute lookup, which is always truthy. Renamed to
+  `update_note`; a regression test pins the default page to badge-free.
+
 ## [1.2.0] - 2026-07-11
 
 ### Added
@@ -97,6 +106,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.2.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.1
 [1.2.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.0
 [1.1.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.1.0
 [1.0.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.0.0
