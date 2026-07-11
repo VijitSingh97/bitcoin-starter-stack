@@ -9,6 +9,11 @@ command -v jq >/dev/null || {
   exit 1
 }
 
+if [ ! -f config.json ]; then
+  echo "No config.json. Create yours with: cp config.example.json config.json"
+  exit 1
+fi
+
 if grep -q "create_a_" config.json; then
   echo "Edit config.json first: set your own node username and password."
   exit 1

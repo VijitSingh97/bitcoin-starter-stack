@@ -29,8 +29,8 @@ watching sync progress, peers, and disk usage.
 - 📊 **Live dashboard.** Sync progress, block height, peer counts, uptime, and disk usage on
   your LAN at port `8000`, auto-refreshing. RPC stays inside the Docker network — nothing
   but the dashboard port is exposed.
-- 🔑 **Credentials out of git.** `configure.sh` renders your settings from `config.json`
-  into a gitignored `.env`; no tracked file is ever edited, so a stray `git add` can't
+- 🔑 **Credentials out of git.** Your settings live in `config.json` and render into
+  `.env` — both gitignored, no tracked file is ever edited, so a stray `git add` can't
   publish your RPC password.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
   the multi-day initial download.
@@ -44,6 +44,7 @@ Details in [Hardware Requirements](docs/hardware.md).
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
 cd bitcoin-starter-stack
+cp config.example.json config.json
 nano config.json    # set node_username and node_password (letters/numbers only)
 ./configure.sh      # writes .env, creates the data dir
 docker compose up -d

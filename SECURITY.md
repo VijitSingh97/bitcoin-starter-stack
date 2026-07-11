@@ -16,8 +16,9 @@ Please don't open public issues for security problems.
 - **RPC from the outside.** Bitcoin Core's RPC port is never published to
   the host; it is reachable only from containers on the internal Docker
   network (`rpcallowip=172.16.0.0/12`).
-- **Credentials from git.** RPC credentials live only in the gitignored
-  `.env` (mode 600) and are never written into tracked files.
+- **Credentials from git.** RPC credentials live only in gitignored files —
+  `config.json` and the rendered `.env` (mode 600) — and are never written
+  into tracked files.
 
 **Accepted risks (by design — know them before deploying):**
 

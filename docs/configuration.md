@@ -1,10 +1,14 @@
 # Configuration
 
-All per-box settings live in `config.json`. `configure.sh` renders them
-into a gitignored `.env`, which docker compose reads. Tracked files are
-never modified, so your credentials can't end up in a commit.
+All per-box settings live in `config.json` — created by copying the
+tracked template (`cp config.example.json config.json`) and gitignored
+from then on. `configure.sh` renders it into a gitignored `.env`, which
+docker compose reads. Tracked files are never modified, so your
+credentials can't end up in a commit.
 
 ## config.json reference
+
+The template ([config.example.json](../config.example.json)):
 
 ```json
 {

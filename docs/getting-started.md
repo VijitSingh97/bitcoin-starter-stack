@@ -23,6 +23,7 @@ sudo apt install jq avahi-daemon
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
 cd bitcoin-starter-stack
+cp config.example.json config.json
 nano config.json    # set node_username and node_password
 ./configure.sh
 docker compose up -d
