@@ -48,10 +48,10 @@ echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked into rendered command line"
 
-# The only published port is the dashboard on 8000
-ports=$(echo "$rendered" | grep -c 'published: "8000"' || true)
+# The only published port is the dashboard on host port 80
+ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
 published=$(echo "$rendered" | grep -c 'published:' || true)
-[ "$ports" = "1" ] || fail "expected dashboard published on 8000, got $ports"
+[ "$ports" = "1" ] || fail "expected dashboard published on 80, got $ports"
 [ "$published" = "1" ] || fail "expected exactly 1 published port, got $published"
 
 # Without credentials the stack refuses to start

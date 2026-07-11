@@ -73,11 +73,25 @@ body {
   min-height: 100vh;
 }
 
+/* With room to spare, put the card on the left and give the tower the right
+   half of the page (tower.js mirrors this 900px breakpoint). Below it, the
+   card stays centred and the tower sits behind it. */
+@media (min-width: 900px) {
+  .center,
+  .center-screen {
+    justify-content: flex-start;
+    align-items: center;
+    min-height: 100vh;
+    padding: 0 0 0 6vw;
+  }
+}
+
 .card {
   background: var(--card);
   border-radius: 12px;
   padding: 25px;
   width: 420px;
+  max-width: calc(100vw - 24px); /* never overflow a narrow phone */
   box-shadow: 0 8px 32px var(--shadow);
   border: 1px solid var(--border);
   position: relative;

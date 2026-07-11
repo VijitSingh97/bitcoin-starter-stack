@@ -29,7 +29,7 @@ watching sync progress, peers, and disk usage.
   default; opt in to an **inbound onion service** to serve blocks back to the network,
   still without exposing your IP.
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
-  low-space warning) on your LAN at port `8000` — optionally behind basic auth. RPC stays
+  low-space warning) on your LAN at port `80` — optionally behind basic auth. RPC stays
   inside the Docker network; nothing but the dashboard port is exposed.
 - 🔑 **Credentials handled properly.** Config renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
@@ -73,8 +73,8 @@ dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-start
 
 ## 📈 Monitoring
 
-Open the dashboard at `http://localhost:8000`, or from another machine on your LAN at
-`http://<hostname>.local:8000` (needs `avahi-daemon` on the node box).
+Open the dashboard at `http://localhost`, or from another machine on your LAN at
+`http://<hostname>.local` (needs `avahi-daemon` on the node box).
 
 - **Node mode** — a **Full** or **Pruned** badge in the header.
 - **Sync progress** — block height vs. headers, with a progress bar.
@@ -89,7 +89,7 @@ Open the dashboard at `http://localhost:8000`, or from another machine on your L
   Theme-aware and paused for `prefers-reduced-motion`.
 
 The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
-`8000` to the internet.
+`80` to the internet.
 
 ## 🏗️ How it works
 
@@ -99,12 +99,12 @@ flowchart LR
     Net(["🌐 Tor Network"])
 
     subgraph stack ["🐳 Bitcoin Starter Stack"]
-        Dashboard["📊 Dashboard<br/>:8000"]
+        Dashboard["📊 Dashboard<br/>:80"]
         Bitcoin["🟠 Bitcoin Core"]
         Tor["🧅 Tor"]
     end
 
-    You ==>|HTTP :8000| Dashboard
+    You ==>|HTTP :80| Dashboard
     Dashboard -.->|RPC| Bitcoin
     Bitcoin ==>|SOCKS5| Tor
     Tor <==> Net

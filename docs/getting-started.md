@@ -12,7 +12,7 @@
   4 cores, 8 GB RAM, and ~1 TB free on an SSD.
 
 Optional: `avahi-daemon` lets you reach the dashboard at
-`http://<hostname>.local:8000` from other machines on your LAN.
+`http://<hostname>.local` from other machines on your LAN.
 
 ```bash
 sudo apt install jq avahi-daemon
@@ -48,7 +48,7 @@ The full key reference is in [Configuration](configuration.md).
    docker logs -f bitcoin
    ```
 
-3. **The dashboard** at `http://localhost:8000` shows a holding page until
+3. **The dashboard** at `http://localhost` shows a holding page until
    the node's RPC comes up, then live sync progress.
 
 The initial block download is ~800 GB **over Tor** — expect it to take
@@ -61,7 +61,7 @@ its RPC is warmed up.
 
 ```bash
 docker ps            # all three containers Up, eventually (healthy)
-curl -s localhost:8000 | grep -o 'Bitcoin Node' | head -1
+curl -s localhost | grep -o 'Bitcoin Node' | head -1
 ```
 
 If something looks wrong, see

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, layerFill, gridCell, nextDisplayed, smooth, GRID, PER_LAYER } from "./tower.js";
+import { project, layerFill, gridCell, nextDisplayed, smooth, towerLayout, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -45,6 +45,24 @@ test("project: height moves the point up; the diamond is symmetric", () => {
   assert.equal(project(2, 2, 1, 40, 20, 0, 0).y, project(2, 2, 0, 40, 20, 0, 0).y - 20);
   assert.equal(project(1, 0, 0, 40, 20, 0, 0).x, 20);
   assert.equal(project(0, 1, 0, 40, 20, 0, 0).x, -20);
+});
+
+test("towerLayout centres behind the card on mobile", () => {
+  const m = towerLayout(375);
+  assert.equal(m.wide, false);
+  assert.equal(m.ox, 187.5);
+});
+
+test("towerLayout puts the tower right of the card zone on wide screens, no overlap", () => {
+  for (const W of [900, 1024, 1280, 1920]) {
+    const { wide, ox, tw } = towerLayout(W, GRID);
+    assert.equal(wide, true, `W=${W} should be wide`);
+    // the tower's left-most vertex must clear the 500px card zone
+    const leftExtent = ox - (GRID * tw) / 2;
+    assert.ok(leftExtent >= 500, `W=${W}: tower overlaps card (leftExtent ${leftExtent})`);
+    // and it must stay on screen
+    assert.ok(ox + (GRID * tw) / 2 <= W + 1, `W=${W}: tower runs off screen`);
+  }
 });
 
 test("smooth clamps to [0,1] and eases the ends", () => {

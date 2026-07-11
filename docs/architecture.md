@@ -14,7 +14,7 @@ flowchart LR
         Tor["🧅 tor<br/>.25 · SOCKS5"]
     end
 
-    You ==>|"HTTP :8000 (published)"| Dashboard
+    You ==>|"HTTP :80 (published)"| Dashboard
     Dashboard -.->|"RPC :8332 (internal)"| Bitcoin
     Bitcoin ==>|"SOCKS5 :9050 (internal)"| Tor
     Tor <==> Net
@@ -46,7 +46,7 @@ simple and deterministic.
 - **RPC auth is a salted hash.** bitcoind is started with `rpcauth=`; the
   plaintext password exists only in the dashboard container and `.env`.
   The bitcoin health check authenticates with Core's `.cookie` file.
-- **The only published port is the dashboard's `8000`.** RPC (`8332`),
+- **The only published port is the dashboard's `80`.** RPC (`8332`),
   SOCKS (`9050`), and the tor control port (`9051`) exist only on the
   internal network; `rpcallowip` restricts RPC to Docker's address space
   as a second layer. The optional dashboard onion service adds reachability

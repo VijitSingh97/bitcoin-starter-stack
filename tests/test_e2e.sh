@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ -z "${CI:-}" ] && [ -z "${RUN_E2E:-}" ]; then
-  echo "SKIP: test_e2e.sh (set RUN_E2E=1; boots real containers on port 8000)"
+  echo "SKIP: test_e2e.sh (set RUN_E2E=1; boots real containers on port 80)"
   exit 0
 fi
 
@@ -61,13 +61,13 @@ docker exec bitcoin bitcoin-cli -rpcuser=e2euser -rpcpassword=e2epass getblockch
 docker inspect bitcoin | grep -q e2epass && fail "plaintext RPC password leaked into the bitcoin container"
 
 # Dashboard enforces basic auth when a password is set
-code=$(curl -s -o /dev/null -w '%{http_code}' localhost:8000)
+code=$(curl -s -o /dev/null -w '%{http_code}' localhost:80)
 [ "$code" = "401" ] || fail "dashboard served without auth (HTTP $code, expected 401)"
 
 # With the password, it authenticates to the node and renders live stats
 body=""
 for _ in 1 2 3 4 5 6; do
-  body=$(curl -sf -u x:e2edash localhost:8000 || true)
+  body=$(curl -sf -u x:e2edash localhost:80 || true)
   echo "$body" | grep -q "Sync Progress" && break
   sleep 5
 done
@@ -92,7 +92,7 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' |
   fail "dashboard onion hostname was not provisioned"
 
 # Prometheus metrics behind the same auth
-curl -sf -u x:e2edash localhost:8000/metrics | grep -q "bitcoin_node_up 1" ||
+curl -sf -u x:e2edash localhost:80/metrics | grep -q "bitcoin_node_up 1" ||
   fail "metrics endpoint missing bitcoin_node_up"
 
 # Egress audit: every ESTABLISHED connection from the bitcoin and dashboard

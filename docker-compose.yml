@@ -79,7 +79,8 @@ services:
     build: ./build/dashboard
     container_name: dashboard
     ports:
-      - "8000:8000"
+      # host port 80 -> container's Flask on 8000
+      - "80:8000"
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
