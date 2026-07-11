@@ -13,7 +13,7 @@ services:
       start_period: 5m
     networks:
       btc_net:
-        ipv4_address: 172.28.0.25
+        ipv4_address: 172.29.0.25
 
   bitcoin:
     image: lncm/bitcoind:v28.0
@@ -27,14 +27,16 @@ services:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
-    # Credentials and dbcache come from .env, written by configure.sh.
-    entrypoint: >
-      /bin/sh -c "
-        find /data -name '*.lock' -delete;
-        find /data -name 'LOCK' -delete;
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf
-          -rpcuser=$${RPC_USER} -rpcpassword=$${RPC_PASSWORD} -dbcache=$${DBCACHE}
-      "
+    # Credentials and dbcache come from the environment, written by configure.sh.
+    # The exec line must stay a single line: a YAML line break here becomes a
+    # shell line break, silently dropping every flag after it (see tests/test_e2e.sh).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        find /data -name '*.lock' -delete
+        find /data -name 'LOCK' -delete
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}"
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped
@@ -46,7 +48,7 @@ services:
       start_period: 30m
     networks:
       btc_net:
-        ipv4_address: 172.28.0.26
+        ipv4_address: 172.29.0.26
 
   dashboard:
     build: ./build/dashboard
@@ -67,7 +69,7 @@ services:
       start_period: 1m
     networks:
       btc_net:
-        ipv4_address: 172.28.0.27
+        ipv4_address: 172.29.0.27
     depends_on:
       - bitcoin
 
@@ -77,7 +79,7 @@ networks:
     name: btc_net
     ipam:
       config:
-        - subnet: 172.28.0.0/24
+        - subnet: 172.29.0.0/24
 
 volumes:
   tor_data:

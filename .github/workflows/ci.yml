@@ -31,3 +31,6 @@ jobs:
           BITCOIN_RPC_USER: ci
           BITCOIN_RPC_PASSWORD: ci
         run: docker compose build
+
+      - name: End-to-end boot test
+        run: tests/test_e2e.sh

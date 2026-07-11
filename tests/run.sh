@@ -12,6 +12,7 @@ fi
 
 tests/test_configure.sh
 tests/test_compose.sh
+tests/test_e2e.sh
 
 if python3 -c "import pytest, flask" 2>/dev/null; then
   python3 -m pytest build/dashboard/tests -q

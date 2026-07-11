@@ -1,14 +1,14 @@
 # Architecture
 
 Three containers on one isolated bridge network (`btc_net`,
-`172.28.0.0/24`), orchestrated by a single compose file.
+`172.29.0.0/24`), orchestrated by a single compose file.
 
 ```mermaid
 flowchart LR
     You(["👤 You · Browser"])
     Net(["🌐 Tor Network"])
 
-    subgraph stack ["🐳 bitcoin-starter-stack · btc_net 172.28.0.0/24"]
+    subgraph stack ["🐳 bitcoin-starter-stack · btc_net 172.29.0.0/24"]
         Dashboard["📊 dashboard<br/>.27 · Flask"]
         Bitcoin["🟠 bitcoin<br/>.26 · Core v28"]
         Tor["🧅 tor<br/>.25 · SOCKS5"]
@@ -24,7 +24,7 @@ flowchart LR
 
 | Service | Image | Runs as | Role |
 |---|---|---|---|
-| `tor` | `alpine:3.22` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.28.0.25:9050`. Fresh onion identity per volume. |
+| `tor` | `alpine:3.22` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.29.0.25:9050`. Fresh onion identity per volume. |
 | `bitcoin` | `lncm/bitcoind:v28.0` | `1000:1000` | Full node. `-datadir=/data` bind-mounted from the host. Credentials and `dbcache` injected from `.env` at runtime. |
 | `dashboard` | `python:3.11-slim` + Flask (built locally) | root (container) | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
 

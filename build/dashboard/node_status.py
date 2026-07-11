@@ -10,7 +10,7 @@ app = Flask(__name__)
 # --- CONFIGURATION ---
 RPC_USER = os.environ["RPC_USER"]
 RPC_PASSWORD = os.environ["RPC_PASSWORD"]
-RPC_URL = 'http://172.28.0.26:8332'
+RPC_URL = 'http://172.29.0.26:8332'
 BITCOIN_DIR = '/data'
 
 def get_rpc_data(method):
@@ -57,7 +57,7 @@ def index():
                 <div class="loading-card">
                     <h2 style="color: #f2a900;">Bitcoin Node Initializing</h2>
                     <div class="spinner"></div>
-                    <p>Connecting to RPC at 172.28.0.26...</p>
+                    <p>Connecting to RPC at 172.29.0.26...</p>
                     <p style="color: #888; font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
                 </div>
             </body>

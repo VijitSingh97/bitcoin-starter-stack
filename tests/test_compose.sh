@@ -27,8 +27,12 @@ echo "$rendered" | grep -q 'RPC_PASSWORD: testpass' || fail "RPC_PASSWORD not in
 echo "$rendered" | grep -q 'DBCACHE: "1234"' || fail "DBCACHE not interpolated"
 
 # Entrypoint defers credential expansion to container runtime ($$ escaped),
-# so plaintext credentials are never baked into the rendered command line
-echo "$rendered" | grep -qF -- "-rpcuser=\$\${RPC_USER}" || fail "entrypoint does not use runtime env for rpcuser"
+# so plaintext credentials are never baked into the rendered command line.
+# All flags must sit on ONE line with the exec: a YAML-induced line break
+# after -conf silently drops them (found the hard way; see tests/test_e2e.sh).
+# shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
+echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}"' ||
+  fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcuser=testuser" && fail "credentials baked into rendered command line"
 
 # The only published port is the dashboard on 8000
