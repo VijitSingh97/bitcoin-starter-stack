@@ -1,0 +1,197 @@
+/* Theme palette. Dark is the default (:root); light applies when the user
+   picks it, or in "auto"/unset mode when the OS prefers light. The bitcoin
+   accent is nudged darker in light mode for contrast on white. */
+:root {
+  --bg: #0f0f0f;
+  --card: #1a1a1a;
+  --text: #e0e0e0;
+  --muted: #888;
+  --faint: #444;
+  --border: #333;
+  --accent: #f2a900;
+  --tag-bg: #222;
+  --tag-border: #444;
+  --shadow: rgba(0, 0, 0, 0.8);
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --card: #ffffff;
+  --text: #1a1a1a;
+  --muted: #666;
+  --faint: #aaa;
+  --border: #e0e0e0;
+  --accent: #c77f00;
+  --tag-bg: #f0f0f0;
+  --tag-border: #d4d4d4;
+  --shadow: rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  /* auto (or no explicit choice) follows the OS; an explicit dark pick wins */
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f4f5;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #666;
+    --faint: #aaa;
+    --border: #e0e0e0;
+    --accent: #c77f00;
+    --tag-bg: #f0f0f0;
+    --tag-border: #d4d4d4;
+    --shadow: rgba(0, 0, 0, 0.12);
+  }
+}
+
+body {
+  font-family: -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  transition: background 0.3s, color 0.3s;
+}
+
+.center {
+  display: flex;
+  justify-content: center;
+  padding-top: 50px;
+}
+
+.center-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 25px;
+  width: 420px;
+  box-shadow: 0 8px 32px var(--shadow);
+  border: 1px solid var(--border);
+  position: relative;
+}
+
+h2 {
+  color: var(--accent);
+  margin-top: 0;
+  font-size: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+  font-family: monospace;
+  font-size: 0.95rem;
+}
+
+.label { color: var(--muted); }
+
+.peer-box {
+  display: flex;
+  gap: 10px;
+  font-size: 0.8rem;
+  margin-top: -5px;
+  margin-bottom: 10px;
+}
+
+.peer-tag {
+  background: var(--tag-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--tag-border);
+}
+
+.in { color: #4caf50; }
+.out { color: #2196f3; }
+
+.badge {
+  background: var(--tag-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 0.6em;
+  padding: 2px 8px;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.warn { color: #ff5252; font-weight: bold; }
+
+.progress-bg {
+  background: var(--tag-bg);
+  height: 10px;
+  border-radius: 5px;
+  margin: 15px 0;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: var(--accent);
+  height: 100%;
+  transition: width 1s;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 20px 0;
+}
+
+.footer {
+  color: var(--faint);
+  font-size: 0.7rem;
+  text-align: center;
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.loading-card {
+  background: var(--card);
+  padding: 30px;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  text-align: center;
+}
+
+.spinner {
+  border: 4px solid var(--border);
+  border-top: 4px solid var(--accent);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.theme-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  background: var(--tag-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
