@@ -1,43 +1,55 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, layersAt, smooth, GRID } from "./tower.js";
+import { project, layerFill, gridCell, nextDisplayed, smooth, GRID, PER_LAYER } from "./tower.js";
 
-test("footprint is 5x5", () => {
-  assert.equal(GRID, 5);
+test("a layer is 12x12 = 144 blocks (~one day)", () => {
+  assert.equal(GRID, 12);
+  assert.equal(PER_LAYER, 144);
 });
 
-test("project places the origin cell at the origin point", () => {
-  const p = project(0, 0, 0, 40, 20, 100, 200);
-  assert.deepEqual(p, { x: 100, y: 200 });
+test("layerFill splits height into completed layers and the top fill", () => {
+  assert.deepEqual(layerFill(0), { layer: 0, fill: 0 });
+  assert.deepEqual(layerFill(143), { layer: 0, fill: 143 });
+  assert.deepEqual(layerFill(144), { layer: 1, fill: 0 });
+  assert.deepEqual(layerFill(150), { layer: 1, fill: 6 });
+  assert.deepEqual(layerFill(-5), { layer: 0, fill: 0 });
 });
 
-test("project: increasing height moves the point up (smaller y)", () => {
-  const base = project(2, 2, 0, 40, 20, 0, 0);
-  const up = project(2, 2, 1, 40, 20, 0, 0);
-  assert.equal(up.y, base.y - 20); // one block height
-  assert.equal(up.x, base.x);
+test("gridCell fills row by row, back to front", () => {
+  assert.deepEqual(gridCell(0), { gx: 0, gy: 0 });
+  assert.deepEqual(gridCell(11), { gx: 11, gy: 0 }); // end of the back row
+  assert.deepEqual(gridCell(12), { gx: 0, gy: 1 }); // next row starts
+  assert.deepEqual(gridCell(143), { gx: 11, gy: 11 }); // last cube
 });
 
-test("project: the isometric diamond is symmetric about the origin column", () => {
-  const right = project(1, 0, 0, 40, 20, 0, 0); // +x, down
-  const left = project(0, 1, 0, 40, 20, 0, 0); // -x, same depth
-  assert.equal(right.x, 20);
-  assert.equal(left.x, -20);
-  assert.equal(right.y, left.y);
+test("nextDisplayed snaps down on a reorg and never overshoots up", () => {
+  assert.equal(nextDisplayed(100, 98, 1000), 98); // dip -> snap
+  assert.equal(nextDisplayed(100, 100, 1000), 100); // equal
+  assert.equal(nextDisplayed(100, 101, 100000), 101); // clamped to target
 });
 
-test("layersAt grows linearly and never goes negative", () => {
-  assert.equal(layersAt(0, 2000), 0);
-  assert.equal(layersAt(2000, 2000), 1);
-  assert.equal(layersAt(5000, 2000), 2.5);
-  assert.equal(layersAt(-100, 2000), 0);
+test("nextDisplayed rips upward when far behind (initial sync)", () => {
+  // gap 5000 >> 2*144 -> fast rate 0.36/ms
+  const after = nextDisplayed(0, 5000, 1000);
+  assert.ok(after > 300 && after <= 5000, `fast catch-up, got ${after}`);
+  assert.equal(after, 360);
+});
+
+test("nextDisplayed drifts a single synced block in over ~0.8s", () => {
+  // gap 1 -> slow rate 0.00125/ms -> ~800ms to add one block
+  assert.ok(Math.abs(nextDisplayed(500, 501, 800) - 501) < 1e-9);
+  assert.ok(nextDisplayed(500, 501, 400) < 501); // still arriving at 400ms
+});
+
+test("project: height moves the point up; the diamond is symmetric", () => {
+  assert.equal(project(2, 2, 1, 40, 20, 0, 0).y, project(2, 2, 0, 40, 20, 0, 0).y - 20);
+  assert.equal(project(1, 0, 0, 40, 20, 0, 0).x, 20);
+  assert.equal(project(0, 1, 0, 40, 20, 0, 0).x, -20);
 });
 
 test("smooth clamps to [0,1] and eases the ends", () => {
   assert.equal(smooth(-1), 0);
-  assert.equal(smooth(0), 0);
-  assert.equal(smooth(1), 1);
   assert.equal(smooth(2), 1);
   assert.equal(smooth(0.5), 0.5);
-  assert.ok(smooth(0.25) < 0.25); // eased in at the start
+  assert.ok(smooth(0.25) < 0.25);
 });

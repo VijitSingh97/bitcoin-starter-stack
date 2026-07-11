@@ -1,28 +1,43 @@
-// A 5x5 isometric tower of blocks that endlessly builds upward behind the
-// card, in the bitcoin-yellow accent. The base sits at the bottom of the
-// page; the camera climbs so new layers keep appearing while older ones
-// scroll off — "built from the bottom, up and up".
+// A live tower of the blockchain: a 12x12 layer is 144 blocks — about one
+// day (a block every ~10 min). Each real block adds a cube to the top layer;
+// when a layer fills (a full day), the tower is pushed down a level and the
+// oldest layers slide off the bottom of the page. During initial sync, blocks
+// pour in and the tower builds up fast. Colours follow the bitcoin accent and
+// the light/dark theme.
 //
-// Pure projection/timing helpers are exported for tower.test.mjs; the canvas
-// wiring is guarded on `document` so importing in Node touches nothing.
-export const GRID = 5;
+// The block height is read from the #live panel's data-blocks attribute, which
+// the server renders and refresh.js keeps current. Pure model helpers are
+// exported for tower.test.mjs; the canvas wiring is guarded on `document`.
+export const GRID = 12;
+export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
 
-// Screen point of lattice vertex (gx, gy) at height level z, given tile
-// width tw (tile height = tw/2) and block height bh, around an origin.
+// Split a height into a completed-layer count and the fill of the top layer.
+export function layerFill(height, perLayer = PER_LAYER) {
+  const h = Math.max(0, height);
+  return { layer: Math.floor(h / perLayer), fill: h - Math.floor(h / perLayer) * perLayer };
+}
+
+// Fill order of cube `index` (0..143) within a layer: row by row, back to
+// front, so the layer accretes toward the viewer.
+export function gridCell(index, cols = GRID) {
+  return { gx: index % cols, gy: Math.floor(index / cols) };
+}
+
+// Ease the displayed height toward the real one: snap on a dip (reorg), rip
+// upward when far behind (initial sync), and let a single new block drift in
+// over ~0.8s when synced.
+export function nextDisplayed(current, target, dtMs) {
+  if (target <= current) return target;
+  const gap = target - current;
+  const perMs = gap > 2 * PER_LAYER ? 0.36 : 0.00125; // 360/s catching up, ~1.25/s synced
+  return Math.min(target, current + perMs * dtMs);
+}
+
+// Screen point of lattice vertex (gx, gy) at height z.
 export function project(gx, gy, z, tw, bh, ox, oy) {
-  return {
-    x: ox + (gx - gy) * (tw / 2),
-    y: oy + (gx + gy) * (tw / 4) - z * bh,
-  };
+  return { x: ox + (gx - gy) * (tw / 2), y: oy + (gx + gy) * (tw / 4) - z * bh };
 }
 
-// Layers built after `ms` at `layerMs` each (float: the fraction is the
-// newest layer easing in). Never negative.
-export function layersAt(ms, layerMs) {
-  return Math.max(0, ms) / layerMs;
-}
-
-// Smoothstep for the newest layer's fade-in.
 export function smooth(t) {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
@@ -34,7 +49,7 @@ if (typeof document !== "undefined") {
   if (ctx) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const N = GRID;
-    const LAYER_MS = 2000; // a new layer every 2s — slow and deliberate
+    const PUSH_MS = 800; // layer-complete push-down duration
 
     let W = 0, H = 0, dpr = 1;
     function resize() {
@@ -56,88 +71,119 @@ if (typeof document !== "undefined") {
       if (t === "dark") return false;
       return window.matchMedia("(prefers-color-scheme: light)").matches;
     }
-
     function palette() {
-      // light mode needs darker, more opaque gold to read on a white page
       return effectiveLight()
-        ? { top: "#e0a72a", left: "#c07f12", right: "#8a5c06", edge: "#9c6500", alpha: 0.5, glow: 0 }
-        : { top: "#ffce5e", left: "#f2a900", right: "#9a6a08", edge: "#ffdd8a", alpha: 0.92, glow: 14 };
+        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#b98a2e", empty: "#c9962e", edge: "#9c6500", alpha: 0.55, glow: 0 }
+        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", alpha: 0.95, glow: 10 };
     }
 
-    function quad(pts, fill, stroke, glow) {
+    // The real block height, or null on the loading page (RPC not up yet).
+    function realHeight() {
+      const el = document.getElementById("live");
+      const b = el && el.dataset ? el.dataset.blocks : "";
+      const n = parseInt(b, 10);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function poly(pts, fill, stroke, glow) {
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.closePath();
       ctx.fillStyle = fill;
       ctx.fill();
-      ctx.shadowBlur = glow;
-      ctx.shadowColor = stroke;
+      if (glow) { ctx.shadowBlur = glow; ctx.shadowColor = stroke; }
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.shadowBlur = 0;
     }
 
-    // Fade layers into darkness near the top and bottom of the viewport so
-    // the pillar emerges from and dissolves into the background.
-    function edgeFade(y) {
-      const top = H * 0.16, bot = H * 0.86;
-      if (y < top) return smooth(y / top);
-      if (y > bot) return smooth((H - y) / (H - bot));
-      return 1;
-    }
+    let displayed = null;   // eased height
+    let lastLayer = null;   // to detect a completed layer
+    let pushStart = -1e9;   // time the last push-down began
+    let synthetic = 0;      // fallback build when no real height yet
+    let prev = performance.now();
 
-    function render(built) {
+    function render(now) {
+      const dt = Math.min(100, now - prev);
+      prev = now;
+
+      // resolve the target height (real, else a slow synthetic climb)
+      let target = realHeight();
+      if (target === null) {
+        synthetic += dt * 0.0006; // ~1 block / 1.6s on the loading screen
+        target = Math.floor(synthetic);
+      } else if (displayed === null) {
+        displayed = Math.max(0, target - 300); // brief intro build on first load
+      }
+      if (displayed === null) displayed = target;
+      displayed = nextDisplayed(displayed, target, dt);
+
+      const { layer: L, fill } = layerFill(displayed);
+      if (lastLayer !== null && L !== lastLayer) pushStart = now;
+      lastLayer = L;
+
       ctx.clearRect(0, 0, W, H);
       const pal = palette();
-
-      // tile + block size scale with viewport; the tower is a touch wider
-      // than the 420px card so its edges flank it
-      const tw = Math.max(48, Math.min(104, W / 12));
+      const tw = Math.max(30, Math.min(52, W / 22));
       const bh = tw * 0.5;
       const ox = W / 2;
+      const anchorY = H * 0.6;                 // top layer's centre sits here
+      const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0
 
-      // origin scrolls upward over time: an endless pillar whose blocks
-      // rise from the bottom and flow off the top
-      const oy = H * 0.95 - built * bh;
-      const p = (gx, gy, z) => project(gx, gy, z, tw, bh, ox, oy);
+      // vertex of cell (gx,gy) on the top surface of layer `k` (k=L is the
+      // in-progress top; smaller k are completed layers below)
+      const p = (gx, gy, k) =>
+        project(gx, gy, 0, tw, bh, ox, anchorY + (L - k) * bh - push - N * (tw / 4));
 
-      // only the vertical band of levels that intersects the viewport
-      const front = oy + (2 * N - 2) * (tw / 4);
-      const zLo = Math.floor((front - H - bh) / bh);
-      const zHi = Math.ceil((front + bh) / bh);
-
-      for (let z = zLo; z <= zHi; z++) {
-        const a = pal.alpha * edgeFade(p(2, 2, z).y);
-        if (a <= 0.01) continue;
-        ctx.globalAlpha = a;
+      // completed layers below the top, near-to-far so lower ones sit behind
+      const visible = Math.min(22, Math.ceil((H - anchorY) / bh) + 2);
+      for (let d = visible; d >= 1; d--) {
+        const k = L - d;
+        if (k < 0) continue;
+        const fade = Math.max(0.15, 1 - d * 0.06);
+        ctx.globalAlpha = pal.alpha * fade;
         for (let i = 0; i < N; i++) {
-          // left wall (j = N face)
-          quad([p(i, N, z), p(i + 1, N, z), p(i + 1, N, z + 1), p(i, N, z + 1)],
-            pal.left, pal.edge, pal.glow);
+          poly([p(i, N, k), p(i + 1, N, k), p(i + 1, N, k - 1), p(i, N, k - 1)], pal.side, pal.edge, 0);
         }
         for (let j = 0; j < N; j++) {
-          // right wall (i = N face)
-          quad([p(N, j, z), p(N, j + 1, z), p(N, j + 1, z + 1), p(N, j, z + 1)],
-            pal.right, pal.edge, pal.glow);
+          poly([p(N, j, k), p(N, j + 1, k), p(N, j + 1, k - 1), p(N, j, k - 1)], pal.dark, pal.edge, 0);
+        }
+      }
+
+      // in-progress top layer: a 12x12 grid filling cube by cube
+      const done = Math.floor(fill);
+      const frac = fill - done;
+      for (let idx = 0; idx < PER_LAYER; idx++) {
+        const { gx, gy } = gridCell(idx);
+        const face = [p(gx, gy, L), p(gx + 1, gy, L), p(gx + 1, gy + 1, L), p(gx, gy + 1, L)];
+        if (idx < done) {
+          ctx.globalAlpha = pal.alpha;
+          poly(face, pal.top, pal.edge, pal.glow);
+        } else if (idx === done) {
+          ctx.globalAlpha = pal.alpha * frac; // the arriving block fades in
+          poly(face, pal.top, pal.edge, pal.glow);
+        } else {
+          ctx.globalAlpha = pal.alpha * 0.5;
+          poly(face, pal.empty, pal.grid, 0); // waiting slot
         }
       }
       ctx.globalAlpha = 1;
     }
 
-    const START_LAYERS = 4; // start part-built so the tower fills the screen
-    render(START_LAYERS); // paint at once (also covers an already-hidden tab)
-    if (!reduce) {
-      // ~30fps is plenty for a slow drift and halves the CPU vs. rAF's 60
-      const FRAME_MS = 1000 / 30;
-      const start = performance.now() - START_LAYERS * LAYER_MS; // continue from the static frame
+    if (reduce) {
+      prev = performance.now();
+      render(performance.now()); // one static frame
+    } else {
+      const FRAME_MS = 1000 / 30; // 30fps is plenty and halves the CPU
       let last = 0;
       const frame = (now) => {
         requestAnimationFrame(frame);
-        if (document.hidden || now - last < FRAME_MS) return;
+        if (document.hidden) { prev = now; return; }
+        if (now - last < FRAME_MS) return;
         last = now;
-        render(layersAt(now - start, LAYER_MS));
+        render(now);
       };
       requestAnimationFrame(frame);
     }

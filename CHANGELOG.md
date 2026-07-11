@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-07-11
+
+### Changed
+
+- **The block tower is now live data, not decoration.** A 12×12 layer is
+  144 blocks — about a day. The dashboard renders the node's block height
+  into the page, and the tower fills a cube per block; when a layer (a day)
+  completes it pushes the tower down a level and the oldest layers slide off
+  the bottom. It rips upward during initial sync and drifts a single block
+  in over ~0.8s once synced. Still theme-aware, throttled, hidden-tab-paused,
+  and reduced-motion-safe.
+
 ## [1.4.0] - 2026-07-11
 
 ### Added
@@ -138,6 +150,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.5.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.5.0
 [1.4.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.4.0
 [1.3.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.3.0
 [1.2.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.1
