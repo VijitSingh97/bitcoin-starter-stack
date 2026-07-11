@@ -30,8 +30,8 @@ export function smooth(t) {
 
 if (typeof document !== "undefined") {
   const canvas = document.getElementById("tower");
-  if (canvas) {
-    const ctx = canvas.getContext("2d");
+  const ctx = canvas && canvas.getContext("2d");
+  if (ctx) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const N = GRID;
     const LAYER_MS = 2000; // a new layer every 2s — slow and deliberate
