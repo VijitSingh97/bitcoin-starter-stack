@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] - 2026-07-11
+
+### Fixed
+
+- **The tower's "blocks today" is now correct immediately and survives a
+  restart.** It was counted from an in-memory series pinned at the first
+  sample after start, so a mid-day container restart reset the day and the
+  tower looked near-empty. It's now computed from the node's own block
+  timestamps — a once-a-day binary search for the first block at/after UTC
+  midnight — so late in the UTC day it shows a nearly full layer (e.g. ~137
+  of 144 at 23:38 UTC), regardless of when the container started.
+
 ## [1.10.0] - 2026-07-11
 
 ### Added
@@ -218,6 +230,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.10.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.1
 [1.10.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.0
 [1.9.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.9.0
 [1.8.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.8.0

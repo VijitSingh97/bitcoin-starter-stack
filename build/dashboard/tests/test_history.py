@@ -29,25 +29,6 @@ def test_ring_buffer_is_capped():
     assert len(history.snapshot()["height"]) == history.MAXLEN
 
 
-def test_blocks_today_counts_from_the_first_sample_of_the_utc_day():
-    # first sample of a day pins the day-start height
-    history.record(900000, 1, now=DAY * 20000)          # 00:00 of some UTC day
-    history.record(900010, 1, now=DAY * 20000 + 3600)   # +1h, 10 blocks later
-    assert history.snapshot()["blocks_today"] == 10
-
-
-def test_day_rollover_resets_the_day_start():
-    history.record(900100, 1, now=DAY * 20000 + 80000)  # late in a day
-    history.record(900100, 1, now=DAY * 20001 + 60)     # first sample after midnight = baseline
-    history.record(900105, 1, now=DAY * 20001 + 3600)   # 5 blocks into the new day
-    assert history.snapshot()["blocks_today"] == 5
-
-
-def test_blocks_today_never_negative():
-    history.record(900000, 1, now=1000)
-    assert history.snapshot()["blocks_today"] >= 0
-
-
 def test_snapshot_is_thread_safe_under_concurrent_writes():
     # a writer thread hammers record() while we snapshot repeatedly; the
     # parallel arrays must stay aligned and nothing may raise "deque mutated

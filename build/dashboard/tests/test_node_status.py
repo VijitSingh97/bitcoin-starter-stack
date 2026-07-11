@@ -194,11 +194,44 @@ def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
     assert '/static/sparkline.js' in full
 
 
+def test_blocks_today_counts_blocks_since_utc_midnight(monkeypatch):
+    import datetime as dt
+    # a fake chain: block N was mined at 10-minute spacing; midnight is at
+    # block 900000, so by the tip (900050) 51 blocks are "today"
+    midnight = int(dt.datetime(2026, 7, 11, tzinfo=dt.timezone.utc).timestamp())
+
+    def rpc(method, params=None):
+        if method == "getblockhash":
+            return f"hash{params[0]}"
+        if method == "getblockheader":
+            h = int(params[0].replace("hash", ""))
+            return {"time": midnight + (h - 900000) * 600}  # 10 min per block
+        return None
+
+    monkeypatch.setattr(node_status, "get_rpc_data", rpc)
+    monkeypatch.setattr(node_status, "_midnight_cache", {"date": None, "first_height": None})
+
+    class FixedNow(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return dt.datetime(2026, 7, 11, 8, 0, tzinfo=tz)  # 08:00 UTC, same day
+
+    monkeypatch.setattr(node_status, "datetime", FixedNow)
+    assert node_status.blocks_today(900050) == 51  # blocks 900000..900050 inclusive
+
+
+def test_blocks_today_zero_when_node_cant_answer(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda m, params=None: None)
+    monkeypatch.setattr(node_status, "_midnight_cache", {"date": None, "first_height": None})
+    assert node_status.blocks_today(900050) == 0
+    assert node_status.blocks_today("N/A") == 0
+
+
 def test_api_history_endpoint(monkeypatch):
     body = node_status.app.test_client().get("/api/history")
     assert body.status_code == 200
     data = body.get_json()
-    assert set(["t", "height", "fee", "blocks_today", "latest_height"]).issubset(data)
+    assert set(["t", "height", "fee", "latest_height"]).issubset(data)
 
 
 def test_api_history_respects_auth(monkeypatch):

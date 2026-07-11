@@ -4,7 +4,7 @@ import shutil
 import requests
 import json
 from flask import Flask, render_template_string, request, Response
-from datetime import datetime
+from datetime import datetime, timezone
 
 import monitor
 import history
@@ -62,6 +62,49 @@ def format_uptime(seconds):
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     return f"{days}d {hours}h {minutes}m" if days > 0 else f"{hours}h {minutes}m"
+
+# blocks-so-far-today for the tower, computed from the node's own block
+# timestamps (Bitcoin uses Unix/UTC time) so it's correct immediately and
+# survives a restart. The UTC-midnight block is found once per day and cached.
+_midnight_cache = {"date": None, "first_height": None}
+
+
+def _block_time(height):
+    h = get_rpc_data("getblockhash", [height])
+    if not h:
+        return None
+    hdr = get_rpc_data("getblockheader", [h])
+    return hdr.get("time") if isinstance(hdr, dict) else None
+
+
+def _first_block_of_utc_day(tip_height):
+    """Lowest block height whose timestamp is at/after today's UTC midnight."""
+    midnight = int(datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp())
+    lo, hi = max(0, tip_height - 400), tip_height  # a day is ~144 blocks; 400 is safe margin
+    while lo < hi:
+        mid = (lo + hi) // 2
+        t = _block_time(mid)
+        if t is None:
+            return None  # can't determine — caller falls back to 0
+        if t >= midnight:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+
+def blocks_today(tip_height):
+    if not isinstance(tip_height, int):
+        return 0
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _midnight_cache["date"] != today or _midnight_cache["first_height"] is None:
+        first = _first_block_of_utc_day(tip_height)
+        if first is None:
+            return 0
+        _midnight_cache.update(date=today, first_height=first)
+    return max(0, tip_height - _midnight_cache["first_height"] + 1)
+
 
 def sample_history():
     """Record one height + fee sample (called once a minute by the sampler)."""
@@ -210,7 +253,7 @@ def index():
         "fee_next": fees.get(1),
         "fee_30m": fees.get(3),
         "fee_hour": fees.get(6),
-        "day_blocks": history.snapshot()["blocks_today"],
+        "day_blocks": blocks_today(blockchain.get("blocks")) if not ibd else 0,
         "next_block": (blockchain.get("blocks") + 1) if isinstance(blockchain.get("blocks"), int) else "",
         "last_update": last_update,
         # not "update": Jinja resolves stats.update to the dict METHOD, which
