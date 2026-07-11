@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-07-11
+
+### Changed
+
+- **The tower fills to the time of day, driven purely by the clock.** A day's
+  layer now fills to where the day should be at ~10-minute spacing (one cube
+  per 10 UTC minutes) rather than tracking exact block arrivals — so it's
+  solid up to "now" (e.g. nearly full late in the UTC day). The single
+  estimate marker is gone; the fill *is* the estimate, with the loading slot
+  pulsing.
+
+### Removed
+
+- The in-memory history sampler, the fee/height sparklines, and the
+  `/api/history` endpoint — no local history is tracked anymore. The tower
+  needs only the clock and the block height, so the node-timestamp
+  "blocks today" lookup is gone too.
+
 ## [1.10.1] - 2026-07-11
 
 ### Fixed
@@ -230,6 +248,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.11.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.0
 [1.10.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.1
 [1.10.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.0
 [1.9.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.9.0

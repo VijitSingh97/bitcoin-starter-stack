@@ -193,23 +193,6 @@ hr {
   justify-content: space-between;
 }
 
-.spark-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 6px 0 12px;
-}
-
-.spark-row .label {
-  font-family: monospace;
-  font-size: 0.75rem;
-}
-
-.spark {
-  width: 180px;
-  height: 28px;
-}
 
 .loading-card {
   background: var(--card);

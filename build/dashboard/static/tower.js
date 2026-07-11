@@ -1,42 +1,46 @@
 // A live tower of the blockchain, read as a day-clock. A 12x12 layer is one
-// UTC day: the first cube is the first block after 00:00, and cubes fill as
-// blocks arrive through the day (~144 of them). At the next midnight the day
-// completes, the tower is pushed down a level, and a fresh day starts on top.
-// The header reads "loading block N" — the next block the network is working
-// on. Colours follow the bitcoin accent and the light/dark theme.
+// UTC day: it fills to where the day "should" be at Bitcoin's ~10-minute
+// spacing (one cube per 10 UTC minutes — block timestamps are Unix/UTC time),
+// so the fill tracks the time of day. At the next midnight the layer completes,
+// the tower is pushed down, and a fresh day starts on top. The header reads
+// "loading block N" — the next block the network is working on.
 //
-// The dashboard renders the counts onto #live (data-day-blocks, data-blocks,
-// data-next-block) and refresh.js keeps them current. Pure helpers are
-// exported for tower.test.mjs; the canvas wiring is guarded on `document`.
+// No history or node lookups: the fill comes straight from the clock, and the
+// block height is read from #live's data-next-block. Pure helpers are exported
+// for tower.test.mjs; the canvas wiring is guarded on `document`.
 export const GRID = 12;
 export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
-const ROLLOVER_DROP = 12; // a fall this far below the shown fill = a new day (or restart)
+const ROLLOVER_DROP = 12; // a fall this far below the shown fill = midnight rolled over
 
 // Fill order of cube `index` (0..143): row by row, back to front.
 export function gridCell(index, cols = GRID) {
   return { gx: index % cols, gy: Math.floor(index / cols) };
 }
 
-// A big drop in the day's block count means the day rolled over (or the
-// container restarted) — the layer should complete and a fresh one begin.
+// A big drop in the fill target means UTC midnight rolled over — the layer
+// completes and a fresh one begins.
 export function isRollover(target, displayed) {
   return target < displayed - ROLLOVER_DROP;
 }
 
-// Where the day's fill "should" be by `utcMinutes` past UTC midnight, at
-// Bitcoin's ~10-minute target spacing (block timestamps are Unix/UTC time).
-// Drives the faint estimate marker; capped at a full layer.
+// How full the day should be `utcMinutes` past UTC midnight, at ~10 min per
+// block — one cube per 10 minutes, capped at a full layer. This is the fill.
 export function expectedFill(utcMinutes) {
-  return Math.max(0, Math.min(PER_LAYER, Math.floor(utcMinutes / 10)));
+  return Math.max(0, Math.min(PER_LAYER, utcMinutes / 10));
 }
 
-// Ease the shown fill toward the target: snap a small dip, rip up a big jump
-// (a fresh page mid-day), drift a single new block in over ~0.8s.
+// Ease the shown fill toward the target: snap a dip (midnight), rip up a big
+// jump (a fresh page mid-day), drift smoothly otherwise.
 export function nextDisplayed(current, target, dtMs) {
   if (target <= current) return target;
   const gap = target - current;
-  const perMs = gap > 24 ? 0.06 : 0.00125; // catch up vs. a single block drifting in
+  const perMs = gap > 24 ? 0.06 : 0.0015; // catch up vs. a smooth minute-by-minute crawl
   return Math.min(target, current + perMs * dtMs);
+}
+
+// Minutes (with seconds) past UTC midnight for a Date — the fill clock.
+export function utcMinutes(date) {
+  return date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
 }
 
 export function project(gx, gy, z, tw, bh, ox, oy) {
@@ -88,30 +92,14 @@ if (typeof document !== "undefined") {
     }
     function palette() {
       return effectiveLight()
-        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", marker: "#6b4400", alpha: 0.55, glow: 0 }
-        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", marker: "#fff2cf", alpha: 0.95, glow: 10 };
-    }
-
-    function outline(pts, stroke, width, glow) {
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
-      if (glow) { ctx.shadowBlur = glow; ctx.shadowColor = stroke; }
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = width;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", alpha: 0.55, glow: 0 }
+        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", alpha: 0.95, glow: 10 };
     }
 
     const liveData = () => {
       const el = document.getElementById("live");
       return (el && el.dataset) || {};
     };
-    function dayBlocks() {
-      const n = parseInt(liveData().dayBlocks, 10);
-      return Number.isFinite(n) ? n : null;
-    }
 
     function poly(pts, fill, stroke, glow) {
       ctx.beginPath();
@@ -128,22 +116,18 @@ if (typeof document !== "undefined") {
     }
 
     let displayed = null;   // eased fill of today's layer
-    let pushStart = -1e9;   // time the last day-rollover push began
-    let synthetic = 0;      // gentle fill before the node is up
+    let pushStart = -1e9;   // time the last midnight push began
     let prev = performance.now();
 
     function render(now) {
       const dt = Math.min(100, now - prev);
       prev = now;
 
-      let target = dayBlocks();
-      if (target === null) {
-        synthetic = (synthetic + dt * 0.004) % PER_LAYER; // slow loop on the loading screen
-        target = synthetic;
-      }
+      // the fill is the time of day: one cube per 10 UTC minutes
+      const target = expectedFill(utcMinutes(new Date()));
       if (displayed === null) displayed = target;
       if (isRollover(target, displayed)) {
-        pushStart = now;        // animate the finished day sliding down
+        pushStart = now;        // midnight: animate the finished day sliding down
         displayed = target;     // begin the new day
       } else {
         displayed = nextDisplayed(displayed, target, dt);
@@ -175,36 +159,24 @@ if (typeof document !== "undefined") {
         }
       }
 
-      // today's layer: a 12x12 grid filling one cube per block
+      // today's layer: filled up to the current time of day, the frontier
+      // cube pulsing as this 10-minute slot loads
       const done = Math.floor(fill);
       const pulse = 0.5 + 0.5 * Math.sin(now / 300); // ~2s flash on the loading block
-      const cellFace = (idx) => {
-        const { gx, gy } = gridCell(idx);
-        return [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
-      };
       for (let idx = 0; idx < PER_LAYER; idx++) {
-        const face = cellFace(idx);
+        const { gx, gy } = gridCell(idx);
+        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
         if (idx < done) {
           ctx.globalAlpha = pal.alpha;
           poly(face, pal.top, pal.edge, pal.glow);
         } else if (idx === done) {
-          // the block being mined right now — pulses while it loads
+          // the slot loading right now — pulses
           ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
           poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
         } else {
           ctx.globalAlpha = pal.alpha * 0.5;
           poly(face, pal.empty, pal.grid, 0);
         }
-      }
-
-      // faint marker for where the day "should" be by now at 10-min spacing
-      // (UTC, matching block timestamps) — sits ahead of the fill when blocks
-      // run slow, behind when they run fast
-      const d = new Date();
-      const exp = expectedFill(d.getUTCHours() * 60 + d.getUTCMinutes());
-      if (exp !== done && exp < PER_LAYER) {
-        ctx.globalAlpha = pal.alpha * (0.35 + 0.4 * pulse);
-        outline(cellFace(exp), pal.marker, 1.5, pal.glow);
       }
       ctx.globalAlpha = 1;
 
