@@ -46,3 +46,28 @@ def test_day_rollover_resets_the_day_start():
 def test_blocks_today_never_negative():
     history.record(900000, 1, now=1000)
     assert history.snapshot()["blocks_today"] >= 0
+
+
+def test_snapshot_is_thread_safe_under_concurrent_writes():
+    # a writer thread hammers record() while we snapshot repeatedly; the
+    # parallel arrays must stay aligned and nothing may raise "deque mutated
+    # during iteration" (this fails on an unlocked snapshot)
+    import threading
+
+    stop = threading.Event()
+
+    def writer():
+        i = 0
+        while not stop.is_set():
+            history.record(900000 + (i % 1000), i % 7, now=1000 + i)
+            i += 1
+
+    t = threading.Thread(target=writer)
+    t.start()
+    try:
+        for _ in range(3000):
+            snap = history.snapshot()
+            assert len(snap["t"]) == len(snap["height"]) == len(snap["fee"])
+    finally:
+        stop.set()
+        t.join()
