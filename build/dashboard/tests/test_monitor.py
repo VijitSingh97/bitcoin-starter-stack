@@ -132,3 +132,53 @@ def test_ping_uses_fail_endpoint_when_unhealthy(monkeypatch):
     monitor.ping_healthchecks(False)
     assert seen["url"] == "https://hc-ping.com/uuid/fail"
     assert "socks5h://" in seen["proxies"]["https"]
+
+
+# --- update checker ---
+
+def _patch_releases(monkeypatch, stack_tag, core_tag):
+    def fake(url):
+        return stack_tag if "bitcoin-starter-stack" in url else core_tag
+
+    monkeypatch.setattr(monitor, "_latest_release_tag", fake)
+
+
+def test_update_alert_for_newer_core(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "STACK_VERSION", "1.2.0")
+    _patch_releases(monkeypatch, "1.2.0", "32.0")
+    state = {}
+    monitor.check_updates("/Satoshi:31.1.0/", state)
+    assert any("Bitcoin Core 32.0" in t for t in cap.telegrams)
+    assert "32.0" in monitor.update_available
+    # same version again: badge stays, telegram not repeated
+    monitor.check_updates("/Satoshi:31.1.0/", state)
+    assert len([t for t in cap.telegrams if "32.0" in t]) == 1
+
+
+def test_no_update_alert_when_current(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "STACK_VERSION", "1.2.0")
+    _patch_releases(monkeypatch, "1.2.0", "31.1")
+    monitor.check_updates("/Satoshi:31.1.0/", {})  # 31.1.0 matches release v31.1
+    assert cap.telegrams == []
+    assert monitor.update_available == ""
+
+
+def test_update_alert_for_newer_stack(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "STACK_VERSION", "1.2.0")
+    _patch_releases(monkeypatch, "1.3.0", "31.1")
+    monitor.check_updates("/Satoshi:31.1.0/", {})
+    assert any("stack v1.3.0" in t for t in cap.telegrams)
+
+
+def test_update_check_survives_api_failure(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "_latest_release_tag", lambda url: "")
+    monitor.check_updates("/Satoshi:31.1.0/", {})  # no exception, no alert
+    assert cap.telegrams == []

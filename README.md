@@ -60,9 +60,13 @@ docker compose up -d
 Then watch it come up:
 
 ```bash
-docker logs -f tor        # wait for "Bootstrapped 100% (done)"
-docker logs -f bitcoin    # headers, then block sync
+./stack status            # container + health summary
+./stack logs tor          # wait for "Bootstrapped 100% (done)"
+./stack logs bitcoin      # headers, then block sync
 ```
+
+`./stack` wraps day-to-day operations (`up`, `down`, `logs`, `status`,
+`doctor`, `apply`, `backup`/`restore`) — see [Operations](docs/operations.md).
 
 The initial block download is ~800 GB over Tor — expect days, with live progress on the
 dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-started.md).

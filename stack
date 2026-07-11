@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Single entry point for operating the stack. Run ./stack help for usage.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+usage() {
+  cat <<'EOF'
+Usage: ./stack <command> [args]
+
+  up | down | restart [svc]  Start / stop / restart the stack (or one service)
+  logs [svc]                 Follow logs (all services, or one)
+  apply                      Re-render .env from config.json and apply changes
+  status                     Container + health summary; warns on anything down
+  doctor                     Read-only health report (deps, disk, sync, tor)
+  backup                     Save config, credentials, and onion keys to backups/
+  restore [-y] <archive>     Restore a backup archive (prompts before overwrite)
+  help                       This text
+EOF
+}
+
+env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+
+status() {
+  docker compose ps
+  bad=0
+  for svc in tor bitcoin dashboard; do
+    st=$(docker inspect "$svc" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+    case "$st" in
+      "running healthy") echo "OK    $svc" ;;
+      "running health: starting" | "running starting") echo "WAIT  $svc (health check warming up)" ;;
+      *)
+        echo "WARN  $svc: $st"
+        bad=1
+        ;;
+    esac
+  done
+  return "$bad"
+}
+
+doctor() {
+  echo "== Dependencies"
+  for tool in docker jq openssl; do
+    if command -v "$tool" >/dev/null; then echo "OK    $tool"; else echo "MISS  $tool"; fi
+  done
+
+  echo "== Config"
+  if [ ! -f config.json ]; then
+    echo "MISS  config.json (cp config.example.json config.json)"
+  elif [ ! -f .env ]; then
+    echo "MISS  .env (run ./stack apply)"
+  elif [ config.json -nt .env ]; then
+    echo "WARN  config.json is newer than .env — run ./stack apply"
+  else
+    echo "OK    config.json rendered into .env"
+  fi
+
+  echo "== Disk"
+  data_dir=$(env_get BITCOIN_DATA_DIR)
+  df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
+
+  echo "== Containers"
+  status || true
+
+  echo "== Node"
+  if docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
+    jq -r '"      blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
+    echo "      RPC unreachable (normal during startup)"
+  fi
+
+  echo "== Tor"
+  docker logs tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
+  if [ "$(env_get DASHBOARD_ONION)" = "1" ]; then
+    echo "      dashboard onion: $(docker exec tor cat /var/lib/tor/dashboard_onion/hostname 2>/dev/null || echo 'not provisioned yet')"
+  fi
+  if [ "$(env_get BITCOIN_INBOUND_ONION)" = "1" ]; then
+    echo "      node onion: $(docker exec bitcoin bitcoin-cli -datadir=/data getnetworkinfo 2>/dev/null | jq -r '.localaddresses[0].address // "not registered yet"')"
+  fi
+}
+
+do_backup() {
+  mkdir -p backups
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  [ -f config.json ] && cp config.json "$tmp/"
+  [ -f .env ] && cp .env "$tmp/"
+  # bitcoind stores its inbound-onion key in the datadir
+  data_dir=$(env_get BITCOIN_DATA_DIR)
+  if [ -n "$data_dir" ] && [ -f "$data_dir/onion_v3_private_key" ]; then
+    cp "$data_dir/onion_v3_private_key" "$tmp/"
+  fi
+  # the dashboard onion keys live in the tor volume
+  docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 || true
+  out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  tar czf "$out" -C "$tmp" .
+  chmod 600 "$out"
+  echo "Wrote $out (config, credentials, onion keys — chain data excluded, it's re-derivable)"
+}
+
+do_restore() {
+  yes=0
+  if [ "${1:-}" = "-y" ]; then
+    yes=1
+    shift
+  fi
+  archive=${1:?usage: ./stack restore [-y] <archive>}
+  if [ "$yes" != "1" ]; then
+    printf "This overwrites config.json, .env, and onion keys from %s. Continue? [y/N] " "$archive"
+    read -r reply
+    case "$reply" in y | Y) ;; *)
+      echo "Aborted."
+      exit 1
+      ;;
+    esac
+  fi
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  tar xzf "$archive" -C "$tmp"
+  [ -f "$tmp/config.json" ] && cp "$tmp/config.json" config.json && echo "Restored config.json"
+  if [ -f "$tmp/.env" ]; then
+    cp "$tmp/.env" .env && chmod 600 .env && echo "Restored .env"
+  fi
+  data_dir=$(env_get BITCOIN_DATA_DIR)
+  if [ -f "$tmp/onion_v3_private_key" ] && [ -n "$data_dir" ]; then
+    cp "$tmp/onion_v3_private_key" "$data_dir/" && echo "Restored node onion key"
+  fi
+  if [ -d "$tmp/dashboard_onion" ]; then
+    if docker compose cp "$tmp/dashboard_onion" tor:/var/lib/tor/ >/dev/null 2>&1 &&
+      docker compose exec -u root tor chown -R tor:tor /var/lib/tor/dashboard_onion >/dev/null 2>&1; then
+      docker compose restart tor >/dev/null
+      echo "Restored dashboard onion keys (tor restarted)"
+    else
+      echo "WARN: could not restore dashboard onion keys (is the tor container up?)"
+    fi
+  fi
+  echo "Done. Apply with: ./stack apply"
+}
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  up) docker compose up -d "$@" ;;
+  down) docker compose down "$@" ;;
+  restart) docker compose restart "$@" ;;
+  logs) docker compose logs -f --tail=100 "$@" ;;
+  apply)
+    ./configure.sh
+    docker compose up -d
+    ;;
+  status) status ;;
+  doctor) doctor ;;
+  backup) do_backup ;;
+  restore) do_restore "$@" ;;
+  help | --help | -h) usage ;;
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac

@@ -16,6 +16,7 @@ momentary blip never pings you and each incident fires exactly once.
 | 🟢 **Node recovered** | RPC answering again after a down alert. |
 | ✅ **Sync complete** | Initial block download finished — handy on first run, when it takes days. |
 | 💾 **Disk low** | Free space fell below 50 GB. Re-arms if space is freed. |
+| 🆕 **Update available** | A new Bitcoin Core release or stack release exists (checked daily, over Tor). Also shown as a dashboard badge. Informational only — nothing auto-updates. |
 
 Nothing controls the node over Telegram — there are no commands, so a
 leaked chat can read alerts but never change anything.

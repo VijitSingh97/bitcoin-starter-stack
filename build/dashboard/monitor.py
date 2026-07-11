@@ -20,14 +20,18 @@ NODE_NAME = os.environ.get("NODE_NAME", "bitcoin-node")
 TOR_PROXY = "socks5h://172.29.0.25:9050"  # socks5h: DNS resolves through Tor too
 PROXIES = {"http": TOR_PROXY, "https": TOR_PROXY}
 
+STACK_VERSION = os.environ.get("STACK_VERSION", "")
+STACK_RELEASES_URL = "https://api.github.com/repos/VijitSingh97/bitcoin-starter-stack/releases/latest"
+CORE_RELEASES_URL = "https://api.github.com/repos/bitcoin/bitcoin/releases/latest"
+
 TICK_SECONDS = 60
-PING_EVERY_TICKS = 5   # healthchecks cadence: every 5 minutes
-DOWN_AFTER_TICKS = 3   # debounce: this many consecutive RPC failures = down
+PING_EVERY_TICKS = 5             # healthchecks cadence: every 5 minutes
+DOWN_AFTER_TICKS = 3             # debounce: this many consecutive RPC failures = down
+UPDATE_CHECK_EVERY_TICKS = 1440  # daily
 DISK_WARN_FREE_GB = 50
 
-
-def enabled():
-    return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) or bool(HEALTHCHECKS_URL)
+# Set by check_updates, shown as a badge in the dashboard footer
+update_available = ""
 
 
 def send_telegram(text):
@@ -53,7 +57,43 @@ def ping_healthchecks(healthy):
         print(f"Healthchecks ping failed: {e}")
 
 
-def tick(get_blockchain_info, state, disk_path="/data"):
+def _latest_release_tag(url):
+    try:
+        r = requests.get(url, proxies=PROXIES, timeout=30,
+                         headers={"Accept": "application/vnd.github+json"})
+        if r.status_code == 200:
+            return (r.json().get("tag_name") or "").lstrip("v")
+    except Exception as e:
+        print(f"Release check failed for {url}: {e}")
+    return ""
+
+
+def check_updates(subversion, state):
+    """Informational only — a 🆕 alert and a dashboard badge, never an auto-update."""
+    global update_available
+    notes = []
+
+    latest_stack = _latest_release_tag(STACK_RELEASES_URL)
+    if STACK_VERSION and latest_stack and latest_stack != STACK_VERSION:
+        notes.append(f"stack v{latest_stack} available (running v{STACK_VERSION})")
+        if state.get("notified_stack") != latest_stack:
+            send_telegram(f"🆕 stack v{latest_stack} available (running v{STACK_VERSION})")
+            state["notified_stack"] = latest_stack
+
+    # subversion looks like /Satoshi:31.1.0/; release tags like v31.1
+    current_core = subversion.strip("/").replace("Satoshi:", "")
+    latest_core = _latest_release_tag(CORE_RELEASES_URL)
+    if current_core and latest_core and \
+            not (current_core == latest_core or current_core.startswith(latest_core + ".")):
+        notes.append(f"Bitcoin Core {latest_core} available (running {current_core})")
+        if state.get("notified_core") != latest_core:
+            send_telegram(f"🆕 Bitcoin Core {latest_core} available (running {current_core})")
+            state["notified_core"] = latest_core
+
+    update_available = "; ".join(notes)
+
+
+def tick(get_blockchain_info, state, disk_path="/data", get_network_info=None):
     """One monitoring pass. A small state machine: alerts fire on transitions,
     never repeatedly. Everything observable is injected so tests can drive it."""
     info = get_blockchain_info()
@@ -86,16 +126,21 @@ def tick(get_blockchain_info, state, disk_path="/data"):
     # First tick pings immediately (confirms the check works), then throttled
     if state.get("ticks", 0) % PING_EVERY_TICKS == 0:
         ping_healthchecks(healthy)
+
+    if healthy and get_network_info and state.get("ticks", 0) % UPDATE_CHECK_EVERY_TICKS == 0:
+        network = get_network_info() or {}
+        check_updates(network.get("subversion", ""), state)
+
     state["ticks"] = state.get("ticks", 0) + 1
     return state
 
 
-def monitor_loop(get_blockchain_info):
+def monitor_loop(get_blockchain_info, get_network_info=None):
     send_telegram("🚀 node monitor online")
     state = {}
     while True:
         try:
-            tick(get_blockchain_info, state)
+            tick(get_blockchain_info, state, get_network_info=get_network_info)
         except Exception as e:
             print(f"Monitor tick failed: {e}")
         time.sleep(TICK_SECONDS)

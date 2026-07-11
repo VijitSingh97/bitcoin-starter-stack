@@ -2,12 +2,17 @@
 
 ## Day-to-day commands
 
+Everything runs through `./stack` (thin, shellcheck-clean wrappers — plain
+`docker compose` works too):
+
 | Command | What it does |
 |---|---|
-| `docker compose up -d` | Start (or apply config changes to) the stack. |
-| `docker compose down` | Stop everything. Bitcoin Core gets up to 5 minutes to flush cleanly — let it. |
-| `docker compose logs -f [service]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
-| `docker ps` | Container status including health (`healthy` / `unhealthy`). |
+| `./stack up` / `down` / `restart [svc]` | Start / stop / restart. Bitcoin Core gets up to 5 minutes to flush on stop — let it. |
+| `./stack logs [svc]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
+| `./stack apply` | Re-render `.env` from `config.json` and apply the changes. |
+| `./stack status` | Container + health summary; exits non-zero if anything is down. |
+| `./stack doctor` | Read-only health report: deps, config freshness, disk, containers, sync state, tor bootstrap, onion addresses. |
+| `./stack backup` / `restore [-y] <archive>` | See [Backup](#backup). |
 | `docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
 
 ## Health checks
@@ -39,15 +44,39 @@ shows recent probe output when diagnosing.
 
 ## Backup
 
-Only two things are worth backing up — both tiny:
+```bash
+./stack backup                          # writes backups/stack-backup-<ts>.tar.gz
+./stack restore backups/stack-backup-<ts>.tar.gz
+```
 
-- `config.json` (your settings)
-- `.env` (rendered credentials — or just re-run `./configure.sh`)
+A backup holds everything that can't be re-derived — and nothing else:
 
-The chain itself is re-derivable from the network. Backing up ~800 GB is
-only worth it if a multi-day Tor resync hurts more than the storage does.
-If you do: `docker compose down` first — a live copy of `chainstate/` is
-corrupt by construction.
+- `config.json` and `.env` (settings + credentials)
+- the node's inbound-onion key (`onion_v3_private_key`, if enabled)
+- the dashboard onion keys (from the tor volume, if enabled)
+
+Losing the onion keys means new `.onion` addresses, so back up after
+enabling either onion feature. The chain itself is re-derivable from the
+network — backing up ~800 GB is only worth it if a multi-day Tor resync
+hurts more than the storage does. If you do copy it: `./stack down`
+first — a live copy of `chainstate/` is corrupt by construction.
+
+## Monitoring integrations
+
+- **Prometheus:** the dashboard serves `/metrics` (text format) — block
+  height, headers, verification progress, peers in/out, disk, uptime,
+  pruned flag, and `bitcoin_node_up`. It sits behind the same optional
+  basic auth as the dashboard.
+- **Telegram / Healthchecks.io:** see [Notifications](notifications.md).
+
+## Self-healing (a deliberate non-feature)
+
+`restart: unless-stopped` already restarts any container that *crashes*.
+The remaining case — running but unhealthy — would need something with
+Docker-socket access to act on, and a socket proxy is a bigger attack
+surface than the failure it heals on a single-node stack. So: unhealthy
+states are surfaced (`./stack status`, `docker ps`, Telegram node-down
+alerts) and recovery stays a human decision — `./stack restart <svc>`.
 
 ## Troubleshooting
 

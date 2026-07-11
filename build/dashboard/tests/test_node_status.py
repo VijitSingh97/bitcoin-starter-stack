@@ -120,6 +120,34 @@ def test_index_warns_on_low_disk(monkeypatch):
     assert 'class="warn"' in body
 
 
+# --- prometheus metrics ---
+
+def test_metrics_when_node_up(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", FAKE_RPC.get)
+    monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: BIG_DISK)
+    resp = node_status.app.test_client().get("/metrics")
+    body = resp.data.decode()
+    assert resp.status_code == 200
+    assert "bitcoin_node_up 1" in body
+    assert "bitcoin_blocks 900000" in body
+    assert 'bitcoin_peers{direction="in"} 1' in body
+    assert 'bitcoin_peers{direction="out"} 2' in body
+    assert "bitcoin_pruned 0" in body
+
+
+def test_metrics_when_node_down(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    body = node_status.app.test_client().get("/metrics").data.decode()
+    assert "bitcoin_node_up 0" in body
+    assert "bitcoin_blocks" not in body
+
+
+def test_metrics_respects_auth(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    resp = node_status.app.test_client().get("/metrics")
+    assert resp.status_code == 401
+
+
 # --- optional basic auth ---
 
 def test_no_password_means_no_auth(monkeypatch):

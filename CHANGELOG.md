@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-07-11
+
+### Added
+
+- **`./stack` CLI** — `up`/`down`/`restart`/`logs`/`apply`/`status` plus a
+  read-only `doctor` report (deps, config freshness, disk, sync, tor,
+  onion addresses).
+- **`./stack backup` / `restore`** — config, credentials, and onion keys
+  in one dated tarball; chain data deliberately excluded.
+- **Prometheus `/metrics`** on the dashboard (hand-rolled text format,
+  behind the same optional basic auth).
+- **Update checker** — daily, over Tor: new Bitcoin Core or stack releases
+  trigger a 🆕 Telegram alert and a dashboard badge. Informational only.
+- **Egress audit in the e2e** — asserts every established connection from
+  the bitcoin and dashboard containers terminates inside the stack subnet;
+  the Tor-only claim is now tested, not just configured.
+- `VERSION` file (rendered into the stack for the update checker).
+
+### Changed
+
+- Self-healing decided as a deliberate non-feature (restart policy covers
+  crashes; no Docker-socket access for anything else) — documented in
+  [Operations](docs/operations.md#self-healing-a-deliberate-non-feature).
+
 ## [1.1.0] - 2026-07-11
 
 ### Added
@@ -68,5 +92,6 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.2.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.0
 [1.1.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.1.0
 [1.0.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.0.0

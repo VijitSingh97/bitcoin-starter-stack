@@ -91,4 +91,19 @@ done
 docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' ||
   fail "dashboard onion hostname was not provisioned"
 
+# Prometheus metrics behind the same auth
+curl -sf -u x:e2edash localhost:8000/metrics | grep -q "bitcoin_node_up 1" ||
+  fail "metrics endpoint missing bitcoin_node_up"
+
+# Egress audit: every ESTABLISHED connection from the bitcoin and dashboard
+# containers must terminate inside the stack subnet (172.29.0.x renders as
+# xx001DAC in /proc/net/tcp little-endian hex) — i.e. everything goes to tor
+# or intra-stack RPC, and nothing dials clearnet directly.
+for c in bitcoin dashboard; do
+  bad=$(docker exec "$c" awk 'NR>1 && $4=="01" {split($3,r,":"); if (r[1] !~ /001DAC$/) print r[1]":"r[2]}' /proc/net/tcp 2>/dev/null || true)
+  [ -z "$bad" ] || fail "clearnet egress from $c: $bad"
+  bad6=$(docker exec "$c" sh -c 'awk "NR>1 && \$4==\"01\" {print \$3}" /proc/net/tcp6 2>/dev/null' || true)
+  [ -z "$bad6" ] || fail "unexpected IPv6 egress from $c: $bad6"
+done
+
 echo "PASS: test_e2e.sh"

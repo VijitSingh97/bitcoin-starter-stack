@@ -6,6 +6,8 @@ import json
 from flask import Flask, render_template_string, request, Response
 from datetime import datetime
 
+import monitor
+
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
@@ -45,6 +47,38 @@ def format_uptime(seconds):
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     return f"{days}d {hours}h {minutes}m" if days > 0 else f"{hours}h {minutes}m"
+
+@app.route('/metrics')
+def metrics():
+    """Prometheus text format, hand-rolled — what the dashboard already knows."""
+    lines = []
+
+    def m(name, value):
+        lines.append(f"# TYPE {name} gauge")
+        lines.append(f"{name} {value}")
+
+    blockchain = get_rpc_data("getblockchaininfo")
+    if blockchain is None:
+        m("bitcoin_node_up", 0)
+    else:
+        network = get_rpc_data("getnetworkinfo") or {}
+        peers = get_rpc_data("getpeerinfo") or []
+        inbound = sum(1 for p in peers if isinstance(p, dict) and p.get("inbound"))
+        total, used, free = shutil.disk_usage(BITCOIN_DIR)
+        m("bitcoin_node_up", 1)
+        m("bitcoin_blocks", blockchain.get("blocks", 0))
+        m("bitcoin_headers", blockchain.get("headers", 0))
+        m("bitcoin_verification_progress", blockchain.get("verificationprogress", 0))
+        m("bitcoin_pruned", int(blockchain.get("pruned", False)))
+        m("bitcoin_size_on_disk_bytes", blockchain.get("size_on_disk", 0))
+        m("bitcoin_disk_free_bytes", free)
+        m("bitcoin_uptime_seconds", get_rpc_data("uptime") or 0)
+        m("bitcoin_connections", network.get("connections", 0))
+        lines.append("# TYPE bitcoin_peers gauge")
+        lines.append(f'bitcoin_peers{{direction="in"}} {inbound}')
+        lines.append(f'bitcoin_peers{{direction="out"}} {len(peers) - inbound}')
+    return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
+
 
 @app.route('/')
 def index():
@@ -107,7 +141,8 @@ def index():
         "free_gb": free_gb,
         "disk_warn": free_gb < DISK_WARN_FREE_GB,
         "disk_percent": round((node_bytes / total) * 100, 2) if total > 0 else 0,
-        "last_update": last_update
+        "last_update": last_update,
+        "update": monitor.update_available,
     }
 
     return render_template_string("""
@@ -152,6 +187,7 @@ def index():
             <div class="row"><span class="label">Disk Capacity:</span> <span>{{stats.total_gb}} GB</span></div>
             <div class="row"><span class="label">Disk Usage:</span> <span>{{stats.disk_percent}}%</span></div>
             <div class="row"><span class="label">Disk Free:</span> <span {% if stats.disk_warn %}class="warn"{% endif %}>{{stats.free_gb}} GB{% if stats.disk_warn %} &#9888; LOW{% endif %}</span></div>
+            {% if stats.update %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
                 <span>Auto-refresh: 30s</span>
@@ -163,11 +199,14 @@ def index():
 
 if __name__ == '__main__':
     import threading
-    import monitor
-    if monitor.enabled():
-        threading.Thread(
-            target=monitor.monitor_loop,
-            args=(lambda: get_rpc_data("getblockchaininfo"),),
-            daemon=True,
-        ).start()
+    # Always runs: alerts and pings no-op individually when unconfigured,
+    # and the update checker works regardless.
+    threading.Thread(
+        target=monitor.monitor_loop,
+        args=(
+            lambda: get_rpc_data("getblockchaininfo"),
+            lambda: get_rpc_data("getnetworkinfo"),
+        ),
+        daemon=True,
+    ).start()
     app.run(host='0.0.0.0', port=8000)

@@ -97,6 +97,7 @@ TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
 NODE_NAME=$(hostname)
+STACK_VERSION=$(cat VERSION 2>/dev/null || echo dev)
 EOF
 chmod 600 .env
 
