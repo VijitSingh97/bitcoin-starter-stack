@@ -1,0 +1,62 @@
+services:
+  tor:
+    build: ./build/tor
+    container_name: tor
+    volumes:
+      - tor_data:/var/lib/tor
+    restart: unless-stopped
+    networks:
+      btc_net:
+        ipv4_address: 172.28.0.25
+
+  bitcoin:
+    image: lncm/bitcoind:v28.0
+    container_name: bitcoin
+    user: "1000:1000"
+    volumes:
+      - ./data/bitcoin:/data
+      - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
+    # Clear stale lock files from an unclean shutdown, then start bitcoind.
+    # RPC credentials come from .env, written by configure.sh.
+    entrypoint: >
+      /bin/sh -c "
+        find /data -name '*.lock' -delete;
+        find /data -name 'LOCK' -delete;
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf
+          -rpcuser=${BITCOIN_RPC_USER:?run ./configure.sh first}
+          -rpcpassword=${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      "
+    stop_signal: SIGTERM
+    stop_grace_period: 5m
+    restart: unless-stopped
+    networks:
+      btc_net:
+        ipv4_address: 172.28.0.26
+
+  dashboard:
+    build: ./build/dashboard
+    container_name: dashboard
+    ports:
+      - "8000:8000"
+    environment:
+      RPC_USER: ${BITCOIN_RPC_USER}
+      RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD}
+    volumes:
+      - ./data/bitcoin:/data:ro
+    restart: unless-stopped
+    networks:
+      btc_net:
+        ipv4_address: 172.28.0.27
+    depends_on:
+      - bitcoin
+
+networks:
+  btc_net:
+    driver: bridge
+    name: btc_net
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  tor_data:

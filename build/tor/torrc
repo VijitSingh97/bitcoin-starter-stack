@@ -1,0 +1,3 @@
+# Listen on all interfaces within the container so bitcoind can connect
+SocksPort 0.0.0.0:9050
+DataDirectory /var/lib/tor

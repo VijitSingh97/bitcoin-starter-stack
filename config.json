@@ -1,0 +1,6 @@
+{
+    "bitcoin": {
+        "node_username": "create_a_username_for_node",
+        "node_password": "create_a_password_for_node"
+    }
+}
