@@ -17,18 +17,24 @@ The template ([config.example.json](../config.example.json)):
         "node_password": "create_a_password_for_node",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
-        "prune_mb": 0
+        "prune_mb": 0,
+        "inbound_onion": false
+    },
+    "dashboard": {
+        "password": ""
     }
 }
 ```
 
 | Key | Default | What it does |
 |---|---|---|
-| `node_username` | — (required) | RPC username for Bitcoin Core. Letters and numbers only. |
-| `node_password` | — (required) | RPC password. Letters and numbers only — it passes through shell and env-file layers. |
-| `data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
-| `dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
-| `prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
+| `bitcoin.node_username` | — (required) | RPC username for Bitcoin Core. Letters and numbers only. |
+| `bitcoin.node_password` | — (required) | RPC password. Letters and numbers only — it passes through shell and env-file layers. bitcoind receives only a salted hash (`rpcauth`); the plaintext goes to the dashboard alone. |
+| `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
+| `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
+| `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
+| `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node serves blocks to the network — see [Inbound onion service](#inbound-onion-service). |
+| `dashboard.password` | `""` (no auth) | Non-empty enables HTTP basic auth on the dashboard (any username, this password). Letters and numbers only. |
 
 `configure.sh` refuses to run while the placeholder credentials are still
 in place, and applies the defaults above for any omitted key.
@@ -66,6 +72,25 @@ Know the trade-offs before enabling:
 
 Apply like any other change: edit `config.json`, `./configure.sh`,
 `docker compose up -d`.
+
+## Inbound onion service
+
+By default the node is outbound-only. Setting `"inbound_onion": true` has
+bitcoind register an onion service over Tor's control port, so other nodes
+can fetch blocks from you **without your IP ever being visible** — you
+contribute to the network from behind Tor.
+
+Mechanics (already wired, just flip the flag): tor exposes a cookie-authed
+control port on the internal network; the tor data volume is mounted
+read-only into the bitcoin container, whose process joins tor's group to
+read the cookie; bitcoind gets `-listen=1 -listenonion=1 -torcontrol=...`.
+Confirm it worked with:
+
+```bash
+docker logs bitcoin 2>&1 | grep "tor: Got service ID"
+```
+
+No host port is opened — inbound arrives through the Tor network only.
 
 ## Reusing an existing node
 

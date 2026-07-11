@@ -8,15 +8,16 @@
 | `docker compose down` | Stop everything. Bitcoin Core gets up to 5 minutes to flush cleanly — let it. |
 | `docker compose logs -f [service]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
 | `docker ps` | Container status including health (`healthy` / `unhealthy`). |
-| `docker exec bitcoin bitcoin-cli -rpcuser=... -rpcpassword=... getblockchaininfo` | Talk to the node directly (creds are in `.env`). |
+| `docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
 
 ## Health checks
 
 All three services define Docker health checks:
 
 - `tor` — SOCKS port accepting connections (5 min grace for bootstrap).
-- `bitcoin` — RPC answers `getblockchaininfo` (30 min grace: RPC returns
-  "warming up" during startup block verification).
+- `bitcoin` — RPC answers `getblockchaininfo`, authenticated with Core's
+  `.cookie` file (30 min grace: RPC returns "warming up" during startup
+  block verification).
 - `dashboard` — HTTP 200 on port 8000.
 
 `docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`

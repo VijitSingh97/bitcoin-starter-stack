@@ -24,15 +24,16 @@ watching sync progress, peers, and disk usage.
 - 🟠 **Full Bitcoin node.** The official Bitcoin Core image (digest-pinned, Dependabot-updated)
   validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
   config key.
-- 🧅 **Tor-only networking.** All outbound P2P connections go through the Tor container
-  (`onlynet=onion`) — your home IP is never associated with your node. No inbound
-  connections, no clearnet.
-- 📊 **Live dashboard.** Sync progress, block height, peer counts, uptime, and disk usage on
-  your LAN at port `8000`, auto-refreshing. RPC stays inside the Docker network — nothing
-  but the dashboard port is exposed.
-- 🔑 **Credentials out of git.** Your settings live in `config.json` and render into
-  `.env` — both gitignored, no tracked file is ever edited, so a stray `git add` can't
-  publish your RPC password.
+- 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
+  (`onlynet=onion`) — your home IP is never associated with your node. Outbound-only by
+  default; opt in to an **inbound onion service** to serve blocks back to the network,
+  still without exposing your IP.
+- 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
+  low-space warning) on your LAN at port `8000` — optionally behind basic auth. RPC stays
+  inside the Docker network; nothing but the dashboard port is exposed.
+- 🔑 **Credentials handled properly.** Config renders into gitignored files, so a stray
+  `git add` can't publish your RPC password — and bitcoind itself gets only a salted
+  `rpcauth` hash, never the plaintext.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
   the multi-day initial download.
 

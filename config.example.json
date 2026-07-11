@@ -4,6 +4,10 @@
         "node_password": "create_a_password_for_node",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
-        "prune_mb": 0
+        "prune_mb": 0,
+        "inbound_onion": false
+    },
+    "dashboard": {
+        "password": ""
     }
 }

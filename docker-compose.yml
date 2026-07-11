@@ -28,16 +28,24 @@ services:
     image: bitcoin/bitcoin:31.1@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63
     container_name: bitcoin
     user: "1000:1000"
+    # tor's group (gid 101 in the tor image) — lets bitcoind read the
+    # control-auth cookie for the optional inbound onion service
+    group_add:
+      - "101"
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
-      RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      RPCAUTH_SALT: ${BITCOIN_RPCAUTH_SALT:?run ./configure.sh first}
+      RPCAUTH_HASH: ${BITCOIN_RPCAUTH_HASH:?run ./configure.sh first}
       DBCACHE: ${BITCOIN_DBCACHE:-3000}
       PRUNE: ${BITCOIN_PRUNE:-0}
+      INBOUND_ONION: ${BITCOIN_INBOUND_ONION:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
+      - tor_data:/var/lib/tor:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
-    # Credentials, dbcache, and prune come from the environment (via configure.sh).
+    # Auth uses rpcauth (salted hash) — the plaintext RPC password never
+    # enters this container. Settings come from the environment (configure.sh).
     # The exec line must stay a single line: a YAML line break here becomes a
     # shell line break, silently dropping every flag after it (see tests/test_e2e.sh).
     entrypoint:
@@ -46,13 +54,17 @@ services:
       - |
         find /data -name '*.lock' -delete
         find /data -name 'LOCK' -delete
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcuser="$${RPC_USER}" -rpcpassword="$${RPC_PASSWORD}" -dbcache="$${DBCACHE}" -prune="$${PRUNE}"
+        RPCAUTH=$$(printf '%s:%s$$%s' "$$RPC_USER" "$$RPCAUTH_SALT" "$$RPCAUTH_HASH")
+        ONION_ARGS=""
+        if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped
     logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "bitcoin-cli -rpcuser=$${RPC_USER} -rpcpassword=$${RPC_PASSWORD} getblockchaininfo >/dev/null"]
+      # Cookie auth: bitcoin-cli reads /data/.cookie, no credentials needed here
+      test: ["CMD-SHELL", "bitcoin-cli -datadir=/data getblockchaininfo >/dev/null"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -69,12 +81,14 @@ services:
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
     restart: unless-stopped
     logging: *logging
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"]
+      # Any HTTP response means alive — 401 is expected when auth is enabled
+      test: ["CMD", "python", "-c", "import urllib.request,urllib.error\ntry: urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)\nexcept urllib.error.HTTPError: pass"]
       interval: 60s
       timeout: 10s
       retries: 3

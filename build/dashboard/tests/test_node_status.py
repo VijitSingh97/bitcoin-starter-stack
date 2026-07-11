@@ -70,6 +70,14 @@ FAKE_RPC = {
     "uptime": 90061,
 }
 
+BIG_DISK = (2 * 1024**4, 1 * 1024**4, 1 * 1024**4)  # 1 TB free
+
+
+def render_index(monkeypatch, rpc=FAKE_RPC, disk=BIG_DISK):
+    monkeypatch.setattr(node_status, "get_rpc_data", rpc.get)
+    monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: disk)
+    return node_status.app.test_client().get("/")
+
 
 def test_index_shows_loading_page_when_node_unreachable(monkeypatch):
     monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
@@ -79,12 +87,7 @@ def test_index_shows_loading_page_when_node_unreachable(monkeypatch):
 
 
 def test_index_renders_node_stats(monkeypatch):
-    monkeypatch.setattr(node_status, "get_rpc_data", FAKE_RPC.get)
-    monkeypatch.setattr(
-        node_status.shutil, "disk_usage",
-        lambda path: (2 * 1024**4, 1 * 1024**4, 1 * 1024**4),
-    )
-    resp = node_status.app.test_client().get("/")
+    resp = render_index(monkeypatch)
     body = resp.data.decode()
     assert resp.status_code == 200
     assert "900000 / 900000" in body
@@ -93,3 +96,55 @@ def test_index_renders_node_stats(monkeypatch):
     assert "100.0" in body  # sync progress
     assert ">1</span>" in body  # 1 inbound peer
     assert "800.0 GB" in body  # size on disk
+    assert "Pruned" not in body  # full node: no badge
+    assert "LOW" not in body  # 1 TB free: no warning
+
+
+# --- pruned badge and disk warning ---
+
+def test_index_shows_pruned_badge(monkeypatch):
+    rpc = dict(FAKE_RPC)
+    rpc["getblockchaininfo"] = dict(
+        FAKE_RPC["getblockchaininfo"],
+        pruned=True, prune_target_size=10 * 1024**3, size_on_disk=11 * 1024**3,
+    )
+    body = render_index(monkeypatch, rpc=rpc).data.decode()
+    assert "Pruned" in body
+    assert "10.0 GB" in body  # prune target in the badge
+
+
+def test_index_warns_on_low_disk(monkeypatch):
+    low = (2 * 1024**4, 2 * 1024**4 - 20 * 1024**3, 20 * 1024**3)  # 20 GB free
+    body = render_index(monkeypatch, disk=low).data.decode()
+    assert "LOW" in body
+    assert 'class="warn"' in body
+
+
+# --- optional basic auth ---
+
+def test_no_password_means_no_auth(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "")
+    resp = render_index(monkeypatch)
+    assert resp.status_code == 200
+
+
+def test_auth_rejects_missing_credentials(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    resp = node_status.app.test_client().get("/")
+    assert resp.status_code == 401
+    assert "WWW-Authenticate" in resp.headers
+
+
+def test_auth_rejects_wrong_password(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    resp = node_status.app.test_client().get("/", auth=("x", "wrong"))
+    assert resp.status_code == 401
+
+
+def test_auth_accepts_correct_password(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    monkeypatch.setattr(node_status, "get_rpc_data", FAKE_RPC.get)
+    monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: BIG_DISK)
+    resp = node_status.app.test_client().get("/", auth=("anyuser", "hunter2"))
+    assert resp.status_code == 200
+    assert b"Sync Progress" in resp.data

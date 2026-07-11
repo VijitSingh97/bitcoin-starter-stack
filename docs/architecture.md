@@ -36,13 +36,20 @@ simple and deterministic.
 - **`onlynet=onion` + `proxy=` + `listen=0`** in
   [bitcoin.conf](../build/bitcoin/bitcoin.conf): every P2P connection is
   outbound, to an onion peer, through the tor container. The node never
-  dials clearnet and never accepts inbound.
-- **No inbound onion service.** That would require handing bitcoind Tor's
-  control port; this stack deliberately doesn't. Fewer moving parts, and an
-  outbound-only node leaks less.
-- **The only published port is the dashboard's `8000`.** RPC (`8332`) and
-  SOCKS (`9050`) exist only on the internal network; `rpcallowip` restricts
-  RPC to Docker's address space as a second layer.
+  dials clearnet and, by default, never accepts inbound.
+- **Optional inbound onion service** (`inbound_onion` in `config.json`):
+  bitcoind registers an onion address over tor's cookie-authed control
+  port and serves blocks to the network — still no clearnet, no host port,
+  no IP exposure. The tor data volume is mounted read-only into the
+  bitcoin container (whose process joins tor's group) so it can read the
+  control-auth cookie.
+- **RPC auth is a salted hash.** bitcoind is started with `rpcauth=`; the
+  plaintext password exists only in the dashboard container and `.env`.
+  The bitcoin health check authenticates with Core's `.cookie` file.
+- **The only published port is the dashboard's `8000`.** RPC (`8332`),
+  SOCKS (`9050`), and the tor control port (`9051`) exist only on the
+  internal network; `rpcallowip` restricts RPC to Docker's address space
+  as a second layer.
 
 ## Trust boundaries — and non-boundaries
 

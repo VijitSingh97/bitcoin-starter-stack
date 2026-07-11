@@ -34,7 +34,11 @@ echo '{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": 100}}
 echo '{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": "lots"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric prune_mb was accepted"
 
-# 6. Happy path renders .env with defaults applied
+# 6. Refuses special characters in the dashboard password too
+echo '{"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"password": "a b"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "special characters in dashboard password were accepted"
+
+# 7. Happy path renders .env with defaults applied
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "myuser", "node_password": "mypass123"}}
 EOF
@@ -45,21 +49,33 @@ grep -q '^BITCOIN_RPC_PASSWORD=mypass123$' "$tmp/.env" || fail "password not ren
 grep -q '^BITCOIN_DATA_DIR=./data/bitcoin$' "$tmp/.env" || fail "data_dir default not applied"
 grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applied"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
+grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion default not applied"
+grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
 
-# 6. .env is private
+# 8. rpcauth is a real salted HMAC of the password (re-derive to check)
+salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
+hash=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
+echo "$salt" | grep -qE '^[0-9a-f]{32}$' || fail "rpcauth salt is not 32 hex chars: $salt"
+expected=$(printf '%s' "mypass123" | openssl dgst -sha256 -hmac "$salt" -r | cut -d' ' -f1)
+[ "$hash" = "$expected" ] || fail "rpcauth hash does not verify against the password"
+
+# 9. .env is private
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l "$tmp/.env" | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail ".env permissions are $perms, expected -rw-------"
 
-# 7. Custom data_dir, dbcache, and prune are honored
+# 10. Custom values are honored
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550}}
+{"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true},
+ "dashboard": {"password": "dashpass1"}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir not rendered"
 grep -q '^BITCOIN_DBCACHE=512$' "$tmp/.env" || fail "custom dbcache not rendered"
 grep -q '^BITCOIN_PRUNE=550$' "$tmp/.env" || fail "custom prune not rendered"
+grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion=true not rendered as 1"
+grep -q '^DASHBOARD_PASSWORD=dashpass1$' "$tmp/.env" || fail "dashboard password not rendered"
 [ -d "$tmp/elsewhere" ] || fail "custom data dir not created"
 
 echo "PASS: test_configure.sh"

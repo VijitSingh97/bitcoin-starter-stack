@@ -10,25 +10,32 @@ Please don't open public issues for security problems.
 
 **Protects:**
 
-- **Your IP from the Bitcoin network.** All P2P traffic is outbound-only
-  through Tor (`onlynet=onion`, `listen=0`, `proxy=` to the tor container).
-  No clearnet P2P connections are ever made.
+- **Your IP from the Bitcoin network.** All P2P traffic goes through Tor
+  (`onlynet=onion`, `proxy=` to the tor container). No clearnet P2P
+  connections are ever made. Outbound-only by default; the opt-in
+  `inbound_onion` mode serves blocks via a Tor onion service, still without
+  exposing your IP or opening a host port.
 - **RPC from the outside.** Bitcoin Core's RPC port is never published to
   the host; it is reachable only from containers on the internal Docker
   network (`rpcallowip=172.16.0.0/12`).
 - **Credentials from git.** RPC credentials live only in gitignored files —
   `config.json` and the rendered `.env` (mode 600) — and are never written
   into tracked files.
+- **The plaintext RPC password from the bitcoin container.** bitcoind gets
+  only a salted HMAC (`rpcauth`); `docker inspect bitcoin` reveals no
+  password. The plaintext exists in the dashboard's environment (it must
+  authenticate) and in `.env`. Its own health check uses Bitcoin Core's
+  cookie file, not the password.
 
 **Accepted risks (by design — know them before deploying):**
 
-- **The dashboard has no authentication** and is published on host port
-  `8000`. It is read-only status information, but it fingerprints the host
-  as a Bitcoin node. Keep it on your LAN; never port-forward it.
-- **Anyone with Docker access on the host can read the RPC credentials**
-  (`docker inspect` shows container environment and command lines). Docker
-  access is root-equivalent on the host anyway, so this is not treated as a
-  boundary.
-- **Initial block download trusts Tor exit-independent onion peers** but is
-  still subject to the usual eclipse-attack tradeoffs of an outbound-only
-  node with a small peer count.
+- **The dashboard defaults to no authentication** on host port `8000`. It
+  is read-only status information, but it fingerprints the host as a
+  Bitcoin node. Keep it on your LAN and never port-forward it — or set
+  `dashboard.password` in `config.json` to require HTTP basic auth (note:
+  basic auth over plain HTTP is only as private as your LAN).
+- **Anyone with Docker access on the host can read the dashboard's RPC
+  password** via `docker inspect dashboard`. Docker access is
+  root-equivalent on the host anyway, so this is not treated as a boundary.
+- **Initial block download trusts onion peers** and is subject to the usual
+  eclipse-attack tradeoffs of a Tor-only node with a small peer count.
