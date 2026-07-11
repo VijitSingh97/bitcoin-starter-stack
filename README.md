@@ -83,6 +83,8 @@ Open the dashboard at `http://localhost:8000`, or from another machine on your L
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
+- **Live tower** — a 5×5 isometric tower of blocks rises endlessly behind the card in
+  the bitcoin accent. Decorative, theme-aware, and paused for `prefers-reduced-motion`.
 
 The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
 `8000` to the internet.

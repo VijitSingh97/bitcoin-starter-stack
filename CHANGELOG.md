@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-07-11
+
+### Added
+
+- **Auto light/dark theme** with a top-right toggle (Auto → Light → Dark):
+  follows the system preference in auto mode and remembers an explicit
+  choice. Styles moved to a served stylesheet built on CSS variables, with
+  an inline init script that sets the theme before first paint (no flash).
+- **Animated block tower** — a 5×5 isometric tower in the bitcoin accent
+  rises endlessly behind the status card, fading in and out at the screen
+  edges. Theme-aware, throttled to 30fps, paused on a hidden tab, and
+  honours `prefers-reduced-motion`. Purely decorative.
+- **In-place refresh** — the status panel updates by polling and swapping
+  itself, replacing the full-page `<meta refresh>` so the theme and the
+  tower animation never reset.
+- Frontend unit tests (`node --test`) for the theme-cycle and tower
+  projection/timing logic, wired into CI.
+
 ## [1.3.0] - 2026-07-11
 
 ### Added
@@ -120,6 +138,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.4.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.4.0
 [1.3.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.3.0
 [1.2.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.1
 [1.2.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.0
