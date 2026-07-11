@@ -38,6 +38,19 @@ export function project(gx, gy, z, tw, bh, ox, oy) {
   return { x: ox + (gx - gy) * (tw / 2), y: oy + (gx + gy) * (tw / 4) - z * bh };
 }
 
+// Horizontal placement + tile size for width W. Below 900px (mobile) the
+// tower centres behind the card. Above it, the card sits on the left and the
+// tower is centred in the space to its right, with the tile size shrunk so
+// the whole footprint clears the card zone (no overlap).
+export function towerLayout(W, cols = GRID) {
+  if (W < 900) {
+    return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
+  }
+  const cardZone = 500; // left padding + 420px card + a gap
+  const tw = Math.max(26, Math.min(52, (W - cardZone) / cols - 2, W / 22));
+  return { wide: true, ox: (cardZone + W) / 2, tw };
+}
+
 export function smooth(t) {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
@@ -126,9 +139,8 @@ if (typeof document !== "undefined") {
 
       ctx.clearRect(0, 0, W, H);
       const pal = palette();
-      const tw = Math.max(30, Math.min(52, W / 22));
+      const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
-      const ox = W / 2;
       const anchorY = H * 0.6;                 // top layer's centre sits here
       const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0
 

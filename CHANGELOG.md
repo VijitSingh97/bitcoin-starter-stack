@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-07-11
+
+### Changed
+
+- **The dashboard is now published on host port 80** (was 8000), so it's
+  reachable at `http://<host>` with no port in the URL. The container still
+  serves on 8000 internally.
+- **Responsive layout:** on a wide screen the status card sits on the left
+  and the block tower gets the right half of the page, so the tower is no
+  longer hidden behind the card. On a phone it stays centred with the tower
+  behind, and the card no longer overflows a narrow viewport.
+
 ## [1.5.0] - 2026-07-11
 
 ### Changed
@@ -150,6 +162,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.6.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.6.0
 [1.5.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.5.0
 [1.4.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.4.0
 [1.3.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.3.0

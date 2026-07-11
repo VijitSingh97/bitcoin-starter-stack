@@ -23,7 +23,7 @@ All three services define Docker health checks:
 - `bitcoin` — RPC answers `getblockchaininfo`, authenticated with Core's
   `.cookie` file (30 min grace: RPC returns "warming up" during startup
   block verification).
-- `dashboard` — HTTP 200 on port 8000.
+- `dashboard` — HTTP 200 on port 8000 (inside the container).
 
 `docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
 shows recent probe output when diagnosing.

@@ -34,7 +34,7 @@ Please don't open public issues for security problems.
 
 **Accepted risks (by design — know them before deploying):**
 
-- **The dashboard defaults to no authentication** on host port `8000`. It
+- **The dashboard defaults to no authentication** on host port `80`. It
   is read-only status information, but it fingerprints the host as a
   Bitcoin node. Keep it on your LAN and never port-forward it — or set
   `dashboard.password` in `config.json` to require HTTP basic auth (note:
