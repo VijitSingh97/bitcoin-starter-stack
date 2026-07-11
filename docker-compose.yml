@@ -5,6 +5,12 @@ services:
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
     networks:
       btc_net:
         ipv4_address: 172.28.0.25
@@ -13,22 +19,31 @@ services:
     image: lncm/bitcoind:v28.0
     container_name: bitcoin
     user: "1000:1000"
+    environment:
+      RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
+      RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      DBCACHE: ${BITCOIN_DBCACHE:-3000}
     volumes:
-      - ./data/bitcoin:/data
+      - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
-    # RPC credentials come from .env, written by configure.sh.
+    # Credentials and dbcache come from .env, written by configure.sh.
     entrypoint: >
       /bin/sh -c "
         find /data -name '*.lock' -delete;
         find /data -name 'LOCK' -delete;
         exec bitcoind -datadir=/data -conf=/data/bitcoin.conf
-          -rpcuser=${BITCOIN_RPC_USER:?run ./configure.sh first}
-          -rpcpassword=${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+          -rpcuser=$${RPC_USER} -rpcpassword=$${RPC_PASSWORD} -dbcache=$${DBCACHE}
       "
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -rpcuser=$${RPC_USER} -rpcpassword=$${RPC_PASSWORD} getblockchaininfo >/dev/null"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
     networks:
       btc_net:
         ipv4_address: 172.28.0.26
@@ -39,11 +54,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      RPC_USER: ${BITCOIN_RPC_USER}
-      RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD}
+      RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
+      RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
     volumes:
-      - ./data/bitcoin:/data:ro
+      - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 1m
     networks:
       btc_net:
         ipv4_address: 172.28.0.27

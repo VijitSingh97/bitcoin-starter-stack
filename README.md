@@ -4,6 +4,11 @@
 
 ### Private Bitcoin full node, routed over Tor
 
+[![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
+![Tor](https://img.shields.io/badge/Networking-Tor--only-7D4698?logo=torproject&logoColor=white)
+
 Docker Compose stack for a [Bitcoin Core](https://bitcoincore.org/) full node with all P2P
 traffic routed through a built-in Tor daemon, plus a lightweight web dashboard for
 watching sync progress, peers, and disk usage.
@@ -17,17 +22,56 @@ watching sync progress, peers, and disk usage.
 ## What it does
 
 - 🟠 **Full Bitcoin node.** Bitcoin Core v28 validating the full chain, data persisted on disk
-  across restarts.
+  across restarts, health-checked by Docker.
 - 🧅 **Tor-only networking.** All outbound P2P connections go through the Tor container
   (`onlynet=onion`) — your home IP is never associated with your node. No inbound
   connections, no clearnet.
 - 📊 **Live dashboard.** Sync progress, block height, peer counts, uptime, and disk usage on
   your LAN at port `8000`, auto-refreshing. RPC stays inside the Docker network — nothing
   but the dashboard port is exposed.
-- 🔑 **Credentials out of git.** `configure.sh` renders your RPC credentials from
-  `config.json` into a gitignored `.env`; no tracked file is ever edited.
+- 🔑 **Credentials out of git.** `configure.sh` renders your settings from `config.json`
+  into a gitignored `.env`; no tracked file is ever edited, so a stray `git add` can't
+  publish your RPC password.
+- ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
+  the multi-day initial download.
 
-## How it works
+## 🚀 Quick Start
+
+**Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
+`jq`, an SSD with ~1 TB free (the chain is ~800 GB and grows), and 8 GB+ RAM.
+Details in [Hardware Requirements](docs/hardware.md).
+
+```bash
+git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
+cd bitcoin-starter-stack
+nano config.json    # set node_username and node_password (letters/numbers only)
+./configure.sh      # writes .env, creates the data dir
+docker compose up -d
+```
+
+Then watch it come up:
+
+```bash
+docker logs -f tor        # wait for "Bootstrapped 100% (done)"
+docker logs -f bitcoin    # headers, then block sync
+```
+
+The initial block download is ~800 GB over Tor — expect days, with live progress on the
+dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-started.md).
+
+## 📈 Monitoring
+
+Open the dashboard at `http://localhost:8000`, or from another machine on your LAN at
+`http://<hostname>.local:8000` (needs `avahi-daemon` on the node box).
+
+- **Sync progress** — block height vs. headers, with a progress bar.
+- **Peers** — total connections, inbound vs. outbound.
+- **Disk** — chain size on disk vs. drive capacity.
+
+The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
+`8000` to the internet.
+
+## 🏗️ How it works
 
 ```mermaid
 flowchart LR
@@ -48,60 +92,31 @@ flowchart LR
 
 Three services on an isolated Docker network: `tor` (SOCKS5 proxy), `bitcoin` (Bitcoin Core,
 non-root, RPC reachable only from inside the network), and `dashboard` (Flask app polling
-the node over RPC).
+the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 
-## 🚀 Quick Start
+## 📚 Documentation
 
-**Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)
-(and the [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)),
-`jq`, an SSD with ~1 TB free (the chain is ~800 GB and grows), and 8 GB+ RAM.
+| Guide | What's inside |
+|---|---|
+| [Getting Started](docs/getting-started.md) | Prerequisites, install, first start, what to expect during sync. |
+| [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
+| [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
+| [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
+| [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 
-Optional but handy — `avahi-daemon` lets you reach the dashboard at `<hostname>.local`:
-
-```bash
-sudo apt install jq avahi-daemon
-```
-
-**1. Clone and configure.** Set your own RPC username and password in `config.json`
-(stick to letters and numbers — no special characters):
+## 🧪 Testing
 
 ```bash
-git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
-cd bitcoin-starter-stack
-nano config.json    # set node_username and node_password
-./configure.sh      # writes .env, creates the data dir
+tests/run.sh
 ```
 
-**2. Start the stack:**
-
-```bash
-docker compose up -d
-```
-
-**3. Watch it come up:**
-
-```bash
-docker logs -f tor        # wait for "Bootstrapped 100% (done)"
-docker logs -f bitcoin    # headers, then block sync
-```
-
-The initial block download is several hundred GB over Tor — expect it to take days.
-The dashboard shows live progress the whole time.
-
-## 📈 Monitoring
-
-Open the dashboard at `http://localhost:8000`, or from another machine on your LAN at
-`http://<hostname>.local:8000` (run `hostname` on the node box to get it).
-
-- **Sync progress** — block height vs. headers, with a progress bar.
-- **Peers** — total connections, inbound vs. outbound.
-- **Disk** — chain size on disk vs. drive capacity.
-
-The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
-`8000` to the internet.
+Runs shellcheck, a `configure.sh` end-to-end test, a docker-compose contract test, and the
+dashboard's unit tests — the same suite [CI](.github/workflows/ci.yml) runs on every push,
+plus a full image build. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## ⚠️ Disclaimer
 
 **USE AT YOUR OWN RISK.** This software is provided "as is" without any warranties. Running
 a full node is resource-intensive (bandwidth, disk, memory). Understand your firewall setup
-before exposing anything beyond your LAN.
+before exposing anything beyond your LAN. Security posture and reporting:
+[SECURITY.md](SECURITY.md). Licensed [MIT](LICENSE).

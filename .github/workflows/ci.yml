@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck configure.sh tests/*.sh
+
+      - name: Stack tests (configure.sh + compose contract)
+        run: tests/run.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dashboard unit tests
+        run: |
+          pip install -r build/dashboard/requirements.txt pytest
+          python -m pytest build/dashboard/tests -q
+
+      - name: Build images
+        env:
+          BITCOIN_RPC_USER: ci
+          BITCOIN_RPC_PASSWORD: ci
+        run: docker compose build

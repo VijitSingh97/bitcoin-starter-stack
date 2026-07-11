@@ -1,0 +1,73 @@
+# Operations
+
+## Day-to-day commands
+
+| Command | What it does |
+|---|---|
+| `docker compose up -d` | Start (or apply config changes to) the stack. |
+| `docker compose down` | Stop everything. Bitcoin Core gets up to 5 minutes to flush cleanly — let it. |
+| `docker compose logs -f [service]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
+| `docker ps` | Container status including health (`healthy` / `unhealthy`). |
+| `docker exec bitcoin bitcoin-cli -rpcuser=... -rpcpassword=... getblockchaininfo` | Talk to the node directly (creds are in `.env`). |
+
+## Health checks
+
+All three services define Docker health checks:
+
+- `tor` — SOCKS port accepting connections (5 min grace for bootstrap).
+- `bitcoin` — RPC answers `getblockchaininfo` (30 min grace: RPC returns
+  "warming up" during startup block verification).
+- `dashboard` — HTTP 200 on port 8000.
+
+`docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
+shows recent probe output when diagnosing.
+
+## Upgrading
+
+- **Bitcoin Core:** bump the `lncm/bitcoind` tag in `docker-compose.yml`,
+  then `docker compose up -d`. Chain data upgrades in place; downgrades
+  across major versions are not generally supported, so read the release
+  notes first.
+- **Dashboard / Tor images:** `git pull`, then
+  `docker compose up -d --build`.
+- Dependabot files PRs for base images, pip packages, and GitHub Actions
+  weekly.
+
+## Backup
+
+Only two things are worth backing up — both tiny:
+
+- `config.json` (your settings)
+- `.env` (rendered credentials — or just re-run `./configure.sh`)
+
+The chain itself is re-derivable from the network. Backing up ~800 GB is
+only worth it if a multi-day Tor resync hurts more than the storage does.
+If you do: `docker compose down` first — a live copy of `chainstate/` is
+corrupt by construction.
+
+## Troubleshooting
+
+**Compose says `run ./configure.sh first`** — exactly that. `.env` is
+missing or incomplete.
+
+**Tor never reaches "Bootstrapped 100%"** — your network may block Tor.
+Check `docker compose logs tor` for connection failures; a restrictive
+firewall needs outbound 443/9001 open.
+
+**bitcoind exits immediately** — almost always data-dir permissions. The
+container runs as uid 1000; `ls -ld <data_dir>` should show your user (uid
+1000) as owner. Also check `docker compose logs bitcoin` for the actual
+error.
+
+**Dashboard stuck on "Initializing"** — the dashboard can't reach RPC.
+During startup that's normal (block verification can take minutes). If it
+persists: `docker compose logs bitcoin` — and if you recently changed
+credentials, make sure you re-ran `./configure.sh` *and*
+`docker compose up -d` so both containers got the new values.
+
+**Node syncs but peer count is 0 after hours** — tor container unhealthy or
+restarted with a new identity mid-session. `docker compose restart tor bitcoin`.
+
+**Disk filling up** — the dashboard's disk row is the early warning. Options:
+bigger disk, or accept pruning by forking `bitcoin.conf` (`prune=` is
+incompatible with some wallet/RPC uses; not a supported configuration here).
