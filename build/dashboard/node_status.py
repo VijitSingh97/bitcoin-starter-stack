@@ -172,7 +172,7 @@ def index():
     <body class="center">
         <canvas id="tower"></canvas>
         <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
-        <div id="live">
+        <div id="live" data-blocks="{{stats.blocks}}">
         <div class="card">
             <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
             <div class="row"><span class="label">Bitcoin Core:</span> <span>{{stats.version}}</span></div>

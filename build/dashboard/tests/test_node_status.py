@@ -164,6 +164,8 @@ def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
         assert 'id="live"' in body
         assert '/static/refresh.js' in body
         assert 'http-equiv="refresh"' not in body
+    # the live panel carries the block height so the tower can build from it
+    assert 'data-blocks="900000"' in full
 
 
 def test_tower_and_refresh_assets_served():
