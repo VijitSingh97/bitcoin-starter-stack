@@ -102,6 +102,30 @@ def test_index_renders_node_stats(monkeypatch):
     # rendered "<built-in method update of dict object ...>" on every page
     assert "🆕" not in body
     assert "built-in method" not in body
+    # a full node shows a "Full" badge, never "Pruned"
+    assert ">Full<" in body
+    assert "Pruned" not in body
+
+
+def test_index_shows_stack_version(monkeypatch):
+    monkeypatch.setattr(node_status, "STACK_VERSION", "1.3.0")
+    body = render_index(monkeypatch).data.decode()
+    assert "v1.3.0" in body
+
+
+def test_index_shows_dev_when_unversioned(monkeypatch):
+    monkeypatch.setattr(node_status, "STACK_VERSION", "dev")
+    body = render_index(monkeypatch).data.decode()
+    assert ">dev<" in body
+    assert "vdev" not in body  # not v-prefixed
+
+
+def test_loading_page_shows_version(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "STACK_VERSION", "1.3.0")
+    body = node_status.app.test_client().get("/").data.decode()
+    assert "Initializing" in body
+    assert "v1.3.0" in body
 
 
 def test_update_badge_shows_when_update_available(monkeypatch):
@@ -122,6 +146,7 @@ def test_index_shows_pruned_badge(monkeypatch):
     body = render_index(monkeypatch, rpc=rpc).data.decode()
     assert "Pruned" in body
     assert "10.0 GB" in body  # prune target in the badge
+    assert ">Full<" not in body  # pruned and full badges are exclusive
 
 
 def test_index_warns_on_low_disk(monkeypatch):

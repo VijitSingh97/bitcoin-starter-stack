@@ -76,9 +76,11 @@ dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-start
 Open the dashboard at `http://localhost:8000`, or from another machine on your LAN at
 `http://<hostname>.local:8000` (needs `avahi-daemon` on the node box).
 
+- **Node mode** — a **Full** or **Pruned** badge in the header.
 - **Sync progress** — block height vs. headers, with a progress bar.
 - **Peers** — total connections, inbound vs. outbound.
 - **Disk** — chain size on disk vs. drive capacity.
+- **Versions** — Bitcoin Core version in the card, stack version in the footer.
 
 The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
 `8000` to the internet.
