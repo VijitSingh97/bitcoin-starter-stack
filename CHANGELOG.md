@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-07-11
+
+### Changed
+
+- **Healthchecks pings retry until one succeeds.** The dashboard pings every
+  5 minutes (matching the recommended check period), but a failed ping now
+  retries each minute instead of waiting a full cycle — so a brief Tor blip
+  can't trip a tight Healthchecks grace window.
+- **Notifications guide rewritten** ([docs/notifications.md](docs/notifications.md)):
+  step-by-step Telegram and Healthchecks.io setup, the recommended check
+  settings (Period 5 min, Grace 1–2 min) that match the ping cadence, and how
+  to route Healthchecks' own alert into the same Telegram group.
+
 ## [1.7.0] - 2026-07-11
 
 ### Added
@@ -178,6 +191,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.8.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.8.0
 [1.7.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.7.0
 [1.6.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.6.0
 [1.5.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.5.0

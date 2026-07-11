@@ -51,13 +51,18 @@ def send_telegram(text):
 
 
 def ping_healthchecks(healthy):
+    # Returns True when the ping got through (or there's nothing to do), False
+    # when it failed — the caller uses that to retry rather than wait a full
+    # cycle.
     if not HEALTHCHECKS_URL:
-        return
+        return True
     url = HEALTHCHECKS_URL if healthy else HEALTHCHECKS_URL + "/fail"
     try:
         requests.get(url, proxies=PROXIES, timeout=10)
+        return True
     except Exception as e:
         print(f"Healthchecks ping failed: {e}")
+        return False
 
 
 def _latest_release_tag(url):
@@ -134,9 +139,12 @@ def tick(get_blockchain_info, state, disk_path="/data", get_network_info=None):
             send_telegram(f"🔴 node down — RPC unreachable for {DOWN_AFTER_TICKS} minutes")
             state["down_alerted"] = True
 
-    # First tick pings immediately (confirms the check works), then throttled
-    if state.get("ticks", 0) % PING_EVERY_TICKS == 0:
-        ping_healthchecks(healthy)
+    # Ping every 5 minutes (matching the recommended Healthchecks period), but
+    # keep retrying each tick until one gets through — so a single Tor hiccup
+    # can't trip a tight grace window. The clock only advances on success.
+    if state.get("ticks", 0) >= state.get("ping_due", 0):
+        if ping_healthchecks(healthy):
+            state["ping_due"] = state.get("ticks", 0) + PING_EVERY_TICKS
 
     if healthy and get_network_info and state.get("ticks", 0) % UPDATE_CHECK_EVERY_TICKS == 0:
         network = get_network_info() or {}
