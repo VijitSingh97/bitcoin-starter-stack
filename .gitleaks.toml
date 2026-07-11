@@ -1,0 +1,15 @@
+# gitleaks config. Extends the default rules; allowlists the placeholder and
+# test-only credentials in this repo so the secret scan is signal, not noise.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and test fixtures — no real secrets"
+paths = [
+  '''config\.example\.json''',      # documented placeholders
+  '''build/dashboard/tests/.*''',   # unit-test fixtures
+  '''tests/.*''',                   # shell test fixtures
+]
+regexes = [
+  '''create_a_(username|password)_for_node''',
+]

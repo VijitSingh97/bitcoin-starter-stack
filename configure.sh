@@ -32,6 +32,7 @@ dashboard_onion=$(jq -r 'if .dashboard.onion == true then 1 else 0 end' config.j
 telegram_bot_token=$(jq -r '.notifications.telegram_bot_token // empty' config.json)
 telegram_chat_id=$(jq -r '.notifications.telegram_chat_id // empty' config.json)
 healthchecks_url=$(jq -r '.notifications.healthchecks_url // empty' config.json)
+alert_new_block=$(jq -r 'if .notifications.alert_new_block == true then 1 else 0 end' config.json)
 
 if [ -z "$rpc_user" ] || [ -z "$rpc_password" ]; then
   echo "config.json is missing bitcoin.node_username or bitcoin.node_password."
@@ -96,6 +97,7 @@ DASHBOARD_ONION=$dashboard_onion
 TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
+ALERT_NEW_BLOCK=$alert_new_block
 NODE_NAME=$(hostname)
 STACK_VERSION=$(cat VERSION 2>/dev/null || echo dev)
 EOF

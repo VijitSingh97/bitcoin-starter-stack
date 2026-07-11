@@ -68,19 +68,21 @@ FAKE_RPC = {
     "getnetworkinfo": {"subversion": "/Satoshi:28.0.0/", "connections": 10},
     "getpeerinfo": [{"inbound": True}, {"inbound": False}, {"inbound": False}],
     "uptime": 90061,
+    "getmempoolinfo": {"size": 4200, "bytes": 12 * 1024**2},
+    "estimatesmartfee": {"feerate": 0.0001, "blocks": 1},  # 0.0001 BTC/kvB = 10 sat/vB
 }
 
 BIG_DISK = (2 * 1024**4, 1 * 1024**4, 1 * 1024**4)  # 1 TB free
 
 
 def render_index(monkeypatch, rpc=FAKE_RPC, disk=BIG_DISK):
-    monkeypatch.setattr(node_status, "get_rpc_data", rpc.get)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: rpc.get(method))
     monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: disk)
     return node_status.app.test_client().get("/")
 
 
 def test_index_shows_loading_page_when_node_unreachable(monkeypatch):
-    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     resp = node_status.app.test_client().get("/")
     assert resp.status_code == 200
     assert b"Initializing" in resp.data
@@ -121,7 +123,7 @@ def test_index_shows_dev_when_unversioned(monkeypatch):
 
 
 def test_loading_page_shows_version(monkeypatch):
-    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     monkeypatch.setattr(node_status, "STACK_VERSION", "1.3.0")
     body = node_status.app.test_client().get("/").data.decode()
     assert "Initializing" in body
@@ -135,13 +137,30 @@ def test_update_badge_shows_when_update_available(monkeypatch):
     assert "built-in method" not in body
 
 
+# --- mempool + fees ---
+
+def test_index_shows_mempool_and_fees(monkeypatch):
+    body = render_index(monkeypatch).data.decode()
+    assert "Mempool:" in body
+    assert "4200 tx" in body
+    assert "12.0 MB" in body
+    assert "10 / 10 / 10" in body  # 0.0001 BTC/kvB -> 10 sat/vB (same mock for all)
+
+
+def test_index_hides_mempool_during_sync(monkeypatch):
+    rpc = dict(FAKE_RPC)
+    rpc["getblockchaininfo"] = dict(FAKE_RPC["getblockchaininfo"], initialblockdownload=True)
+    body = render_index(monkeypatch, rpc=rpc).data.decode()
+    assert "Mempool:" not in body
+
+
 # --- theming ---
 
 def test_theme_wired_on_both_pages(monkeypatch):
     # theme-init runs before paint (no flash), the toggle button and the
     # module are present, and no palette is hard-coded in the page anymore
     full = render_index(monkeypatch).data.decode()
-    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     loading = node_status.app.test_client().get("/").data.decode()
     for body in (full, loading):
         assert '/static/dashboard.css' in body
@@ -156,7 +175,7 @@ def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
     # and the page updates by polling (no full-page meta refresh that would
     # reset the animation)
     full = render_index(monkeypatch).data.decode()
-    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     loading = node_status.app.test_client().get("/").data.decode()
     for body in (full, loading):
         assert '<canvas id="tower">' in body
@@ -215,7 +234,7 @@ def test_index_warns_on_low_disk(monkeypatch):
 # --- prometheus metrics ---
 
 def test_metrics_when_node_up(monkeypatch):
-    monkeypatch.setattr(node_status, "get_rpc_data", FAKE_RPC.get)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: FAKE_RPC.get(method))
     monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: BIG_DISK)
     resp = node_status.app.test_client().get("/metrics")
     body = resp.data.decode()
@@ -228,10 +247,18 @@ def test_metrics_when_node_up(monkeypatch):
 
 
 def test_metrics_when_node_down(monkeypatch):
-    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     body = node_status.app.test_client().get("/metrics").data.decode()
     assert "bitcoin_node_up 0" in body
     assert "bitcoin_blocks" not in body
+
+
+def test_metrics_includes_mempool_and_fees(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: FAKE_RPC.get(method))
+    monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: BIG_DISK)
+    body = node_status.app.test_client().get("/metrics").data.decode()
+    assert "bitcoin_mempool_txs 4200" in body
+    assert 'bitcoin_fee_sat_vb{blocks="1"} 10' in body
 
 
 def test_metrics_respects_auth(monkeypatch):
@@ -263,7 +290,7 @@ def test_auth_rejects_wrong_password(monkeypatch):
 
 def test_auth_accepts_correct_password(monkeypatch):
     monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
-    monkeypatch.setattr(node_status, "get_rpc_data", FAKE_RPC.get)
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: FAKE_RPC.get(method))
     monkeypatch.setattr(node_status.shutil, "disk_usage", lambda path: BIG_DISK)
     resp = node_status.app.test_client().get("/", auth=("anyuser", "hunter2"))
     assert resp.status_code == 200

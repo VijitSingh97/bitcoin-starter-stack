@@ -65,8 +65,9 @@ first — a live copy of `chainstate/` is corrupt by construction.
 
 - **Prometheus:** the dashboard serves `/metrics` (text format) — block
   height, headers, verification progress, peers in/out, disk, uptime,
-  pruned flag, and `bitcoin_node_up`. It sits behind the same optional
-  basic auth as the dashboard.
+  pruned flag, `bitcoin_node_up`, and (once synced) mempool size/bytes and
+  `bitcoin_fee_sat_vb` for 1/3/6-block targets. It sits behind the same
+  optional basic auth as the dashboard.
 - **Telegram / Healthchecks.io:** see [Notifications](notifications.md).
 
 ## Self-healing (a deliberate non-feature)

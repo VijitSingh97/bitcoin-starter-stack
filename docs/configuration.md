@@ -27,7 +27,8 @@ The template ([config.example.json](../config.example.json)):
     "notifications": {
         "telegram_bot_token": "",
         "telegram_chat_id": "",
-        "healthchecks_url": ""
+        "healthchecks_url": "",
+        "alert_new_block": false
     }
 }
 ```
@@ -45,6 +46,7 @@ The template ([config.example.json](../config.example.json)):
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
+| `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
 
 `configure.sh` refuses to run while the placeholder credentials are still
 in place, and applies the defaults above for any omitted key.

@@ -16,6 +16,9 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 HEALTHCHECKS_URL = os.environ.get("HEALTHCHECKS_URL", "").strip().rstrip("/")
 NODE_NAME = os.environ.get("NODE_NAME", "bitcoin-node")
+# New-block alerts are opt-in even when Telegram is on — a synced node finds
+# ~144 blocks a day, which is a lot of pings for most operators.
+ALERT_NEW_BLOCK = os.environ.get("ALERT_NEW_BLOCK", "") not in ("", "0", "false", "False")
 
 TOR_PROXY = "socks5h://172.29.0.25:9050"  # socks5h: DNS resolves through Tor too
 PROXIES = {"http": TOR_PROXY, "https": TOR_PROXY}
@@ -109,6 +112,14 @@ def tick(get_blockchain_info, state, disk_path="/data", get_network_info=None):
         if state.get("ibd") and ibd is False:
             send_telegram(f"✅ initial sync complete at height {info.get('blocks')}")
         state["ibd"] = ibd
+
+        # opt-in new-block alert: only when synced, and skip catch-up bursts
+        blocks = info.get("blocks")
+        if isinstance(blocks, int):
+            prev = state.get("last_block")
+            if ALERT_NEW_BLOCK and prev is not None and ibd is False and 0 < blocks - prev <= 6:
+                send_telegram(f"🟧 new block {blocks}")
+            state["last_block"] = blocks
 
         free_gb = shutil.disk_usage(disk_path).free / 1024**3
         if free_gb < DISK_WARN_FREE_GB:

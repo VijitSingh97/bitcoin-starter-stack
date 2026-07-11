@@ -35,6 +35,48 @@ def test_down_alert_is_debounced_and_fires_once(monkeypatch):
     assert len([t for t in cap.telegrams if "down" in t]) == 1
 
 
+# --- opt-in new-block alert ---
+
+def test_new_block_alert_when_enabled_and_synced(monkeypatch):
+    cap = Capture()
+    monkeypatch.setattr(monitor, "ALERT_NEW_BLOCK", True)
+    run_ticks(cap, monkeypatch, [
+        {"initialblockdownload": False, "blocks": 900000},
+        {"initialblockdownload": False, "blocks": 900001},
+    ])
+    assert any("new block 900001" in t for t in cap.telegrams)
+
+
+def test_no_new_block_alert_when_disabled(monkeypatch):
+    cap = Capture()
+    monkeypatch.setattr(monitor, "ALERT_NEW_BLOCK", False)
+    run_ticks(cap, monkeypatch, [
+        {"initialblockdownload": False, "blocks": 900000},
+        {"initialblockdownload": False, "blocks": 900001},
+    ])
+    assert not any("new block" in t for t in cap.telegrams)
+
+
+def test_no_new_block_alert_during_sync(monkeypatch):
+    cap = Capture()
+    monkeypatch.setattr(monitor, "ALERT_NEW_BLOCK", True)
+    run_ticks(cap, monkeypatch, [
+        {"initialblockdownload": True, "blocks": 100},
+        {"initialblockdownload": True, "blocks": 500},
+    ])
+    assert not any("new block" in t for t in cap.telegrams)
+
+
+def test_no_new_block_alert_on_catch_up_burst(monkeypatch):
+    cap = Capture()
+    monkeypatch.setattr(monitor, "ALERT_NEW_BLOCK", True)
+    run_ticks(cap, monkeypatch, [
+        {"initialblockdownload": False, "blocks": 900000},
+        {"initialblockdownload": False, "blocks": 900050},  # +50 > 6, a burst
+    ])
+    assert not any("new block" in t for t in cap.telegrams)
+
+
 def test_no_alert_on_momentary_blip(monkeypatch):
     cap = Capture()
     run_ticks(cap, monkeypatch, [None, None, HEALTHY])

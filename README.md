@@ -80,6 +80,8 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Sync progress** — block height vs. headers, with a progress bar.
 - **Peers** — total connections, inbound vs. outbound.
 - **Disk** — chain size on disk vs. drive capacity.
+- **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
+  blocks (once synced).
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.

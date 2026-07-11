@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-07-11
+
+### Added
+
+- **Mempool & fees on the dashboard** (and `/metrics`): transaction backlog
+  (count + size) and sat/vB fee estimates for the next / ~30-min / ~1-hour
+  blocks. Shown only once synced (`estimatesmartfee` has no data during
+  initial block download). New Prometheus series `bitcoin_mempool_txs`,
+  `bitcoin_mempool_bytes`, and `bitcoin_fee_sat_vb{blocks="1|3|6"}`.
+- **Opt-in new-block Telegram alert** (`notifications.alert_new_block`,
+  default off): a 🟧 alert as the node accepts each new block once synced.
+  Off by default because a synced node finds ~144 blocks a day; skips the
+  catch-up burst during sync.
+- **Supply-chain lint in CI**: gitleaks (secret scan) and hadolint
+  (Dockerfile lint), plus GitHub issue/PR templates and a code of conduct.
+
 ## [1.6.0] - 2026-07-11
 
 ### Changed
@@ -162,6 +178,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.7.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.7.0
 [1.6.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.6.0
 [1.5.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.5.0
 [1.4.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.4.0

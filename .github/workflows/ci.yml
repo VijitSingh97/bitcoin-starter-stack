@@ -15,6 +15,14 @@ jobs:
       - name: ShellCheck
         run: shellcheck configure.sh stack build/tor/entrypoint.sh scripts/*.sh tests/*.sh
 
+      - name: Secret scan (gitleaks)
+        run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.21.2
+          detect --no-git --source=/repo --config=/repo/.gitleaks.toml --redact --verbose
+
+      - name: Lint Dockerfiles (hadolint)
+        run: docker run --rm -v "$PWD":/repo -w /repo hadolint/hadolint:v2.12.0
+          hadolint build/tor/Dockerfile build/dashboard/Dockerfile
+
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14"
