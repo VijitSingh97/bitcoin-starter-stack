@@ -22,4 +22,10 @@ else
   echo "SKIP: dashboard unit tests (pip install -r build/dashboard/requirements.txt pytest)"
 fi
 
+if command -v node >/dev/null; then
+  node --test build/dashboard/static/*.test.mjs
+else
+  echo "SKIP: frontend unit tests (node not installed)"
+fi
+
 echo "All tests passed."

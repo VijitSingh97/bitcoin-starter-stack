@@ -24,6 +24,9 @@ jobs:
           pip install -r build/dashboard/requirements.txt pytest
           python -m pytest build/dashboard/tests -q
 
+      - name: Frontend unit tests
+        run: node --test build/dashboard/static/*.test.mjs
+
       # Runs the configure.sh e2e, the compose contract test, and the
       # full-stack boot test (which builds the images) — same as local.
       - name: Stack tests

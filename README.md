@@ -81,6 +81,8 @@ Open the dashboard at `http://localhost:8000`, or from another machine on your L
 - **Peers** — total connections, inbound vs. outbound.
 - **Disk** — chain size on disk vs. drive capacity.
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
+- **Theme** — follows your system light/dark setting; the top-right toggle cycles
+  Auto → Light → Dark and remembers your choice.
 
 The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
 `8000` to the internet.

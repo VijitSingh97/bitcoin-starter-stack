@@ -99,22 +99,23 @@ def index():
         return render_template_string("""
             <html>
             <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
                 <meta http-equiv="refresh" content="5">
-                <style>
-                    body { font-family: sans-serif; background: #0f0f0f; color: #e0e0e0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .loading-card { background: #1a1a1a; padding: 30px; border-radius: 12px; border: 1px solid #f2a900; text-align: center; }
-                    .spinner { border: 4px solid #333; border-top: 4px solid #f2a900; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                </style>
+                <title>Bitcoin Node Status</title>
+                <link rel="stylesheet" href="/static/dashboard.css">
+                <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
             </head>
-            <body>
+            <body class="center-screen">
+                <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
                 <div class="loading-card">
-                    <h2 style="color: #f2a900;">Bitcoin Node Initializing</h2>
+                    <h2>Bitcoin Node Initializing</h2>
                     <div class="spinner"></div>
                     <p>Connecting to RPC at 172.29.0.26...</p>
-                    <p style="color: #888; font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
-                    <p style="color: #444; font-size: 0.7rem;">{{version}}</p>
+                    <p style="color: var(--muted); font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
+                    <p style="color: var(--faint); font-size: 0.7rem;">{{version}}</p>
                 </div>
+                <script type="module" src="/static/theme.js"></script>
             </body>
             </html>
         """, version=version_label())
@@ -158,27 +159,15 @@ def index():
     return render_template_string("""
     <html>
     <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Bitcoin Node Status</title>
         <meta http-equiv="refresh" content="30">
-        <style>
-            body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e0e0e0; display: flex; justify-content: center; padding-top: 50px; }
-            .card { background: #1a1a1a; border-radius: 12px; padding: 25px; width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.8); border: 1px solid #333; position: relative; }
-            h2 { color: #f2a900; margin-top: 0; font-size: 1.5rem; border-bottom: 1px solid #333; padding-bottom: 10px; }
-            .row { display: flex; justify-content: space-between; margin: 12px 0; font-family: monospace; font-size: 0.95rem; }
-            .label { color: #888; }
-            .peer-box { display: flex; gap: 10px; font-size: 0.8rem; margin-top: -5px; margin-bottom: 10px; }
-            .peer-tag { background: #222; padding: 2px 8px; border-radius: 4px; border: 1px solid #444; }
-            .in { color: #4caf50; }
-            .out { color: #2196f3; }
-            .badge { background: #333; color: #f2a900; border: 1px solid #f2a900; border-radius: 4px; font-size: 0.6em; padding: 2px 8px; vertical-align: middle; margin-left: 8px; }
-            .warn { color: #ff5252; font-weight: bold; }
-            .progress-bg { background: #333; height: 10px; border-radius: 5px; margin: 15px 0; overflow: hidden; }
-            .progress-fill { background: #f2a900; height: 100%; width: {{stats.progress}}%; transition: width 1s; }
-            hr { border: 0; border-top: 1px solid #333; margin: 20px 0; }
-            .footer { color: #444; font-size: 0.7rem; text-align: center; margin-top: 10px; display: flex; justify-content: space-between; }
-        </style>
+        <link rel="stylesheet" href="/static/dashboard.css">
+        <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
     </head>
-    <body>
+    <body class="center">
+        <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
         <div class="card">
             <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
             <div class="row"><span class="label">Bitcoin Core:</span> <span>{{stats.version}}</span></div>
@@ -190,7 +179,7 @@ def index():
             </div>
             <hr>
             <div class="row"><span class="label">Blocks:</span> <span>{{stats.blocks}} / {{stats.headers}}</span></div>
-            <div class="progress-bg"><div class="progress-fill"></div></div>
+            <div class="progress-bg"><div class="progress-fill" style="width: {{stats.progress}}%"></div></div>
             <div class="row"><span class="label">Sync Progress:</span> <span>{{stats.progress}}%</span></div>
             <hr>
             <div class="row"><span class="label">Node Data Size:</span> <span>{{stats.node_gb}} GB</span></div>
@@ -204,6 +193,7 @@ def index():
                 <span>Auto-refresh: 30s</span>
             </div>
         </div>
+        <script type="module" src="/static/theme.js"></script>
     </body>
     </html>
     """, stats=stats)

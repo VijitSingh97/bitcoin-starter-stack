@@ -135,6 +135,37 @@ def test_update_badge_shows_when_update_available(monkeypatch):
     assert "built-in method" not in body
 
 
+# --- theming ---
+
+def test_theme_wired_on_both_pages(monkeypatch):
+    # theme-init runs before paint (no flash), the toggle button and the
+    # module are present, and no palette is hard-coded in the page anymore
+    full = render_index(monkeypatch).data.decode()
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda method: None)
+    loading = node_status.app.test_client().get("/").data.decode()
+    for body in (full, loading):
+        assert '/static/dashboard.css' in body
+        assert 'data-theme' in body
+        assert 'id="theme-toggle"' in body
+        assert '/static/theme.js' in body
+        assert '#0f0f0f' not in body  # colours live in the stylesheet now
+
+
+def test_static_css_and_js_are_served():
+    client = node_status.app.test_client()
+    css = client.get("/static/dashboard.css")
+    assert css.status_code == 200
+    assert b"--accent" in css.data
+    js = client.get("/static/theme.js")
+    assert js.status_code == 200
+    assert b"nextTheme" in js.data
+
+
+def test_static_assets_respect_auth(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    assert node_status.app.test_client().get("/static/dashboard.css").status_code == 401
+
+
 # --- pruned badge and disk warning ---
 
 def test_index_shows_pruned_badge(monkeypatch):
