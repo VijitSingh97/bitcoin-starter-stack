@@ -60,6 +60,24 @@ body {
   pointer-events: none;
 }
 
+#tower-label {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+#tower-label b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .center {
   display: flex;
   justify-content: center;
@@ -173,6 +191,24 @@ hr {
   margin-top: 10px;
   display: flex;
   justify-content: space-between;
+}
+
+.spark-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 12px;
+}
+
+.spark-row .label {
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+.spark {
+  width: 180px;
+  height: 28px;
 }
 
 .loading-card {

@@ -183,8 +183,27 @@ def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
         assert 'id="live"' in body
         assert '/static/refresh.js' in body
         assert 'http-equiv="refresh"' not in body
-    # the live panel carries the block height so the tower can build from it
+    # the live panel carries the counts the tower + label build from
     assert 'data-blocks="900000"' in full
+    assert 'data-day-blocks="' in full
+    assert 'data-next-block="900001"' in full  # the block being loaded
+    assert 'id="tower-label"' in full
+    # sparklines
+    assert 'id="spark-height"' in full
+    assert 'id="spark-fee"' in full
+    assert '/static/sparkline.js' in full
+
+
+def test_api_history_endpoint(monkeypatch):
+    body = node_status.app.test_client().get("/api/history")
+    assert body.status_code == 200
+    data = body.get_json()
+    assert set(["t", "height", "fee", "blocks_today", "latest_height"]).issubset(data)
+
+
+def test_api_history_respects_auth(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    assert node_status.app.test_client().get("/api/history").status_code == 401
 
 
 def test_tower_and_refresh_assets_served():

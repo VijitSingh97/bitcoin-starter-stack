@@ -69,6 +69,10 @@ first — a live copy of `chainstate/` is corrupt by construction.
   `bitcoin_fee_sat_vb` for 1/3/6-block targets. It sits behind the same
   optional basic auth as the dashboard.
 - **Telegram / Healthchecks.io:** see [Notifications](notifications.md).
+- **Sparklines:** the dashboard samples height + fee once a minute into an
+  in-memory 24-hour series (reset on restart) and draws them as sparklines;
+  it also backs the tower's day count. Served at `/api/history` (behind the
+  same optional auth) if you want the raw JSON.
 
 ## Self-healing (a deliberate non-feature)
 

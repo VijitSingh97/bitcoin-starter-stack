@@ -1,47 +1,46 @@
-// A live tower of the blockchain: a 12x12 layer is 144 blocks — about one
-// day (a block every ~10 min). Each real block adds a cube to the top layer;
-// when a layer fills (a full day), the tower is pushed down a level and the
-// oldest layers slide off the bottom of the page. During initial sync, blocks
-// pour in and the tower builds up fast. Colours follow the bitcoin accent and
-// the light/dark theme.
+// A live tower of the blockchain, read as a day-clock. A 12x12 layer is one
+// UTC day: the first cube is the first block after 00:00, and cubes fill as
+// blocks arrive through the day (~144 of them). At the next midnight the day
+// completes, the tower is pushed down a level, and a fresh day starts on top.
+// The header reads "loading block N" — the next block the network is working
+// on. Colours follow the bitcoin accent and the light/dark theme.
 //
-// The block height is read from the #live panel's data-blocks attribute, which
-// the server renders and refresh.js keeps current. Pure model helpers are
+// The dashboard renders the counts onto #live (data-day-blocks, data-blocks,
+// data-next-block) and refresh.js keeps them current. Pure helpers are
 // exported for tower.test.mjs; the canvas wiring is guarded on `document`.
 export const GRID = 12;
 export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
+const ROLLOVER_DROP = 12; // a fall this far below the shown fill = a new day (or restart)
 
-// Split a height into a completed-layer count and the fill of the top layer.
-export function layerFill(height, perLayer = PER_LAYER) {
-  const h = Math.max(0, height);
-  return { layer: Math.floor(h / perLayer), fill: h - Math.floor(h / perLayer) * perLayer };
-}
-
-// Fill order of cube `index` (0..143) within a layer: row by row, back to
-// front, so the layer accretes toward the viewer.
+// Fill order of cube `index` (0..143): row by row, back to front.
 export function gridCell(index, cols = GRID) {
   return { gx: index % cols, gy: Math.floor(index / cols) };
 }
 
-// Ease the displayed height toward the real one: snap on a dip (reorg), rip
-// upward when far behind (initial sync), and let a single new block drift in
-// over ~0.8s when synced.
+// A big drop in the day's block count means the day rolled over (or the
+// container restarted) — the layer should complete and a fresh one begin.
+export function isRollover(target, displayed) {
+  return target < displayed - ROLLOVER_DROP;
+}
+
+// Ease the shown fill toward the target: snap a small dip, rip up a big jump
+// (a fresh page mid-day), drift a single new block in over ~0.8s.
 export function nextDisplayed(current, target, dtMs) {
   if (target <= current) return target;
   const gap = target - current;
-  const perMs = gap > 2 * PER_LAYER ? 0.36 : 0.00125; // 360/s catching up, ~1.25/s synced
+  const perMs = gap > 24 ? 0.06 : 0.00125; // catch up vs. a single block drifting in
   return Math.min(target, current + perMs * dtMs);
 }
 
-// Screen point of lattice vertex (gx, gy) at height z.
 export function project(gx, gy, z, tw, bh, ox, oy) {
   return { x: ox + (gx - gy) * (tw / 2), y: oy + (gx + gy) * (tw / 4) - z * bh };
 }
 
-// Horizontal placement + tile size for width W. Below 900px (mobile) the
-// tower centres behind the card. Above it, the card sits on the left and the
-// tower is centred in the space to its right, with the tile size shrunk so
-// the whole footprint clears the card zone (no overlap).
+export function smooth(t) {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
 export function towerLayout(W, cols = GRID) {
   if (W < 900) {
     return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
@@ -51,18 +50,14 @@ export function towerLayout(W, cols = GRID) {
   return { wide: true, ox: (cardZone + W) / 2, tw };
 }
 
-export function smooth(t) {
-  const x = Math.min(1, Math.max(0, t));
-  return x * x * (3 - 2 * x);
-}
-
 if (typeof document !== "undefined") {
   const canvas = document.getElementById("tower");
   const ctx = canvas && canvas.getContext("2d");
+  const label = document.getElementById("tower-label");
   if (ctx) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const N = GRID;
-    const PUSH_MS = 800; // layer-complete push-down duration
+    const PUSH_MS = 800;
 
     let W = 0, H = 0, dpr = 1;
     function resize() {
@@ -86,15 +81,16 @@ if (typeof document !== "undefined") {
     }
     function palette() {
       return effectiveLight()
-        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#b98a2e", empty: "#c9962e", edge: "#9c6500", alpha: 0.55, glow: 0 }
+        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", alpha: 0.55, glow: 0 }
         : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", alpha: 0.95, glow: 10 };
     }
 
-    // The real block height, or null on the loading page (RPC not up yet).
-    function realHeight() {
+    const liveData = () => {
       const el = document.getElementById("live");
-      const b = el && el.dataset ? el.dataset.blocks : "";
-      const n = parseInt(b, 10);
+      return (el && el.dataset) || {};
+    };
+    function dayBlocks() {
+      const n = parseInt(liveData().dayBlocks, 10);
       return Number.isFinite(n) ? n : null;
     }
 
@@ -112,64 +108,60 @@ if (typeof document !== "undefined") {
       ctx.shadowBlur = 0;
     }
 
-    let displayed = null;   // eased height
-    let lastLayer = null;   // to detect a completed layer
-    let pushStart = -1e9;   // time the last push-down began
-    let synthetic = 0;      // fallback build when no real height yet
+    let displayed = null;   // eased fill of today's layer
+    let pushStart = -1e9;   // time the last day-rollover push began
+    let synthetic = 0;      // gentle fill before the node is up
     let prev = performance.now();
 
     function render(now) {
       const dt = Math.min(100, now - prev);
       prev = now;
 
-      // resolve the target height (real, else a slow synthetic climb)
-      let target = realHeight();
+      let target = dayBlocks();
       if (target === null) {
-        synthetic += dt * 0.0006; // ~1 block / 1.6s on the loading screen
-        target = Math.floor(synthetic);
-      } else if (displayed === null) {
-        displayed = Math.max(0, target - 300); // brief intro build on first load
+        synthetic = (synthetic + dt * 0.004) % PER_LAYER; // slow loop on the loading screen
+        target = synthetic;
       }
       if (displayed === null) displayed = target;
-      displayed = nextDisplayed(displayed, target, dt);
-
-      const { layer: L, fill } = layerFill(displayed);
-      if (lastLayer !== null && L !== lastLayer) pushStart = now;
-      lastLayer = L;
+      if (isRollover(target, displayed)) {
+        pushStart = now;        // animate the finished day sliding down
+        displayed = target;     // begin the new day
+      } else {
+        displayed = nextDisplayed(displayed, target, dt);
+      }
+      const fill = Math.max(0, Math.min(PER_LAYER, displayed));
 
       ctx.clearRect(0, 0, W, H);
       const pal = palette();
       const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
-      const anchorY = H * 0.6;                 // top layer's centre sits here
-      const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0
+      const anchorY = H * 0.6;
+      const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0 after a rollover
 
-      // vertex of cell (gx,gy) on the top surface of layer `k` (k=L is the
-      // in-progress top; smaller k are completed layers below)
+      // vertex of cell (gx,gy) on the top surface of layer `k` (0 = today's
+      // top; negative below is a finished day)
       const p = (gx, gy, k) =>
-        project(gx, gy, 0, tw, bh, ox, anchorY + (L - k) * bh - push - N * (tw / 4));
+        project(gx, gy, 0, tw, bh, ox, anchorY + (0 - k) * bh - push - N * (tw / 4));
 
-      // completed layers below the top, near-to-far so lower ones sit behind
+      // finished days below, near-to-far
       const visible = Math.min(22, Math.ceil((H - anchorY) / bh) + 2);
       for (let d = visible; d >= 1; d--) {
-        const k = L - d;
-        if (k < 0) continue;
         const fade = Math.max(0.15, 1 - d * 0.06);
         ctx.globalAlpha = pal.alpha * fade;
         for (let i = 0; i < N; i++) {
-          poly([p(i, N, k), p(i + 1, N, k), p(i + 1, N, k - 1), p(i, N, k - 1)], pal.side, pal.edge, 0);
+          poly([p(i, N, -d), p(i + 1, N, -d), p(i + 1, N, -d - 1), p(i, N, -d - 1)], pal.side, pal.edge, 0);
         }
         for (let j = 0; j < N; j++) {
-          poly([p(N, j, k), p(N, j + 1, k), p(N, j + 1, k - 1), p(N, j, k - 1)], pal.dark, pal.edge, 0);
+          poly([p(N, j, -d), p(N, j + 1, -d), p(N, j + 1, -d - 1), p(N, j, -d - 1)], pal.dark, pal.edge, 0);
         }
       }
 
-      // in-progress top layer: a 12x12 grid filling cube by cube
+      // today's layer: a 12x12 grid filling one cube per block
       const done = Math.floor(fill);
       const frac = fill - done;
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
-        const face = [p(gx, gy, L), p(gx + 1, gy, L), p(gx + 1, gy + 1, L), p(gx, gy + 1, L)];
+        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
         if (idx < done) {
           ctx.globalAlpha = pal.alpha;
           poly(face, pal.top, pal.edge, pal.glow);
@@ -178,17 +170,29 @@ if (typeof document !== "undefined") {
           poly(face, pal.top, pal.edge, pal.glow);
         } else {
           ctx.globalAlpha = pal.alpha * 0.5;
-          poly(face, pal.empty, pal.grid, 0); // waiting slot
+          poly(face, pal.empty, pal.grid, 0);
         }
       }
       ctx.globalAlpha = 1;
+
+      // "loading block N" header above the tower's back corner
+      if (label) {
+        const next = liveData().nextBlock;
+        if (next) {
+          const topY = p(0, 0, 0).y;
+          label.style.left = ox + "px";
+          label.style.top = Math.max(8, topY - 40) + "px";
+          label.innerHTML = 'loading block <b>' + next + "</b>";
+          label.style.opacity = "1";
+        } else {
+          label.style.opacity = "0";
+        }
+      }
     }
 
-    if (reduce) {
-      prev = performance.now();
-      render(performance.now()); // one static frame
-    } else {
-      const FRAME_MS = 1000 / 30; // 30fps is plenty and halves the CPU
+    render(performance.now()); // one static frame (also covers a hidden tab)
+    if (!reduce) {
+      const FRAME_MS = 1000 / 30;
       let last = 0;
       const frame = (now) => {
         requestAnimationFrame(frame);
