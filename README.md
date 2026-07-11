@@ -81,14 +81,14 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Peers** — total connections, inbound vs. outbound.
 - **Disk** — chain size on disk vs. drive capacity.
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
-  blocks (once synced).
+  blocks (once synced), each with a 24-hour sparkline.
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
-- **Live block tower** — a 12×12 layer is 144 blocks (about a day). Each new block the
-  node accepts drops a cube into the top layer; when a day fills, the tower is pushed
-  down and the oldest layers slide off the page. It builds up fast while syncing.
-  Theme-aware and paused for `prefers-reduced-motion`.
+- **Live block tower** — a day-clock: a 12×12 layer is one day (~144 blocks). The first cube
+  is the first block after 00:00, and cubes fill as blocks arrive through the day; at midnight
+  the day is pushed down and a fresh one starts. A **loading block N** header shows the next
+  block. Theme-aware and paused for `prefers-reduced-motion`.
 
 The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
 `80` to the internet.

@@ -7,6 +7,7 @@ from flask import Flask, render_template_string, request, Response
 from datetime import datetime
 
 import monitor
+import history
 
 app = Flask(__name__)
 
@@ -61,6 +62,28 @@ def format_uptime(seconds):
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     return f"{days}d {hours}h {minutes}m" if days > 0 else f"{hours}h {minutes}m"
+
+def sample_history():
+    """Record one height + fee sample (called once a minute by the sampler)."""
+    bc = get_rpc_data("getblockchaininfo")
+    if bc and not bc.get("initialblockdownload", False):
+        history.record(bc.get("blocks"), fee_sat_vb(1))
+
+
+def sampler_loop():
+    import time
+    while True:
+        try:
+            sample_history()
+        except Exception as e:
+            print(f"Sampler failed: {e}")
+        time.sleep(60)
+
+
+@app.route('/api/history')
+def api_history():
+    return history.snapshot()
+
 
 @app.route('/metrics')
 def metrics():
@@ -127,6 +150,7 @@ def index():
             </head>
             <body class="center-screen">
                 <canvas id="tower"></canvas>
+                <div id="tower-label"></div>
                 <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
                 <div id="live">
                 <div class="loading-card">
@@ -186,6 +210,8 @@ def index():
         "fee_next": fees.get(1),
         "fee_30m": fees.get(3),
         "fee_hour": fees.get(6),
+        "day_blocks": history.snapshot()["blocks_today"],
+        "next_block": (blockchain.get("blocks") + 1) if isinstance(blockchain.get("blocks"), int) else "",
         "last_update": last_update,
         # not "update": Jinja resolves stats.update to the dict METHOD, which
         # is always truthy and renders as its repr
@@ -203,8 +229,9 @@ def index():
     </head>
     <body class="center">
         <canvas id="tower"></canvas>
-        <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
-        <div id="live" data-blocks="{{stats.blocks}}">
+                <div id="tower-label"></div>
+                <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+        <div id="live" data-blocks="{{stats.blocks}}" data-day-blocks="{{stats.day_blocks}}" data-next-block="{{stats.next_block}}">
         <div class="card">
             <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
             <div class="row"><span class="label">Bitcoin Core:</span> <span>{{stats.version}}</span></div>
@@ -218,6 +245,7 @@ def index():
             <div class="row"><span class="label">Blocks:</span> <span>{{stats.blocks}} / {{stats.headers}}</span></div>
             <div class="progress-bg"><div class="progress-fill" style="width: {{stats.progress}}%"></div></div>
             <div class="row"><span class="label">Sync Progress:</span> <span>{{stats.progress}}%</span></div>
+            <div class="spark-row"><span class="label">Height (24h)</span><canvas class="spark" id="spark-height"></canvas></div>
             <hr>
             <div class="row"><span class="label">Node Data Size:</span> <span>{{stats.node_gb}} GB</span></div>
             <div class="row"><span class="label">Disk Capacity:</span> <span>{{stats.total_gb}} GB</span></div>
@@ -227,6 +255,7 @@ def index():
             <hr>
             <div class="row"><span class="label">Mempool:</span> <span>{{stats.mempool_txs}} tx &middot; {{stats.mempool_mb}} MB</span></div>
             <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{stats.fee_next or '—'}} / {{stats.fee_30m or '—'}} / {{stats.fee_hour or '—'}}</span></div>
+            <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
@@ -238,6 +267,7 @@ def index():
         </div>
         <script type="module" src="/static/tower.js"></script>
         <script type="module" src="/static/theme.js"></script>
+        <script type="module" src="/static/sparkline.js"></script>
         <script type="module" src="/static/refresh.js"></script>
     </body>
     </html>
@@ -255,4 +285,6 @@ if __name__ == '__main__':
         ),
         daemon=True,
     ).start()
+    # records height + fee once a minute for the sparklines and the tower's day count
+    threading.Thread(target=sampler_loop, daemon=True).start()
     app.run(host='0.0.0.0', port=8000)

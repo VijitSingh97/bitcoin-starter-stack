@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-07-11
+
+### Added
+
+- **Fee and block-height sparklines.** The dashboard samples height + fee
+  once a minute into an in-memory 24-hour series and draws a sparkline under
+  each. Served as JSON at `/api/history` (behind the dashboard's optional
+  auth).
+- **The tower is now a day-clock.** A 12×12 layer is one UTC day: the first
+  cube is the first block after 00:00, cubes fill as blocks arrive through
+  the day, and at midnight the day is pushed down and a fresh one starts
+  (driven by the real "blocks so far today" count, not a fixed block index).
+- **"loading block N" header** above the tower — the next block the network
+  is working on.
+
 ## [1.8.0] - 2026-07-11
 
 ### Changed
@@ -191,6 +206,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.9.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.9.0
 [1.8.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.8.0
 [1.7.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.7.0
 [1.6.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.6.0
