@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.2] - 2026-07-12
+
+### Fixed
+
+- **The update checker only alerts on a strictly newer version now.** It
+  compared the running version against the latest release with `!=`, so if
+  the box was briefly ahead of the GitHub "latest release" (e.g. right after
+  a deploy, before the API propagated), it would report the *older* release
+  as "available" — "🆕 stack v1.12.0 available (running v1.12.1)". Now it
+  compares numeric version parts and stays quiet unless a genuinely newer
+  release exists. Same fix for the Bitcoin Core check.
+
 ## [1.12.1] - 2026-07-12
 
 ### Fixed
@@ -280,6 +292,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.12.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.2
 [1.12.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.1
 [1.12.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.0
 [1.11.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.1

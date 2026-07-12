@@ -7,6 +7,7 @@ the box can never report. Both are off until configured, and both ride the
 stack's Tor SOCKS proxy so neither is a clearnet beacon.
 """
 import os
+import re
 import shutil
 import time
 
@@ -76,13 +77,26 @@ def _latest_release_tag(url):
     return ""
 
 
+def _newer(latest, current):
+    """Is `latest` a strictly higher version than `current`? Compares the
+    numeric parts, so "31.1" is not newer than "31.1.0" (same release, the
+    running one just carries a patch digit) and an *older* tag never alerts."""
+    nums = lambda v: [int(x) for x in re.findall(r"\d+", v or "")]
+    try:
+        return nums(latest) > nums(current)
+    except Exception:
+        return False
+
+
 def check_updates(subversion, state):
-    """Informational only — a 🆕 alert and a dashboard badge, never an auto-update."""
+    """Informational only — a 🆕 alert and a dashboard badge, never an auto-update.
+    Alerts only when a strictly newer version exists (never when the box is
+    ahead of or level with the latest release)."""
     global update_available
     notes = []
 
     latest_stack = _latest_release_tag(STACK_RELEASES_URL)
-    if STACK_VERSION and latest_stack and latest_stack != STACK_VERSION:
+    if STACK_VERSION and latest_stack and _newer(latest_stack, STACK_VERSION):
         notes.append(f"stack v{latest_stack} available (running v{STACK_VERSION})")
         if state.get("notified_stack") != latest_stack:
             send_telegram(f"🆕 stack v{latest_stack} available (running v{STACK_VERSION})")
@@ -91,8 +105,7 @@ def check_updates(subversion, state):
     # subversion looks like /Satoshi:31.1.0/; release tags like v31.1
     current_core = subversion.strip("/").replace("Satoshi:", "")
     latest_core = _latest_release_tag(CORE_RELEASES_URL)
-    if current_core and latest_core and \
-            not (current_core == latest_core or current_core.startswith(latest_core + ".")):
+    if current_core and latest_core and _newer(latest_core, current_core):
         notes.append(f"Bitcoin Core {latest_core} available (running {current_core})")
         if state.get("notified_core") != latest_core:
             send_telegram(f"🆕 Bitcoin Core {latest_core} available (running {current_core})")
