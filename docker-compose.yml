@@ -76,7 +76,9 @@ services:
         ipv4_address: 172.29.0.26
 
   dashboard:
-    build: ./build/dashboard
+    build:
+      context: .
+      dockerfile: build/dashboard/Dockerfile
     container_name: dashboard
     ports:
       # host port 80 -> container's Flask on 8000

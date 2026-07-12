@@ -144,7 +144,33 @@ def test_index_shows_mempool_and_fees(monkeypatch):
     assert "Mempool:" in body
     assert "4200 tx" in body
     assert "12.0 MB" in body
-    assert "10 / 10 / 10" in body  # 0.0001 BTC/kvB -> 10 sat/vB (same mock for all)
+    assert "10 / 10 / 10" in body  # 0.0001 BTC/kvB -> 10 sat/vB (whole -> no ".0")
+
+
+def test_fee_sat_vb_rounding(monkeypatch):
+    def with_rate(est):
+        monkeypatch.setattr(node_status, "get_rpc_data", lambda m, params=None: est)
+        return node_status.fee_sat_vb(1)
+
+    assert with_rate({"feerate": 0.0001}) == 10  # whole -> int, renders "10" not "10.0"
+    assert isinstance(with_rate({"feerate": 0.0001}), int)
+    assert with_rate({"feerate": 0.00000442}) == 0.4  # sub-1 kept (the "1h = —" bug)
+    assert with_rate({"errors": ["x"]}) is None  # no estimate -> None (shown —), not 0
+    assert with_rate(None) is None
+
+
+def test_index_shows_dash_only_when_no_estimate(monkeypatch):
+    # 1h target returns a sub-1 fee; it must show "0.4", not "—"
+    def rpc(method, params=None):
+        if method == "estimatesmartfee":
+            return {"feerate": 0.00000442} if params[0] == 6 else {"feerate": 0.00001075}
+        return FAKE_RPC.get(method)
+
+    monkeypatch.setattr(node_status, "get_rpc_data", rpc)
+    monkeypatch.setattr(node_status.shutil, "disk_usage", lambda p: BIG_DISK)
+    body = node_status.app.test_client().get("/").data.decode()
+    assert "1.1 / 1.1 / 0.4" in body
+    assert "/ —" not in body  # sub-1 is a number, not a dash
 
 
 def test_index_hides_mempool_during_sync(monkeypatch):

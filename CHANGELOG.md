@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] - 2026-07-12
+
+### Fixed
+
+- **Sub-1 sat/vB fees showed "—".** A quiet-mempool estimate like 0.44 sat/vB
+  was rounded to 0, and 0 rendered as a dash (so "1h" showed "—"). Fees now
+  keep one decimal (e.g. `0.4`); a dash means genuinely no estimate.
+- **The displayed stack version could go stale.** It came from `.env`, so a
+  deploy that ran `docker compose build && up` without re-running
+  `configure.sh` kept an old version (and tripped the update badge). The
+  version is now baked into the dashboard image (`COPY VERSION`; the build
+  context is the repo root), so it always matches the running code.
+
 ## [1.12.0] - 2026-07-11
 
 ### Added
@@ -267,6 +280,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.12.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.1
 [1.12.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.0
 [1.11.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.1
 [1.11.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.0
