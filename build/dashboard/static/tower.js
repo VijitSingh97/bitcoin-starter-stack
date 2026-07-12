@@ -92,8 +92,8 @@ if (typeof document !== "undefined") {
     }
     function palette() {
       return effectiveLight()
-        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#c9962e", empty: "#dcc79a", edge: "#9c6500", alpha: 0.55, glow: 0 }
-        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#5a4413", empty: "#3a2e10", edge: "#ffe08a", alpha: 0.95, glow: 10 };
+        ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#caa250", edge: "#9c6500", alpha: 0.55, glow: 0 }
+        : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#6b5320", edge: "#ffe08a", alpha: 0.95, glow: 10 };
     }
 
     const liveData = () => {
@@ -106,8 +106,10 @@ if (typeof document !== "undefined") {
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
       if (glow) { ctx.shadowBlur = glow; ctx.shadowColor = stroke; }
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 1;
@@ -174,8 +176,10 @@ if (typeof document !== "undefined") {
           ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
           poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
         } else {
-          ctx.globalAlpha = pal.alpha * 0.5;
-          poly(face, pal.empty, pal.grid, 0);
+          // an unfilled slot for later in the day — a faint grid, so it
+          // recedes and doesn't read as a bright cube next to the loading one
+          ctx.globalAlpha = pal.alpha * 0.4;
+          poly(face, null, pal.grid, 0);
         }
       }
       ctx.globalAlpha = 1;
