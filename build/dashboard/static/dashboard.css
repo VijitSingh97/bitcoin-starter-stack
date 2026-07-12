@@ -88,6 +88,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+  align-items: safe center; /* taller-than-viewport content stays top-reachable */
   min-height: 100vh;
 }
 
@@ -99,8 +100,13 @@ body {
   .center-screen {
     justify-content: flex-start;
     align-items: center;
+    /* When the stack is taller than the viewport (short window, or a browser
+       banner eating height), fall back to top-aligned so the header never
+       clips — plain `center` would push the top off-screen, unscrollable. */
+    align-items: safe center;
     min-height: 100vh;
-    padding: 0 0 0 6vw;
+    padding: 24px 0 24px 6vw; /* top/bottom buffer so nothing sits flush */
+    box-sizing: border-box;   /* keep min-height at 100vh incl. the padding */
   }
 }
 
