@@ -11,7 +11,7 @@ WORKDIR /app
 COPY build/dashboard/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY build/dashboard/node_status.py build/dashboard/monitor.py build/dashboard/fee_history.py ./
+COPY build/dashboard/node_status.py build/dashboard/monitor.py build/dashboard/fee_history.py build/dashboard/watch.py ./
 COPY build/dashboard/static ./static
 COPY VERSION ./VERSION
 

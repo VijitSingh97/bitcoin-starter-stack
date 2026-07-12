@@ -33,6 +33,9 @@ telegram_bot_token=$(jq -r '.notifications.telegram_bot_token // empty' config.j
 telegram_chat_id=$(jq -r '.notifications.telegram_chat_id // empty' config.json)
 healthchecks_url=$(jq -r '.notifications.healthchecks_url // empty' config.json)
 alert_new_block=$(jq -r 'if .notifications.alert_new_block == true then 1 else 0 end' config.json)
+# Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
+# pass through .env untouched (no quoting or $-expansion footguns).
+watch_wallets_b64=$(jq -cj '.wallets // []' config.json | base64 | tr -d '\n')
 
 if [ -z "$rpc_user" ] || [ -z "$rpc_password" ]; then
   echo "config.json is missing bitcoin.node_username or bitcoin.node_password."
@@ -100,6 +103,7 @@ HEALTHCHECKS_URL=$healthchecks_url
 ALERT_NEW_BLOCK=$alert_new_block
 NODE_NAME=$(hostname)
 STACK_VERSION=$(cat VERSION 2>/dev/null || echo dev)
+WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
 chmod 600 .env
 

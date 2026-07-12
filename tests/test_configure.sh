@@ -56,6 +56,7 @@ grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not 
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
 grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
+grep -q '^WATCH_WALLETS_B64=W10=$' "$tmp/.env" || fail "empty wallets not rendered as base64 []"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
 
 # 8. rpcauth is a real salted HMAC of the password (re-derive to check)
@@ -74,7 +75,8 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true},
  "dashboard": {"password": "dashpass1", "onion": true},
- "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true}}
+ "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
+ "wallets": [{"name": "Cold storage", "key": "zpub6rFR7", "birthday": "2021-01-01"}]}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir not rendered"
@@ -87,6 +89,10 @@ grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token n
 grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
 grep -q '^ALERT_NEW_BLOCK=1$' "$tmp/.env" || fail "new-block alert not rendered"
+# wallets round-trip through the base64 blob (decode and check the name survived)
+watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
+printf '%s' "$watch_b64" | openssl base64 -d -A | grep -q '"name":"Cold storage"' ||
+  fail "wallets not rendered into WATCH_WALLETS_B64"
 [ -d "$tmp/elsewhere" ] || fail "custom data dir not created"
 
 # 11. Rejects env-file-unsafe notification values and non-URL healthchecks

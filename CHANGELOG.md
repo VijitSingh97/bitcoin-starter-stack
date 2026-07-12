@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] - 2026-07-12
+
+### Added
+
+- **Watch-only balances.** Add public keys to `config.json` (`wallets: [{ name,
+  key, birthday? }]`) and the dashboard shows each balance and a total, read
+  straight off your own node — your addresses never touch a block explorer.
+  `key` accepts an `xpub`/`ypub`/`zpub` (script type inferred from the prefix,
+  SLIP-132 keys converted to the `xpub` Core needs) or a full output descriptor
+  for exact control. The node holds one spend-disabled descriptor wallet per
+  key, so there are no private keys and no spend risk; the first import rescans
+  the chain (bounded by an optional `birthday`) and shows `scanning…` until
+  done. Full node only — a pruned node can't rescan history, so it's skipped
+  there. See [docs/watch-only.md](docs/watch-only.md).
+
 ## [1.12.2] - 2026-07-12
 
 ### Fixed
@@ -292,6 +307,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.13.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.13.0
 [1.12.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.2
 [1.12.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.1
 [1.12.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.0

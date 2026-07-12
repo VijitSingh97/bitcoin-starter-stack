@@ -40,6 +40,9 @@ watching sync progress, peers, and disk usage.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
+- 👀 **Watch-only balances.** Paste in your `xpub`s (or descriptors) and the dashboard shows
+  each balance and a total, read straight off your own node — your addresses never touch a
+  block explorer. Watch-only, so no keys and no spend risk. See [Watch-only](docs/watch-only.md).
 
 ## 🚀 Quick Start
 
@@ -82,6 +85,8 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Disk** — chain size on disk vs. drive capacity.
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
   blocks (once synced), with a 24-hour fee sparkline.
+- **Watch-only balances** — optional per-key balances and a total for any `xpub`/descriptor you
+  add, read off your own node ([Watch-only](docs/watch-only.md)).
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
@@ -124,6 +129,7 @@ the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 | [Getting Started](docs/getting-started.md) | Prerequisites, install, first start, what to expect during sync. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
+| [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
 | [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 
