@@ -187,9 +187,31 @@ def test_tower_and_live_refresh_wired_on_both_pages(monkeypatch):
     assert 'data-blocks="900000"' in full
     assert 'data-next-block="900001"' in full  # the block being loaded
     assert 'id="tower-label"' in full
-    # history/sparklines were removed in the time-based simplification
-    assert 'spark' not in full
-    assert '/api/history' not in full
+    # the fee sparkline is back (fee-only); the tower no longer tracks history
+    assert 'id="spark-fee"' in full
+    assert '/static/sparkline.js' in full
+    assert '/api/history' not in full  # only /api/fees now
+    assert 'id="spark-height"' not in full
+
+
+def test_api_fees_endpoint():
+    body = node_status.app.test_client().get("/api/fees")
+    assert body.status_code == 200
+    assert "fee" in body.get_json()
+
+
+def test_api_fees_respects_auth(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
+    assert node_status.app.test_client().get("/api/fees").status_code == 401
+
+
+def test_favicon_linked_and_served(monkeypatch):
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda m, params=None: None)
+    client = node_status.app.test_client()
+    assert 'rel="icon"' in client.get("/").data.decode()
+    icon = client.get("/static/favicon.svg")
+    assert icon.status_code == 200
+    assert b"<svg" in icon.data
 
 
 def test_tower_and_refresh_assets_served():

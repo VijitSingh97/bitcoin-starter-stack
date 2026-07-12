@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-07-11
+
+### Added
+
+- **Fee sparkline (back).** A 24-hour sparkline of the next-block fee under
+  the fee row, from a small in-memory series sampled once a minute (`fee_history`,
+  served at `/api/fees`). Fee-only — no height series or tower dependency.
+- **Tab favicon** — a bitcoin ₿ mark, so the dashboard is recognisable in a
+  browser tab.
+
 ## [1.11.1] - 2026-07-11
 
 ### Fixed
@@ -257,6 +267,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.12.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.0
 [1.11.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.1
 [1.11.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.0
 [1.10.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.1
