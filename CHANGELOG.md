@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] - 2026-07-11
+
+### Fixed
+
+- Unfilled tower cubes now recede as a faint grid instead of a solid fill —
+  in light mode the "not yet" slots were brighter than the filled gold and
+  read as a highlighted patch next to the pulsing loading cube. Now only the
+  single loading slot stands out.
+
 ## [1.11.0] - 2026-07-11
 
 ### Changed
@@ -248,6 +257,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.11.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.1
 [1.11.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.0
 [1.10.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.1
 [1.10.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.0
