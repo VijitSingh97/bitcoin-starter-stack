@@ -257,6 +257,27 @@ def test_update_alert_for_newer_stack(monkeypatch):
     assert any("stack v1.3.0" in t for t in cap.telegrams)
 
 
+def test_no_alert_when_box_is_ahead_of_latest_release(monkeypatch):
+    # the bug: running v1.12.1 while the API returns an older v1.12.0 must NOT
+    # say "v1.12.0 available" — only a strictly newer release alerts
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "STACK_VERSION", "1.12.1")
+    _patch_releases(monkeypatch, "1.12.0", "31.1")
+    monitor.check_updates("/Satoshi:31.1.0/", {})
+    assert cap.telegrams == []
+    assert monitor.update_available == ""
+
+
+def test_newer_compares_numeric_parts():
+    assert monitor._newer("1.12.1", "1.12.0") is True
+    assert monitor._newer("1.12.0", "1.12.1") is False
+    assert monitor._newer("1.2.0", "1.2.0") is False
+    assert monitor._newer("31.1", "31.1.0") is False  # same release, running has a patch digit
+    assert monitor._newer("32.0", "31.1.0") is True
+    assert monitor._newer("", "1.0.0") is False
+
+
 def test_update_check_survives_api_failure(monkeypatch):
     cap = Capture()
     cap.install(monkeypatch)
