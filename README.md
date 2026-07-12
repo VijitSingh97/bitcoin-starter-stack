@@ -13,7 +13,7 @@ Docker Compose stack for a [Bitcoin Core](https://bitcoincore.org/) full node wi
 traffic routed through a built-in Tor daemon, plus a lightweight web dashboard for
 watching sync progress, peers, and disk usage.
 
-<img src="./images/dashboard.png" width="55%" alt="Bitcoin node dashboard" />
+<img src="./images/dashboard.png" width="80%" alt="Bitcoin node dashboard: live node status card beside a 3D block tower filling with the day's blocks" />
 
 </div>
 
