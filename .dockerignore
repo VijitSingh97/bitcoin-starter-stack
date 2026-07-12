@@ -1,0 +1,10 @@
+# Keep the dashboard build context (repo root) lean
+.git
+data/
+backups/
+.env
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.venv/
+node_modules/

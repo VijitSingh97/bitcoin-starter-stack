@@ -18,7 +18,23 @@ DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 RPC_URL = 'http://172.29.0.26:8332'
 BITCOIN_DIR = '/data'
 DISK_WARN_FREE_GB = 50
-STACK_VERSION = os.environ.get("STACK_VERSION", "dev")
+
+
+def _read_stack_version():
+    # baked into the image at build time (COPY VERSION), so the displayed
+    # version always matches the running code — not a stale .env value
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")) as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except OSError:
+        pass
+    return os.environ.get("STACK_VERSION", "dev")
+
+
+STACK_VERSION = _read_stack_version()
+monitor.STACK_VERSION = STACK_VERSION  # keep the update-checker in sync
 
 
 def version_label():
@@ -49,10 +65,15 @@ def get_rpc_data(method, params=None):
 
 def fee_sat_vb(blocks):
     # estimatesmartfee returns BTC/kvB (or an error during sync / with too
-    # little data); convert to sat/vB, or None when unavailable
+    # little data); convert to sat/vB (1 decimal, so a quiet-mempool sub-1
+    # estimate shows as e.g. 0.4 rather than rounding to 0), or None when
+    # unavailable
     est = get_rpc_data("estimatesmartfee", [blocks])
     rate = est.get("feerate") if isinstance(est, dict) else None
-    return round(rate * 100000) if rate else None
+    if not rate:
+        return None
+    v = round(rate * 100000, 1)
+    return int(v) if v == int(v) else v  # "10" for a whole value, "0.4" for sub-1
 
 
 def format_uptime(seconds):
@@ -249,7 +270,7 @@ def index():
             {% if stats.show_mempool %}
             <hr>
             <div class="row"><span class="label">Mempool:</span> <span>{{stats.mempool_txs}} tx &middot; {{stats.mempool_mb}} MB</span></div>
-            <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{stats.fee_next or '—'}} / {{stats.fee_30m or '—'}} / {{stats.fee_hour or '—'}}</span></div>
+            <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{ stats.fee_next if stats.fee_next is not none else '—' }} / {{ stats.fee_30m if stats.fee_30m is not none else '—' }} / {{ stats.fee_hour if stats.fee_hour is not none else '—' }}</span></div>
             <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
