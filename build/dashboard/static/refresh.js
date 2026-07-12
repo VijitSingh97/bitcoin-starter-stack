@@ -12,7 +12,11 @@ async function tick() {
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     const next = doc.getElementById("live");
     const cur = document.getElementById("live");
-    if (next && cur) cur.replaceWith(next);
+    if (next && cur) {
+      cur.replaceWith(next);
+      // let the fee sparkline redraw into the fresh canvas
+      window.dispatchEvent(new Event("live-updated"));
+    }
   } catch {
     /* offline or a blip — try again next tick */
   }

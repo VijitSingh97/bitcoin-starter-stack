@@ -7,6 +7,7 @@ from flask import Flask, render_template_string, request, Response
 from datetime import datetime
 
 import monitor
+import fee_history
 
 app = Flask(__name__)
 
@@ -61,6 +62,23 @@ def format_uptime(seconds):
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     return f"{days}d {hours}h {minutes}m" if days > 0 else f"{hours}h {minutes}m"
+
+def fee_sampler_loop():
+    import time
+    while True:
+        try:
+            bc = get_rpc_data("getblockchaininfo")
+            if bc and not bc.get("initialblockdownload", False):
+                fee_history.record(fee_sat_vb(1))
+        except Exception as e:
+            print(f"Fee sampler failed: {e}")
+        time.sleep(60)
+
+
+@app.route('/api/fees')
+def api_fees():
+    return {"fee": fee_history.series()}
+
 
 @app.route('/metrics')
 def metrics():
@@ -122,6 +140,7 @@ def index():
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <title>Bitcoin Node Status</title>
+                <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
                 <link rel="stylesheet" href="/static/dashboard.css">
                 <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
             </head>
@@ -200,6 +219,7 @@ def index():
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Bitcoin Node Status</title>
+                <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
         <link rel="stylesheet" href="/static/dashboard.css">
         <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
     </head>
@@ -230,6 +250,7 @@ def index():
             <hr>
             <div class="row"><span class="label">Mempool:</span> <span>{{stats.mempool_txs}} tx &middot; {{stats.mempool_mb}} MB</span></div>
             <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{stats.fee_next or '—'}} / {{stats.fee_30m or '—'}} / {{stats.fee_hour or '—'}}</span></div>
+            <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
@@ -241,6 +262,7 @@ def index():
         </div>
         <script type="module" src="/static/tower.js"></script>
         <script type="module" src="/static/theme.js"></script>
+        <script type="module" src="/static/sparkline.js"></script>
         <script type="module" src="/static/refresh.js"></script>
     </body>
     </html>
@@ -258,4 +280,6 @@ if __name__ == '__main__':
         ),
         daemon=True,
     ).start()
+    # records the next-block fee once a minute for the sparkline
+    threading.Thread(target=fee_sampler_loop, daemon=True).start()
     app.run(host='0.0.0.0', port=8000)
