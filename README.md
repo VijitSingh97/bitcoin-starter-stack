@@ -40,9 +40,10 @@ watching sync progress, peers, and disk usage.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- 👀 **Watch-only balances.** Paste in your `xpub`s (or descriptors) and the dashboard shows
-  each balance and a total, read straight off your own node — your addresses never touch a
-  block explorer. Watch-only, so no keys and no spend risk. See [Watch-only](docs/watch-only.md).
+- 👀 **Watch-only balances.** Add your `xpub`s (or descriptors) right in the dashboard — each
+  balance and a total, read straight off your own node, your addresses never touching a block
+  explorer. Add and remove them from the UI; watch-only, so no keys and no spend risk. See
+  [Watch-only](docs/watch-only.md).
 
 ## 🚀 Quick Start
 
@@ -85,8 +86,8 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Disk** — chain size on disk vs. drive capacity.
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
   blocks (once synced), with a 24-hour fee sparkline.
-- **Watch-only balances** — optional per-key balances and a total for any `xpub`/descriptor you
-  add, read off your own node ([Watch-only](docs/watch-only.md)).
+- **Watch-only balances** — add `xpub`s/descriptors from the UI; per-key balances and a total
+  (shown once you have more than one), read off your own node ([Watch-only](docs/watch-only.md)).
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.

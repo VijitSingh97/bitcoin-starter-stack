@@ -132,9 +132,52 @@ h2 {
 }
 
 .label { color: var(--muted); }
-.label.sub { padding-left: 12px; } /* watch-only per-wallet rows */
 .row.total { border-top: 1px solid var(--border); padding-top: 8px; font-weight: 600; }
 .row.total .label { color: var(--text); }
+
+/* watch-only wallets card (stacked under the status card) */
+.stack-col { display: flex; flex-direction: column; gap: 16px; }
+.watch-card h2 { font-size: 1.1rem; }
+.watch-right { display: flex; align-items: center; gap: 10px; }
+.watch-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 2px;
+  line-height: 1;
+}
+.watch-x:hover { color: #ff5252; }
+.watch-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.watch-add input {
+  flex: 1 1 140px;
+  min-width: 0;
+  background: var(--tag-bg);
+  border: 1px solid var(--tag-border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+.watch-add button {
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #1a1a1a;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 7px 16px;
+}
+.watch-add button:disabled { opacity: 0.5; cursor: default; }
+.watch-msg { color: var(--muted); font-size: 0.8rem; margin-top: 8px; min-height: 1em; }
+.watch-warn { color: #e0a800; font-size: 0.75rem; margin-top: 8px; }
 
 .peer-box {
   display: flex;

@@ -350,26 +350,65 @@ def test_auth_accepts_correct_password(monkeypatch):
     assert b"Sync Progress" in resp.data
 
 
-# --- watch-only balances ---
+# --- watch-only wallets (client-rendered card + /api/watch) ---
 
-def test_index_renders_watch_only_section(monkeypatch):
+BIP84_ZPUB = ("zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1"
+              "ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs")
+
+
+def test_index_has_watch_card_and_loads_module(monkeypatch):
+    body = render_index(monkeypatch).data.decode()
+    assert 'id="watch"' in body
+    assert "/static/watch.js" in body
+
+
+def test_api_watch_list_returns_balances_and_total(monkeypatch):
     monkeypatch.setattr(node_status, "WATCH",
-                        [{"name": "Cold storage", "key": "z"}, {"name": "Hot", "key": "z"}])
-
-    def wallet_rpc(wallet, method, params=None, timeout=8):
-        if method == "getwalletinfo":
-            return {"scanning": False} if wallet == "watch_Cold_storage" else {"scanning": {"duration": 5}}
-        return {"mine": {"trusted": 1.5}}
-
-    monkeypatch.setattr(node_status, "get_wallet_data", wallet_rpc)
-    body = render_index(monkeypatch).data.decode()
-    assert "Watch-only balances" in body
-    assert "Cold storage" in body and "1.5 BTC" in body
-    assert "scanning" in body            # the still-rescanning wallet
-    assert "Total" in body and "1.5 BTC" in body
+                        [{"name": "Cold", "key": "z"}, {"name": "Hot", "key": "z"}])
+    monkeypatch.setattr(node_status, "get_wallet_data",
+                        lambda w, m, p=None, timeout=8: {"scanning": False} if m == "getwalletinfo"
+                        else {"mine": {"trusted": 1.0}})
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "")
+    data = node_status.app.test_client().get("/api/watch", headers={"X-Requested-With": "fetch"}).get_json()
+    assert data["show_total"] is True and data["total"] == "2"
+    assert data["has_password"] is False
+    assert [w["name"] for w in data["wallets"]] == ["Cold", "Hot"]
 
 
-def test_index_hides_watch_section_when_none_configured(monkeypatch):
+def test_api_watch_add_requires_csrf_header(monkeypatch):
     monkeypatch.setattr(node_status, "WATCH", [])
-    body = render_index(monkeypatch).data.decode()
-    assert "Watch-only balances" not in body
+    resp = node_status.app.test_client().post("/api/watch", json={"name": "X", "key": BIP84_ZPUB})
+    assert resp.status_code == 403  # no X-Requested-With
+
+
+def test_api_watch_add_rejects_bad_key(monkeypatch):
+    monkeypatch.setattr(node_status, "WATCH", [])
+    resp = node_status.app.test_client().post(
+        "/api/watch", json={"name": "X", "key": "not-a-key"},
+        headers={"X-Requested-With": "fetch"})
+    assert resp.status_code == 400
+
+
+def test_api_watch_add_then_remove(monkeypatch, tmp_path):
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    store = []
+    monkeypatch.setattr(node_status, "WATCH", store)
+    monkeypatch.setattr(node_status.watch, "provision_one", lambda *a, **k: None)  # no rescan
+    calls = []
+
+    def fake_rpc(method, params=None):
+        calls.append((method, params))
+        return {"pruned": False}
+    monkeypatch.setattr(node_status, "get_rpc_data", fake_rpc)
+    client = node_status.app.test_client()
+
+    r = client.post("/api/watch", json={"name": "Cold", "key": BIP84_ZPUB, "birthday": "2021-01-01"},
+                    headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 200 and [w["name"] for w in store] == ["Cold"]
+
+    r = client.delete("/api/watch/Cold", headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 200 and store == []
+    assert ("unloadwallet", ["watch_Cold", False]) in calls  # Core told to unload + forget
+
+    r = client.delete("/api/watch/Cold", headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 404  # already gone

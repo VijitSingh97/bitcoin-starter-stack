@@ -151,6 +151,81 @@ def test_balances_sums_only_ready_wallets():
     assert rows[2]["state"] == "error"
 
 
+def test_balances_view_show_total_only_when_more_than_one():
+    one = [{"name": "A", "key": "z"}]
+    two = [{"name": "A", "key": "z"}, {"name": "B", "key": "z"}]
+    table = {
+        "watch_A": {"getwalletinfo": {"scanning": False}, "getbalances": {"mine": {"trusted": 1}}},
+        "watch_B": {"getwalletinfo": {"scanning": False}, "getbalances": {"mine": {"trusted": 2}}},
+    }
+    assert watch.balances_view(FakeWalletRpc(table), one)["show_total"] is False
+    v = watch.balances_view(FakeWalletRpc(table), two)
+    assert v["show_total"] is True and v["total"] == "3"
+
+
+# --- persistent store + CRUD ---
+
+def test_store_seeds_from_env_then_persists(monkeypatch, tmp_path):
+    path = tmp_path / "wallets.json"
+    monkeypatch.setenv("WATCH_STORE", str(path))
+    blob = [{"name": "Seed", "key": "zpub123", "birthday": "2020-01-01"}]
+    monkeypatch.setenv("WATCH_WALLETS_B64", base64.b64encode(json.dumps(blob).encode()).decode())
+    store = watch.load_store()
+    assert [w["name"] for w in store] == ["Seed"]
+    assert path.exists()  # seed was written through
+    # a second load reads the file, not the env (env authority ends after seed)
+    monkeypatch.delenv("WATCH_WALLETS_B64", raising=False)
+    assert [w["name"] for w in watch.load_store()] == ["Seed"]
+
+
+def test_add_and_remove_entry_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    store = []
+    watch.add_entry(store, "Cold", BIP84_ZPUB, "2021-01-01")
+    assert len(store) == 1 and store[0]["name"] == "Cold"
+    # persisted and reloadable
+    assert [w["name"] for w in watch.load_store()] == ["Cold"]
+    assert watch.remove_entry(store, "Cold") is True
+    assert store == [] and watch.load_store() == []
+    assert watch.remove_entry(store, "Cold") is False  # already gone
+
+
+def test_add_entry_rejects_bad_input(monkeypatch, tmp_path):
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    store = []
+    for bad in [("", BIP84_ZPUB, ""), ("A", "", ""), ("A", "not-a-key", ""),
+                ("A", BIP84_ZPUB, "nonsense-date")]:
+        try:
+            watch.add_entry(store, *bad)
+            assert False, f"accepted bad input {bad}"
+        except ValueError:
+            pass
+    assert store == []  # nothing was saved
+
+
+def test_add_entry_rejects_duplicate_and_cap(monkeypatch, tmp_path):
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    store = []
+    watch.add_entry(store, "Cold", BIP84_ZPUB)
+    try:
+        watch.add_entry(store, "cold", BIP84_ZPUB)  # case-insensitive dup
+        assert False
+    except ValueError:
+        pass
+    monkeypatch.setattr(watch, "MAX_WALLETS", 1)
+    try:
+        watch.add_entry(store, "Hot", BIP84_ZPUB)
+        assert False
+    except ValueError:
+        pass
+
+
+def test_save_store_survives_unwritable_path(monkeypatch):
+    # a missing/unwritable volume must not raise — the dashboard keeps running
+    monkeypatch.setenv("WATCH_STORE", "/nonexistent-dir-xyz/no/perms/w.json")
+    watch.save_store([{"name": "A", "key": "z", "birthday": ""}])  # no exception
+
+
 # --- wallet provisioning ---
 
 class FakeRpc:
@@ -185,15 +260,36 @@ def test_ensure_creates_and_imports_new_wallet():
 
 
 def test_ensure_skips_already_loaded_wallet():
-    rpc = FakeRpc(existing=["watch_Cold"])
-    watch.ensure_wallets(rpc, lambda *a, **k: None, [{"name": "Cold", "key": BIP84_ZPUB}])
-    assert [c[0] for c in rpc.calls] == ["listwallets"]  # nothing created
-
-
-def test_ensure_is_a_noop_on_pruned_node():
     rpc = FakeRpc()
-    watch.ensure_wallets(rpc, lambda *a, **k: None, [{"name": "Cold", "key": BIP84_ZPUB}], pruned=True)
-    assert rpc.calls == []
+    # getwalletinfo returns a dict -> already loaded -> provision returns at once
+    watch.ensure_wallets(rpc, lambda w, m, p=None: {"scanning": False},
+                         [{"name": "Cold", "key": BIP84_ZPUB}])
+    assert rpc.calls == []  # nothing created or loaded
+
+
+def test_ensure_loads_existing_wallet_without_reimport():
+    # a removed-then-re-added wallet exists on disk: loadwallet succeeds, so we
+    # never re-create or re-import (no second rescan)
+    rpc = FakeRpc()
+    rpc.existing = []  # listwallets unused now
+
+    def rpc_with_load(method, params=None):
+        rpc.calls.append((method, params))
+        if method == "loadwallet":
+            return {"name": params[0]}      # exists on disk -> loads
+        return None
+    watch.ensure_wallets(rpc_with_load, lambda w, m, p=None: None,
+                         [{"name": "Cold", "key": BIP84_ZPUB}])
+    methods = [c[0] for c in rpc.calls]
+    assert "loadwallet" in methods and "createwallet" not in methods
+
+
+def test_ensure_does_not_import_on_pruned_node():
+    rpc = FakeRpc()
+    watch.ensure_wallets(rpc, lambda w, m, p=None: None,
+                         [{"name": "Cold", "key": BIP84_ZPUB}], pruned=True)
+    methods = [c[0] for c in rpc.calls]
+    assert "createwallet" not in methods  # no fresh import while pruned
 
 
 def test_ensure_skips_bad_key_without_crashing_or_orphaning():
