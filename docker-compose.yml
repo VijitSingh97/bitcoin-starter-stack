@@ -93,6 +93,7 @@ services:
       ALERT_NEW_BLOCK: ${ALERT_NEW_BLOCK:-0}
       NODE_NAME: ${NODE_NAME:-bitcoin-node}
       STACK_VERSION: ${STACK_VERSION:-dev}
+      WATCH_WALLETS_B64: ${WATCH_WALLETS_B64:-}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
     restart: unless-stopped

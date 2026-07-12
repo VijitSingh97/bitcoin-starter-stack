@@ -8,6 +8,7 @@ from datetime import datetime
 
 import monitor
 import fee_history
+import watch
 
 app = Flask(__name__)
 
@@ -61,6 +62,21 @@ def get_rpc_data(method, params=None):
         return None
     except Exception as e:
         print(f"RPC Error ({method}): {e}")
+        return None
+
+# Configured watch-only wallets (public keys pasted into config.json). Empty
+# unless the operator adds any, so this is inert for everyone else.
+WATCH = watch.load_config()
+
+def get_wallet_data(wallet, method, params=None, timeout=8):
+    # Wallet-scoped RPC lives at /wallet/<name>. Balance reads are quick;
+    # importdescriptors blocks on a rescan, so that caller passes a long timeout.
+    payload = json.dumps({"jsonrpc": "1.0", "id": "dashboard", "method": method, "params": params or []})
+    try:
+        r = requests.post(f"{RPC_URL}/wallet/{wallet}", auth=(RPC_USER, RPC_PASSWORD), data=payload, timeout=timeout)
+        return r.json().get("result") if r.status_code == 200 else None
+    except Exception as e:
+        print(f"Wallet RPC {method}@{wallet}: {e}")
         return None
 
 def fee_sat_vb(blocks):
@@ -204,6 +220,9 @@ def index():
     mempool = get_rpc_data("getmempoolinfo") if not ibd else None
     fees = {n: fee_sat_vb(n) for n in (1, 3, 6)} if not ibd else {}
 
+    # Watch-only balances, read straight off this node (never a third party)
+    watch_rows, watch_total = watch.balances(get_wallet_data, WATCH) if WATCH else ([], "0")
+
     stats = {
         "version": network.get("subversion", "Unknown") if network else "Unknown",
         "uptime": format_uptime(uptime_seconds),
@@ -228,6 +247,9 @@ def index():
         "fee_30m": fees.get(3),
         "fee_hour": fees.get(6),
         "next_block": (blockchain.get("blocks") + 1) if isinstance(blockchain.get("blocks"), int) else "",
+        "show_watch": bool(WATCH),
+        "watch": watch_rows,
+        "watch_total": watch_total,
         "last_update": last_update,
         # not "update": Jinja resolves stats.update to the dict METHOD, which
         # is always truthy and renders as its repr
@@ -273,6 +295,14 @@ def index():
             <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{ stats.fee_next if stats.fee_next is not none else '—' }} / {{ stats.fee_30m if stats.fee_30m is not none else '—' }} / {{ stats.fee_hour if stats.fee_hour is not none else '—' }}</span></div>
             <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
+            {% if stats.show_watch %}
+            <hr>
+            <div class="row"><span class="label">Watch-only balances</span></div>
+            {% for w in stats.watch %}
+            <div class="row"><span class="label sub">{{w.name}}</span><span>{% if w.state == 'ok' %}{{w.btc}} BTC{% elif w.state == 'scanning' %}scanning…{% else %}—{% endif %}</span></div>
+            {% endfor %}
+            <div class="row total"><span class="label">Total</span><span>{{stats.watch_total}} BTC</span></div>
+            {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
@@ -303,4 +333,22 @@ if __name__ == '__main__':
     ).start()
     # records the next-block fee once a minute for the sparkline
     threading.Thread(target=fee_sampler_loop, daemon=True).start()
+    # provision any watch-only wallets once bitcoind is answering; the first
+    # import rescans the chain, so keep it off the request path
+    if WATCH:
+        import time
+
+        def _watch_setup():
+            while True:
+                chain = get_rpc_data("getblockchaininfo")
+                if chain:
+                    watch.ensure_wallets(
+                        get_rpc_data,
+                        lambda w, m, p=None: get_wallet_data(w, m, p, timeout=3600),
+                        WATCH, pruned=chain.get("pruned", False),
+                    )
+                    return
+                time.sleep(10)  # node still starting
+
+        threading.Thread(target=_watch_setup, daemon=True).start()
     app.run(host='0.0.0.0', port=8000)

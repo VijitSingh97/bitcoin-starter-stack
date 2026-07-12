@@ -29,7 +29,8 @@ The template ([config.example.json](../config.example.json)):
         "telegram_chat_id": "",
         "healthchecks_url": "",
         "alert_new_block": false
-    }
+    },
+    "wallets": []
 }
 ```
 
@@ -47,6 +48,7 @@ The template ([config.example.json](../config.example.json)):
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
+| `wallets` | `[]` | Watch-only public keys to show balances for — each `{ name, key, birthday? }`, where `key` is an `xpub`/`ypub`/`zpub` or a full output descriptor. Full node only. See [Watch-only](watch-only.md). |
 
 `configure.sh` refuses to run while the placeholder credentials are still
 in place, and applies the defaults above for any omitted key.

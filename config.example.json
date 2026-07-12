@@ -16,5 +16,6 @@
         "telegram_chat_id": "",
         "healthchecks_url": "",
         "alert_new_block": false
-    }
+    },
+    "wallets": []
 }

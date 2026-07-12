@@ -21,6 +21,7 @@ export BITCOIN_RPCAUTH_HASH=deadbeef
 export BITCOIN_DATA_DIR=./data/bitcoin
 export BITCOIN_DBCACHE=1234
 export BITCOIN_PRUNE=555
+export WATCH_WALLETS_B64=watchblob
 
 rendered=$(docker compose --env-file /dev/null config)
 
@@ -34,6 +35,7 @@ echo "$rendered" | grep -q 'INBOUND_ONION: "0"' || fail "INBOUND_ONION default n
 echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION default not applied"
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
+echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 
 # The plaintext RPC password reaches ONLY the dashboard (bitcoind gets the
 # rpcauth hash) — exactly one occurrence in the whole rendered config

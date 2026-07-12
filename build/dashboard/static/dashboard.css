@@ -132,6 +132,9 @@ h2 {
 }
 
 .label { color: var(--muted); }
+.label.sub { padding-left: 12px; } /* watch-only per-wallet rows */
+.row.total { border-top: 1px solid var(--border); padding-top: 8px; font-weight: 600; }
+.row.total .label { color: var(--text); }
 
 .peer-box {
   display: flex;

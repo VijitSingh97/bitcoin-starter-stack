@@ -348,3 +348,28 @@ def test_auth_accepts_correct_password(monkeypatch):
     resp = node_status.app.test_client().get("/", auth=("anyuser", "hunter2"))
     assert resp.status_code == 200
     assert b"Sync Progress" in resp.data
+
+
+# --- watch-only balances ---
+
+def test_index_renders_watch_only_section(monkeypatch):
+    monkeypatch.setattr(node_status, "WATCH",
+                        [{"name": "Cold storage", "key": "z"}, {"name": "Hot", "key": "z"}])
+
+    def wallet_rpc(wallet, method, params=None, timeout=8):
+        if method == "getwalletinfo":
+            return {"scanning": False} if wallet == "watch_Cold_storage" else {"scanning": {"duration": 5}}
+        return {"mine": {"trusted": 1.5}}
+
+    monkeypatch.setattr(node_status, "get_wallet_data", wallet_rpc)
+    body = render_index(monkeypatch).data.decode()
+    assert "Watch-only balances" in body
+    assert "Cold storage" in body and "1.5 BTC" in body
+    assert "scanning" in body            # the still-rescanning wallet
+    assert "Total" in body and "1.5 BTC" in body
+
+
+def test_index_hides_watch_section_when_none_configured(monkeypatch):
+    monkeypatch.setattr(node_status, "WATCH", [])
+    body = render_index(monkeypatch).data.decode()
+    assert "Watch-only balances" not in body
