@@ -17,7 +17,11 @@ import base64
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime, timezone
+
+MAX_WALLETS = 20  # bounds rescan abuse from the write endpoints
+_store_lock = threading.Lock()  # guards the shared wallet list + its file
 
 # SLIP-132 extended-key version bytes -> (xpub/tpub version bytes, script
 # template). Core rejects ypub/zpub outright, so we swap the version bytes to
@@ -139,56 +143,63 @@ def load_config():
     return out
 
 
-def ensure_wallets(rpc, wallet_rpc, wallets, pruned=False):
-    """Create + import any not-yet-present watch wallets. Idempotent: skips
-    wallets already loaded, and importdescriptors triggers the one-time rescan
-    (so callers run this off the request path). No-op on a pruned node, whose
-    rescan can't reach historical funds."""
-    if not wallets:
-        return
+def provision_one(rpc, wallet_rpc, entry, pruned=False):
+    """Make one watch wallet ready in Core (idempotent). Loads a wallet that
+    already exists on disk (a re-add — no rescan); otherwise creates it and
+    imports the descriptors, which triggers the one-time rescan (so callers run
+    this off the request path). A new import needs a full node; loading an
+    existing wallet works on a pruned node too."""
+    name = wallet_name(entry["name"])
+    if wallet_rpc(name, "getwalletinfo", []) is not None:
+        return  # already loaded
+    if rpc("loadwallet", [name]) is not None:
+        return  # existed on disk (e.g. removed then re-added) — descriptors already imported
+    # needs a fresh create + import — build descriptors first so a bad key
+    # (typo'd xpub, unknown prefix) raises here, before any wallet is created
+    descs = descriptors_for(entry["key"])
     if pruned:
-        print("watch-only: node is pruned — a full node is needed to rescan "
-              "historical balances; skipping wallet import")
+        print(f"watch-only: node is pruned — can't rescan history; not importing {entry['name']!r}")
         return
-    existing = set(rpc("listwallets", []) or [])
+    # createwallet(name, disable_private_keys, blank, passphrase,
+    #              avoid_reuse, descriptors, load_on_startup)
+    if rpc("createwallet", [name, True, True, "", False, True, True]) is None:
+        print(f"watch-only: could not create wallet for {entry['name']!r}")
+        return
+    ts = birthday_ts(entry.get("birthday"))
+    requests = []
+    for desc, internal in descs:
+        info = rpc("getdescriptorinfo", [desc])
+        if not info:
+            print(f"watch-only: invalid descriptor for {entry['name']!r}: {desc}")
+            continue
+        requests.append({"desc": info["descriptor"], "timestamp": ts,
+                         "active": False, "internal": internal, "range": 1000})
+    if requests:
+        wallet_rpc(name, "importdescriptors", [requests])
+
+
+def ensure_wallets(rpc, wallet_rpc, wallets, pruned=False):
+    """Provision every configured wallet. One bad entry never blocks the others
+    or kills the calling thread."""
     for w in wallets:
-        name = wallet_name(w["name"])
-        if name in existing:
-            continue
-        # a wallet from a prior run may exist on disk but be unloaded
-        if wallet_rpc(name, "getwalletinfo", []) is not None:
-            continue
-        # Build descriptors before creating anything: a bad key (typo'd xpub,
-        # unknown prefix) raises here, so we skip it cleanly — no orphan wallet,
-        # and one bad entry never blocks the others or kills this thread.
         try:
-            descs = descriptors_for(w["key"])
+            provision_one(rpc, wallet_rpc, w, pruned)
         except Exception as e:
-            print(f"watch-only: skipping {w['name']!r} — bad key: {e}")
-            continue
-        # createwallet(name, disable_private_keys, blank, passphrase,
-        #              avoid_reuse, descriptors, load_on_startup)
-        if rpc("createwallet", [name, True, True, "", False, True, True]) is None:
-            print(f"watch-only: could not create wallet for {w['name']!r}")
-            continue
-        ts = birthday_ts(w.get("birthday"))
-        requests = []
-        for desc, internal in descs:
-            info = rpc("getdescriptorinfo", [desc])
-            if not info:
-                print(f"watch-only: invalid descriptor for {w['name']!r}: {desc}")
-                continue
-            requests.append({"desc": info["descriptor"], "timestamp": ts,
-                             "active": False, "internal": internal, "range": 1000})
-        if requests:
-            wallet_rpc(name, "importdescriptors", [requests])
+            print(f"watch-only: skipping {w.get('name')!r}: {e}")
+
+
+def deprovision(rpc, name):
+    """Unload a removed wallet and drop it from Core's auto-load list. The tiny
+    wallet dir is left on disk (Core has no delete-files RPC and the dashboard
+    mounts the datadir read-only); a later re-add just loads it back."""
+    rpc("unloadwallet", [wallet_name(name), False])
 
 
 def balances(wallet_rpc, wallets):
     """(rows, total_btc_string). Each row: {name, state, btc}. state is 'ok'
     (btc set), 'scanning' (rescan in progress), or 'error'."""
     rows, total = [], 0.0
-    for w in wallets:
+    for w in list(wallets):  # snapshot — the list can be mutated by the API
         name = wallet_name(w["name"])
         info = wallet_rpc(name, "getwalletinfo", [])
         if info is None:
@@ -201,3 +212,92 @@ def balances(wallet_rpc, wallets):
             total += btc
             rows.append({"name": w["name"], "state": "ok", "btc": fmt_btc(btc)})
     return rows, fmt_btc(total)
+
+
+def balances_view(wallet_rpc, wallets):
+    """balances() plus show_total (only meaningful with more than one wallet)."""
+    rows, total = balances(wallet_rpc, wallets)
+    return {"wallets": rows, "total": total, "show_total": len(rows) > 1}
+
+
+# --- persistence: the saved wallet list ("saved to the stack") ---------------
+# Bitcoin Core persists the wallets themselves (load_on_startup); this small
+# JSON sidecar persists the operator's list — labels, keys, birthdays — so the
+# UI has a clean, editable roster. Lives on a writable volume (see compose),
+# separate from the read-only chain datadir.
+
+def _store_path():
+    return os.environ.get("WATCH_STORE", "/state/wallets.json")
+
+
+def _normalize(it):
+    name = str(it.get("name", "")).strip()
+    key = str(it.get("key", "")).strip()
+    if name and key:
+        return {"name": name, "key": key, "birthday": (it.get("birthday") or "")}
+    return None
+
+
+def save_store(wallets):
+    """Best-effort atomic write — a missing/unwritable volume must not crash the
+    dashboard, just log and keep the list in memory for this run."""
+    path = _store_path()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(wallets, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"watch store not saved ({path}): {e}")
+
+
+def load_store():
+    """The saved wallet list. First run seeds it from config.json (the env blob)
+    so an existing declarative config carries over; after that the file — driven
+    by the UI — is authoritative."""
+    path = _store_path()
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                items = json.load(f)
+            return [n for n in (_normalize(it) for it in items) if n]
+        except Exception as e:
+            print(f"watch store unreadable ({path}): {e}")
+            return []
+    seed = load_config()
+    save_store(seed)
+    return seed
+
+
+def add_entry(store, name, key, birthday=""):
+    """Validate and append a wallet, persisting the list. Raises ValueError with
+    a user-facing message on bad input. Returns the stored entry."""
+    name = (name or "").strip()
+    key = (key or "").strip()
+    birthday = (birthday or "").strip()
+    if not name or not key:
+        raise ValueError("Name and key are both required.")
+    if birthday and birthday_ts(birthday) == 0:
+        raise ValueError("Birthday must be a date like 2021-03-15.")
+    descriptors_for(key)  # raises ValueError on an unparseable key/descriptor
+    with _store_lock:
+        if len(store) >= MAX_WALLETS:
+            raise ValueError(f"At most {MAX_WALLETS} wallets.")
+        if any(w["name"].lower() == name.lower() for w in store):
+            raise ValueError("A wallet with that name already exists.")
+        entry = {"name": name, "key": key, "birthday": birthday}
+        store.append(entry)
+        save_store(store)
+    return entry
+
+
+def remove_entry(store, name):
+    """Drop a wallet by name, persisting. Returns True if one was removed."""
+    with _store_lock:
+        for i, w in enumerate(store):
+            if w["name"] == name:
+                store.pop(i)
+                save_store(store)
+                return True
+    return False

@@ -96,6 +96,8 @@ services:
       WATCH_WALLETS_B64: ${WATCH_WALLETS_B64:-}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
+      # writable state (the saved watch-only wallet list); the chain stays read-only
+      - dashboard_state:/state
     restart: unless-stopped
     logging: *logging
     healthcheck:
@@ -121,3 +123,4 @@ networks:
 
 volumes:
   tor_data:
+  dashboard_state:

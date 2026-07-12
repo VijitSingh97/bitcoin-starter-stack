@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-07-12
+
+### Added
+
+- **Manage watch-only wallets from the dashboard.** A "Watch-only balances" card
+  now lets you add a wallet (label + `xpub`/descriptor + optional birthday) and
+  remove it with a ✕ — no config editing. The list is saved to the stack (held in
+  Bitcoin Core, with the roster on a new `dashboard_state` volume) and survives
+  restarts; `config.json`'s `wallets` becomes an optional first-run seed. A total
+  is shown only when you have more than one wallet. See
+  [docs/watch-only.md](docs/watch-only.md).
+
+### Security
+
+- The add/remove endpoints turn the dashboard into a control surface, so they're
+  guarded: the existing dashboard password (when set) gates them, a required
+  `X-Requested-With` header blocks cross-site (CSRF) writes, keys are validated
+  server-side, the wallet count is capped, and the card warns when no password is
+  set. Wallet names render via `textContent` (no HTML injection).
+
 ## [1.13.0] - 2026-07-12
 
 ### Added
@@ -307,6 +327,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.14.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.0
 [1.13.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.13.0
 [1.12.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.2
 [1.12.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.1

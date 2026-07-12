@@ -1,39 +1,36 @@
 # Watch-only balances
 
-Paste your public keys into `config.json` and the dashboard shows the balance of
-each, plus a total — read straight off **your own node**. No third-party block
-explorer ever sees your addresses, which is the whole reason to run a private
-node in the first place.
+Add your public keys and the dashboard shows the balance of each, plus a total —
+read straight off **your own node**. No third-party block explorer ever sees your
+addresses, which is the whole reason to run a private node in the first place.
 
 These are **watch-only** wallets: they hold public keys only. The node can see
 your balance and derive your addresses, but it has no private keys and
 **cannot spend** anything.
 
-## Requirements
+## Add a wallet from the dashboard
 
-- A **full node** (`prune_mb: 0`). Finding an existing balance means rescanning
-  historical blocks, which a pruned node has thrown away — so watch-only is
-  skipped on a pruned node (you'll see a note in the dashboard logs).
+The dashboard has a **Watch-only balances** card with an add form:
 
-## Configure
+1. **Label** — any name you like (e.g. "Cold storage").
+2. **Key** — an extended public key or a full output descriptor (see below).
+3. **Birthday** (optional) — the date the wallet was first used; it bounds the
+   one-time rescan.
 
-Add a `wallets` array to `config.json`, then re-run `./configure.sh` and restart
-the dashboard (`docker compose up -d dashboard`):
+Click **Add**. The node imports the key and rescans the chain for its history —
+the row shows `scanning…` while that runs, then the balance appears and stays
+live. Remove a wallet with the **✕** next to it.
 
-```json
-"wallets": [
-    { "name": "Cold storage", "key": "zpub6r...", "birthday": "2021-03-15" },
-    { "name": "Spending",     "key": "wpkh([a1b2c3d4/84h/0h/0h]xpub6C.../<0;1>/*)" }
-]
-```
+Wallets are **saved to the stack**: they persist across restarts (held in Bitcoin
+Core, with the list stored on a small `dashboard_state` volume). No file editing
+required.
 
-| Field | Required | What it is |
-| --- | --- | --- |
-| `name` | yes | A label shown in the dashboard. |
-| `key` | yes | An extended public key **or** a full output descriptor (see below). |
-| `birthday` | no | `YYYY-MM-DD` the wallet was first used. Bounds the one-time rescan — without it the node rescans from genesis, which is correct but slow. |
+> **No dashboard password?** Then anyone who can reach the page can add or remove
+> wallets — the card shows a warning. Set `dashboard.password` in `config.json`
+> (see [Configuration](configuration.md)) to require a login. Removing a wallet is
+> harmless (watch-only, no keys), but adding one starts a chain rescan.
 
-### What to paste for `key`
+## What to paste for the key
 
 **An extended public key** — the friendly option. Copy the `xpub`/`ypub`/`zpub`
 your wallet shows for an account:
@@ -59,19 +56,36 @@ wpkh([a1b2c3d4/84h/0h/0h]xpub6CUGRUo.../<0;1>/*)
 The `<0;1>` covers both the receive and change branches. Any checksum (`#abcd…`)
 is fine to leave on or off.
 
-## First run: the rescan
+## Requirements & the first rescan
 
-The first time a key is added, the node imports it and **rescans the chain** to
-find its history. This runs in the background; while it's working the dashboard
-shows `scanning…` for that wallet. A tight `birthday` keeps it to minutes; no
-birthday means a full-chain scan (tens of minutes on a full node). Once done,
-the balance stays live as new blocks arrive — no rescan on restart.
+- A **full node** (`prune_mb: 0`). Finding an existing balance means rescanning
+  historical blocks, which a pruned node has thrown away — so a new import is
+  skipped on a pruned node.
+- The first import **rescans the chain**. A tight `birthday` keeps it to minutes;
+  no birthday means a full-chain scan (tens of minutes on a full node). Once
+  done, the balance stays live and there's no rescan on restart. Removing then
+  re-adding the same wallet reloads it instantly — no second rescan.
+
+## Seeding from config.json (optional)
+
+You can also predeclare wallets in `config.json`, which seeds the list on first
+start (handy for a fresh deploy):
+
+```json
+"wallets": [
+    { "name": "Cold storage", "key": "zpub6r...", "birthday": "2021-03-15" }
+]
+```
+
+After that first start the dashboard's own list is authoritative — edits you make
+in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 
 - **No spend risk.** Watch-only wallets have no private keys.
 - **An xpub is still sensitive.** Anyone who has it can see every address and
-  balance you'll ever use under it. It lives only in `config.json`, which is
-  gitignored — keep that file private, same as your RPC password.
+  balance you'll ever use under it. It's stored on the node (the wallet list and
+  Bitcoin Core's wallet files) — keep access to the box and the dashboard
+  controlled, and set a dashboard password if it's reachable beyond your LAN.
 - **Nothing leaves the box.** Balances come from your node's own index; no
   request goes to any external service.

@@ -62,4 +62,9 @@ if env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD docker compose --env-file /de
   fail "compose config succeeded without credentials"
 fi
 
+# The dashboard mounts the chain read-only and gets a separate writable volume
+# for watch-only wallet state (so the chain datadir is never writable from it)
+echo "$rendered" | grep -q 'target: /data' || fail "dashboard missing /data mount"
+echo "$rendered" | grep -q 'target: /state' || fail "dashboard missing writable /state volume"
+
 echo "PASS: test_compose.sh"

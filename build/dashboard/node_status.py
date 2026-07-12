@@ -1,9 +1,10 @@
 import hmac
 import os
 import shutil
+import threading
 import requests
 import json
-from flask import Flask, render_template_string, request, Response
+from flask import Flask, render_template_string, request, Response, jsonify
 from datetime import datetime
 
 import monitor
@@ -64,9 +65,9 @@ def get_rpc_data(method, params=None):
         print(f"RPC Error ({method}): {e}")
         return None
 
-# Configured watch-only wallets (public keys pasted into config.json). Empty
-# unless the operator adds any, so this is inert for everyone else.
-WATCH = watch.load_config()
+# The saved watch-only wallet list (managed from the UI, seeded once from
+# config.json). Empty unless the operator adds any, so this is inert otherwise.
+WATCH = watch.load_store()
 
 def get_wallet_data(wallet, method, params=None, timeout=8):
     # Wallet-scoped RPC lives at /wallet/<name>. Balance reads are quick;
@@ -161,6 +162,59 @@ def metrics():
     return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
 
 
+# --- watch-only wallets: list + add + remove --------------------------------
+# All routes are already gated by the optional dashboard password (before_request).
+# Writes additionally require the X-Requested-With header the front-end sends —
+# a browser can't set it on a cross-site form post without a CORS preflight we
+# never grant, so this blocks CSRF against the add/remove actions.
+
+def _reject_csrf():
+    if request.headers.get("X-Requested-With") != "fetch":
+        return Response("missing X-Requested-With", 403)
+    return None
+
+
+@app.route('/api/watch', methods=['GET'])
+def api_watch_list():
+    view = watch.balances_view(get_wallet_data, WATCH)
+    view["has_password"] = bool(DASHBOARD_PASSWORD)
+    return jsonify(view)
+
+
+@app.route('/api/watch', methods=['POST'])
+def api_watch_add():
+    bad = _reject_csrf()
+    if bad:
+        return bad
+    data = request.get_json(silent=True) or {}
+    try:
+        entry = watch.add_entry(WATCH, data.get("name"), data.get("key"), data.get("birthday"))
+    except ValueError as e:
+        return Response(str(e), 400)
+    # Import rescans the chain — do it off the request thread with a long
+    # timeout; the UI shows "scanning…" until it finishes.
+    pruned = (get_rpc_data("getblockchaininfo") or {}).get("pruned", False)
+    threading.Thread(
+        target=lambda: watch.provision_one(
+            get_rpc_data,
+            lambda w, m, p=None: get_wallet_data(w, m, p, timeout=3600),
+            entry, pruned),
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True})
+
+
+@app.route('/api/watch/<name>', methods=['DELETE'])
+def api_watch_remove(name):
+    bad = _reject_csrf()
+    if bad:
+        return bad
+    if watch.remove_entry(WATCH, name):
+        watch.deprovision(get_rpc_data, name)
+        return jsonify({"ok": True})
+    return Response("no such wallet", 404)
+
+
 @app.route('/')
 def index():
     # Fetch core data
@@ -220,9 +274,6 @@ def index():
     mempool = get_rpc_data("getmempoolinfo") if not ibd else None
     fees = {n: fee_sat_vb(n) for n in (1, 3, 6)} if not ibd else {}
 
-    # Watch-only balances, read straight off this node (never a third party)
-    watch_rows, watch_total = watch.balances(get_wallet_data, WATCH) if WATCH else ([], "0")
-
     stats = {
         "version": network.get("subversion", "Unknown") if network else "Unknown",
         "uptime": format_uptime(uptime_seconds),
@@ -247,9 +298,6 @@ def index():
         "fee_30m": fees.get(3),
         "fee_hour": fees.get(6),
         "next_block": (blockchain.get("blocks") + 1) if isinstance(blockchain.get("blocks"), int) else "",
-        "show_watch": bool(WATCH),
-        "watch": watch_rows,
-        "watch_total": watch_total,
         "last_update": last_update,
         # not "update": Jinja resolves stats.update to the dict METHOD, which
         # is always truthy and renders as its repr
@@ -270,6 +318,7 @@ def index():
         <canvas id="tower"></canvas>
                 <div id="tower-label"></div>
                 <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+        <div class="stack-col">
         <div id="live" data-blocks="{{stats.blocks}}" data-next-block="{{stats.next_block}}">
         <div class="card">
             <h2>Bitcoin Node Status<span class="badge">{% if stats.pruned %}Pruned &middot; {{stats.prune_target_gb}} GB{% else %}Full{% endif %}</span></h2>
@@ -295,14 +344,6 @@ def index():
             <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{ stats.fee_next if stats.fee_next is not none else '—' }} / {{ stats.fee_30m if stats.fee_30m is not none else '—' }} / {{ stats.fee_hour if stats.fee_hour is not none else '—' }}</span></div>
             <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
-            {% if stats.show_watch %}
-            <hr>
-            <div class="row"><span class="label">Watch-only balances</span></div>
-            {% for w in stats.watch %}
-            <div class="row"><span class="label sub">{{w.name}}</span><span>{% if w.state == 'ok' %}{{w.btc}} BTC{% elif w.state == 'scanning' %}scanning…{% else %}—{% endif %}</span></div>
-            {% endfor %}
-            <div class="row total"><span class="label">Total</span><span>{{stats.watch_total}} BTC</span></div>
-            {% endif %}
             {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
@@ -311,16 +352,18 @@ def index():
             </div>
         </div>
         </div>
+        <section id="watch" class="card watch-card" hidden></section>
+        </div>
         <script type="module" src="/static/tower.js"></script>
         <script type="module" src="/static/theme.js"></script>
         <script type="module" src="/static/sparkline.js"></script>
         <script type="module" src="/static/refresh.js"></script>
+        <script type="module" src="/static/watch.js"></script>
     </body>
     </html>
     """, stats=stats)
 
 if __name__ == '__main__':
-    import threading
     # Always runs: alerts and pings no-op individually when unconfigured,
     # and the update checker works regardless.
     threading.Thread(
