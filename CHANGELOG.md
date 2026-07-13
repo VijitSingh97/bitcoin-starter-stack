@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.1] - 2026-07-12
+
+### Fixed
+
+- **The watch-only add-form hints no longer get clipped.** The label and key
+  inputs are full width now (the date field shares a row with Add), so long
+  placeholders like "xpub / zpub / address / descriptor" are fully visible.
+- **The dashboard picks up new CSS/JS immediately after an upgrade.** Static
+  assets are revalidated each load (cheap 304s) rather than heuristically
+  cached, so a deploy's changes show without a hard refresh.
+
+### Added
+
+- **End-to-end coverage for watch-only wallets.** The e2e provisions a wallet of
+  each supported key type against the real node — an xpub, a zpub, Satoshi's
+  genesis address, and his genesis public key (both resolving to
+  1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa) — and CI covers the same types with mock
+  data.
+
 ## [1.15.0] - 2026-07-12
 
 ### Added
@@ -367,6 +386,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.15.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.1
 [1.15.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.0
 [1.14.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.2
 [1.14.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.1

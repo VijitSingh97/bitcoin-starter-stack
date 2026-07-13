@@ -389,6 +389,35 @@ def test_api_watch_add_rejects_bad_key(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_api_watch_accepts_every_key_type(monkeypatch, tmp_path):
+    # the mock-data (CI) counterpart of the e2e provisioning test: each
+    # supported input type is accepted and kicks off provisioning. Satoshi's
+    # genesis key has no xpub/zpub, so its cases are the address + pubkey forms.
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    store = []
+    monkeypatch.setattr(node_status, "WATCH", store)
+    provisioned = []
+    monkeypatch.setattr(node_status.watch, "provision_one",
+                        lambda rpc, wrpc, entry, pruned=False: provisioned.append(entry["key"]))
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda m, p=None: {"pruned": False})
+    client = node_status.app.test_client()
+    genesis_pk = ("04678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f6"
+                  "1deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5f")
+    cases = {
+        "xpub": ("xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3Xyuv"
+                 "PEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V"),
+        "zpub": BIP84_ZPUB,
+        "satoshi-address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+        "satoshi-pubkey": f"pkh({genesis_pk})",
+    }
+    for name, key in cases.items():
+        r = client.post("/api/watch", json={"name": name, "key": key},
+                        headers={"X-Requested-With": "fetch"})
+        assert r.status_code == 200, (name, r.data)
+    assert [w["name"] for w in store] == list(cases)
+    assert len(provisioned) == len(cases)  # each type started provisioning
+
+
 def test_api_watch_add_then_remove(monkeypatch, tmp_path):
     monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
     store = []

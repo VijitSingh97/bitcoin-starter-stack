@@ -12,6 +12,10 @@ import fee_history
 import watch
 
 app = Flask(__name__)
+# Revalidate static assets every load (cheap 304s) so a deploy's new CSS/JS is
+# picked up immediately — otherwise browsers heuristically cache the old files
+# and show a stale dashboard until a hard refresh.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # --- CONFIGURATION ---
 RPC_USER = os.environ["RPC_USER"]
