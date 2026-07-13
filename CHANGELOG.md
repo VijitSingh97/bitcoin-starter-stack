@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.2] - 2026-07-12
+
+### Fixed
+
+- **The dashboard now keeps matching space below the last card.** The bottom
+  buffer had been set on the flex container, and browsers drop a flex
+  container's padding on the overflow (bottom) edge when the content is taller
+  than the viewport — so the last card sat flush against the bottom. The buffer
+  now lives on the content column, where it's always part of the scroll area
+  (top and bottom now match).
+
 ## [1.14.1] - 2026-07-12
 
 ### Fixed
@@ -338,6 +349,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.14.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.2
 [1.14.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.1
 [1.14.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.0
 [1.13.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.13.0

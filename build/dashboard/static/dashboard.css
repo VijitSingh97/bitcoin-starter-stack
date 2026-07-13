@@ -142,7 +142,11 @@ h2 {
 .row.total .label { color: var(--text); }
 
 /* watch-only wallets card (stacked under the status card) */
-.stack-col { display: flex; flex-direction: column; gap: 16px; }
+/* Buffer below the last card. It lives on the column, not the flex container's
+   padding-bottom: when the stack overflows the viewport, a flex container drops
+   its padding on the overflow (bottom) edge from the scroll area, so the bottom
+   would sit flush. Padding on the content itself is always counted. */
+.stack-col { display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px; }
 .watch-card h2 { font-size: 1.1rem; }
 .watch-right { display: flex; align-items: center; gap: 10px; }
 .watch-x {
