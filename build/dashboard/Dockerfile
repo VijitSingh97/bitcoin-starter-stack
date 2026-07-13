@@ -11,7 +11,9 @@ WORKDIR /app
 COPY build/dashboard/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY build/dashboard/node_status.py build/dashboard/monitor.py build/dashboard/fee_history.py build/dashboard/watch.py ./
+# All dashboard modules (tests/ is a subdir, not matched by the flat glob), so a
+# new module is picked up automatically — no need to list each one.
+COPY build/dashboard/*.py ./
 COPY build/dashboard/static ./static
 COPY VERSION ./VERSION
 
