@@ -224,14 +224,16 @@ def balances(wallet_rpc, wallets):
         name = wallet_name(w["name"])
         info = wallet_rpc(name, "getwalletinfo", [])
         if info is None:
-            rows.append({"name": w["name"], "state": "error", "btc": None})
+            row = {"name": w["name"], "state": "error", "btc": None}
         elif info.get("scanning"):
-            rows.append({"name": w["name"], "state": "scanning", "btc": None})
+            row = {"name": w["name"], "state": "scanning", "btc": None}
         else:
             bal = wallet_rpc(name, "getbalances", []) or {}
             btc = (bal.get("mine", {}) or {}).get("trusted", 0) or 0
             total += btc
-            rows.append({"name": w["name"], "state": "ok", "btc": fmt_btc(btc)})
+            row = {"name": w["name"], "state": "ok", "btc": fmt_btc(btc)}
+        row["key"] = w["key"]  # the UI shows a truncated form, expandable on click
+        rows.append(row)
     return rows, fmt_btc(total)
 
 

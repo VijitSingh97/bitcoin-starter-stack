@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] - 2026-07-13
+
+### Changed
+
+- **Watch-only balances now show in gold above the tower.** Each wallet's
+  balance — and a total once you have more than one — renders in the gold accent
+  font above the block tower (at the top of the column on mobile). The card below
+  becomes the manager.
+
+### Added
+
+- **Click a wallet's key to expand it.** Each row shows the key/address as
+  first-4…last-4 next to the label; click to reveal the full string, click again
+  to collapse.
+- **Mobile: scroll past the cards to see the tower on its own.** Extra scroll
+  room below the cards lets the full block tower fill the screen.
+
 ## [1.15.1] - 2026-07-12
 
 ### Fixed
@@ -386,6 +403,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.16.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.16.0
 [1.15.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.1
 [1.15.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.0
 [1.14.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.2
