@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] - 2026-07-12
+
+### Added
+
+- **Watch a single address.** The watch-only key field now accepts a plain
+  address (`bc1…`, `1…`, `3…`), not just an `xpub`/descriptor — handy for a
+  specific receive address, a donation address, or a paper wallet. It's wrapped
+  into an `addr()` descriptor for you.
+
+### Fixed
+
+- **Un-ranged descriptors (a single address or fixed key) failed to import.** The
+  import always sent a `range`, which Bitcoin Core rejects on a non-ranged
+  descriptor (`"Range should not be specified for an un-ranged descriptor"`), so
+  the wallet was created but never populated. The range is now sent only for
+  ranged (`…/*`) descriptors. Bad input also gets a clearer message ("not an
+  xpub/ypub/zpub, an output descriptor, or an address").
+
 ## [1.14.2] - 2026-07-12
 
 ### Fixed
@@ -349,6 +367,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.15.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.0
 [1.14.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.2
 [1.14.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.1
 [1.14.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.0

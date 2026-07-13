@@ -34,7 +34,7 @@ if (typeof document !== "undefined") {
   name.placeholder = "Label (e.g. Cold storage)";
   name.maxLength = 40;
   const key = el("input");
-  key.placeholder = "xpub / zpub / descriptor";
+  key.placeholder = "xpub / zpub / address / descriptor";
   const bday = el("input");
   bday.type = "date";
   bday.title = "Wallet birthday (optional) — bounds the first rescan";

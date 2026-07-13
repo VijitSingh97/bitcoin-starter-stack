@@ -17,6 +17,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 
@@ -41,6 +42,18 @@ _SLIP132 = {
 }
 
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+# A bare address (not an extended key) is watched as a single-address descriptor,
+# addr(<address>). Loose shape check only — Core's getdescriptorinfo is the real
+# validator, so a bad checksum is caught at import, not here.
+_ADDR_RE = re.compile(
+    r"^(?:bc1|tb1|bcrt1)[0-9a-z]{20,}$"       # bech32 / bech32m (segwit, taproot)
+    r"|^[13][1-9A-HJ-NP-Za-km-z]{25,34}$"      # base58 P2PKH / P2SH
+)
+
+
+def _looks_like_address(s):
+    return bool(_ADDR_RE.match(s))
 
 
 def _b58decode_check(s):
@@ -94,7 +107,12 @@ def descriptors_for(key):
             return [(body.replace("<0;1>", "0"), False),
                     (body.replace("<0;1>", "1"), True)]
         return [(body, False)]
-    xpub, wrap = _to_xpub(key)
+    try:
+        xpub, wrap = _to_xpub(key)
+    except ValueError:
+        if _looks_like_address(key):
+            return [(f"addr({key})", False)]  # watch one specific address
+        raise ValueError("not an xpub/ypub/zpub, an output descriptor, or an address")
     return [(wrap.format(f"{xpub}/0/*"), False),
             (wrap.format(f"{xpub}/1/*"), True)]
 
@@ -172,8 +190,11 @@ def provision_one(rpc, wallet_rpc, entry, pruned=False):
         if not info:
             print(f"watch-only: invalid descriptor for {entry['name']!r}: {desc}")
             continue
-        requests.append({"desc": info["descriptor"], "timestamp": ts,
-                         "active": False, "internal": internal, "range": 1000})
+        req = {"desc": info["descriptor"], "timestamp": ts,
+               "active": False, "internal": internal}
+        if info.get("isrange"):
+            req["range"] = 1000  # a range is only valid on ranged (…/*) descriptors
+        requests.append(req)
     if requests:
         wallet_rpc(name, "importdescriptors", [requests])
 
