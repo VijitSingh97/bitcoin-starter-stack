@@ -1,9 +1,11 @@
-// Watch-only wallets card: list balances, add a key, remove one. Talks to
-// /api/watch. Lives outside #live so the 30s status refresh never clobbers the
-// add form mid-typing; the list re-renders on its own poll.
+// Watch-only wallets. The card (#watch) is the manager — each wallet's label +
+// a truncated key you can click to expand, a remove ✕, and the add form. The
+// balances themselves render in gold above the tower (#tower-stats): per-wallet,
+// plus a total once there's more than one. Talks to /api/watch.
 //
-// The pure label helper is exported for watch.test.mjs. Wallet names are user
-// input, so every name goes in via textContent (never innerHTML) — no XSS.
+// Lives outside #live so the 30s status refresh never clobbers the add form.
+// Every bit of user data (labels, keys) goes in via textContent — no XSS.
+import { towerLayout } from "./tower.js";
 
 const CSRF = { "X-Requested-With": "fetch" }; // blocks cross-site form posts
 const POLL_MS = 15000;
@@ -14,8 +16,14 @@ export function balanceLabel(w) {
   return "—"; // error / not ready
 }
 
+// first 4 … last 4 of a key/address/descriptor; full string if it's short.
+export function shortKey(k) {
+  return k.length > 12 ? `${k.slice(0, 4)}…${k.slice(-4)}` : k;
+}
+
 if (typeof document !== "undefined") {
   const card = document.getElementById("watch");
+  const stats = document.getElementById("tower-stats");
 
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
@@ -24,7 +32,7 @@ if (typeof document !== "undefined") {
     return n;
   };
 
-  // Build the static shell once: heading, live list, add form, warning slot.
+  // --- manager card: heading, wallet list, add form, warning ---
   const list = el("div", "watch-list");
   const msg = el("div", "watch-msg");
   const warn = el("div", "watch-warn");
@@ -42,38 +50,70 @@ if (typeof document !== "undefined") {
   add.type = "submit";
   form.append(name, key, bday, add);
 
-  const shell = () => {
-    card.append(el("h2", null, "Watch-only balances"), list, form, msg, warn);
-  };
+  card.append(el("h2", null, "Watch-only wallets"), list, form, msg, warn);
 
-  const renderList = (view) => {
+  const renderManager = (view) => {
     list.textContent = "";
     for (const w of view.wallets) {
       const row = el("div", "row");
-      row.append(el("span", "label", w.name));
-      const right = el("span", "watch-right");
-      right.append(el("span", null, balanceLabel(w)));
+      const left = el("div", "wk-cell");
+      left.append(el("span", "label", w.name));
+      // truncated key, click to expand/collapse
+      const k = el("span", "wk", shortKey(w.key));
+      k.title = "click to expand";
+      k.addEventListener("click", () => {
+        k.textContent = k.textContent === w.key ? shortKey(w.key) : w.key;
+      });
+      left.append(k);
+      row.append(left);
       const x = el("button", "watch-x", "✕");
       x.type = "button";
       x.title = `Remove ${w.name}`;
       x.addEventListener("click", () => remove(w.name));
-      right.append(x);
-      row.append(right);
+      row.append(x);
       list.append(row);
-    }
-    if (view.show_total) {
-      const t = el("div", "row total");
-      t.append(el("span", "label", "Total"), el("span", null, `${view.total} BTC`));
-      list.append(t);
     }
     warn.textContent = view.has_password ? "" :
       "No dashboard password set — anyone who can reach this page can add or remove wallets.";
   };
 
+  // --- gold balances above the tower ---
+  const renderStats = (view) => {
+    stats.textContent = "";
+    if (!view.wallets.length) { stats.hidden = true; return; }
+    stats.hidden = false;
+    for (const w of view.wallets) {
+      const row = el("div", "ws-row");
+      row.append(el("span", "ws-name", w.name), el("span", null, balanceLabel(w)));
+      stats.append(row);
+    }
+    if (view.show_total) {
+      const t = el("div", "ws-total");
+      t.append(el("span", null, `${view.total} BTC`));
+      stats.append(el("div", "ws-total-label", "total"), t);
+    }
+    placeStats();
+  };
+
+  // On desktop the balances float above the tower, centred on its axis; JS only
+  // sets the horizontal centre (the CSS pins the top). On mobile they sit in the
+  // normal flow at the top of the column.
+  function placeStats() {
+    if (window.innerWidth >= 900) {
+      stats.style.left = towerLayout(window.innerWidth).ox + "px";
+    } else {
+      stats.style.left = "";
+    }
+  }
+  window.addEventListener("resize", placeStats);
+
+  let last = { wallets: [] };
+  const render = (view) => { last = view; renderManager(view); renderStats(view); };
+
   async function refresh() {
     try {
       const res = await fetch("/api/watch", { headers: CSRF });
-      if (res.ok) renderList(await res.json());
+      if (res.ok) render(await res.json());
     } catch { /* blip — next poll */ }
   }
 
@@ -108,7 +148,6 @@ if (typeof document !== "undefined") {
     refresh();
   });
 
-  shell();
   card.hidden = false;
   refresh();
   setInterval(refresh, POLL_MS);

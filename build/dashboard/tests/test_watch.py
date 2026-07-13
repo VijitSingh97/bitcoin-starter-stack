@@ -171,9 +171,10 @@ def test_balances_sums_only_ready_wallets():
     }
     rows, total = watch.balances(FakeWalletRpc(table), wallets)
     assert total == "0.5"  # only A counts
-    assert rows[0] == {"name": "A", "state": "ok", "btc": "0.5"}
+    assert rows[0] == {"name": "A", "state": "ok", "btc": "0.5", "key": "z"}
     assert rows[1]["state"] == "scanning"
     assert rows[2]["state"] == "error"
+    assert all("key" in r for r in rows)  # every row carries its key for the UI
 
 
 def test_balances_view_show_total_only_when_more_than_one():

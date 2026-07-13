@@ -148,7 +148,15 @@ h2 {
    would sit flush. Padding on the content itself is always counted. */
 .stack-col { display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px; }
 .watch-card h2 { font-size: 1.1rem; }
-.watch-right { display: flex; align-items: center; gap: 10px; }
+.wk-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wk { /* truncated key/address, click to expand */
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  word-break: break-all;
+}
+.wk:hover { color: var(--text); }
 .watch-x {
   background: none;
   border: none;
@@ -157,8 +165,47 @@ h2 {
   font-size: 0.85rem;
   padding: 0 2px;
   line-height: 1;
+  align-self: center;
 }
 .watch-x:hover { color: #ff5252; }
+
+/* Watch-only balances, in gold above the tower (desktop) / at the top of the
+   column (mobile). */
+.tower-stats {
+  color: var(--accent);
+  font-family: monospace;
+  text-align: center;
+  z-index: 0;
+}
+.tower-stats .ws-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 1rem;
+  margin: 3px 0;
+}
+.tower-stats .ws-name { color: var(--muted); }
+.tower-stats .ws-total-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 10px;
+}
+.tower-stats .ws-total { font-size: 1.6rem; font-weight: 600; }
+
+@media (min-width: 900px) {
+  .tower-stats {
+    position: fixed;
+    top: 32px;
+    transform: translateX(-50%); /* JS sets left = the tower's centre axis */
+  }
+}
+@media (max-width: 899px) {
+  /* room to scroll the cards away and see the tower on its own. flex-basis
+     (not height) because as a flex-column child a plain height is ignored. */
+  .stack-col::after { content: ""; flex: 0 0 80vh; }
+}
 .watch-add {
   display: flex;
   flex-wrap: wrap;
