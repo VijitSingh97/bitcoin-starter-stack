@@ -27,6 +27,7 @@ data_dir=$(jq -r '.bitcoin.data_dir // "./data/bitcoin"' config.json)
 dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' config.json)
 prune=$(jq -r '.bitcoin.prune_mb // 0' config.json)
 inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == true then 1 else 0 end' config.json)
+blockfilterindex=$(jq -r 'if .bitcoin.blockfilterindex == true then 1 else 0 end' config.json)
 dashboard_password=$(jq -r '.dashboard.password // empty' config.json)
 dashboard_onion=$(jq -r 'if .dashboard.onion == true then 1 else 0 end' config.json)
 telegram_bot_token=$(jq -r '.notifications.telegram_bot_token // empty' config.json)
@@ -79,6 +80,12 @@ if [ "$prune" -lt 0 ] || { [ "$prune" -ne 0 ] && [ "$prune" -lt 550 ]; }; then
   exit 1
 fi
 
+# blockfilterindex needs the full chain — bitcoind refuses to start with pruning
+if [ "$blockfilterindex" = "1" ] && [ "$prune" != "0" ]; then
+  echo "blockfilterindex requires a full node (prune_mb: 0) — it can't run on a pruned node."
+  exit 1
+fi
+
 # rpcauth = salted HMAC of the password (same scheme as Bitcoin Core's
 # rpcauth.py), so the bitcoin container never holds the plaintext password.
 # Salt and hash stay as separate hex values; the container assembles the
@@ -95,6 +102,7 @@ BITCOIN_DATA_DIR=$data_dir
 BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
+BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 TELEGRAM_BOT_TOKEN=$telegram_bot_token

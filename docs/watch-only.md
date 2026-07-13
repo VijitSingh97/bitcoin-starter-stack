@@ -81,6 +81,18 @@ xpub.
   done, the balance stays live and there's no rescan on restart. Removing then
   re-adding the same wallet reloads it instantly — no second rescan.
 
+### Speeding up the first scan
+
+- **Set a birthday.** The single biggest lever — it bounds the rescan to blocks
+  after that date instead of scanning from 2009.
+- **Enable `blockfilterindex`.** Set `"blockfilterindex": true` in `config.json`
+  (full node only). Bitcoin Core builds a compact filter of every block once,
+  then *every* rescan — this wallet and every future one — uses the filters to
+  skip blocks that can't match, turning a multi-hour scan into minutes. It's a
+  shared, one-time-built cache: ~a few GB of extra disk and a one-time
+  background build (the node keeps serving meanwhile). After `configure.sh`,
+  restart the node (`docker compose up -d bitcoin`).
+
 ## Seeding from config.json (optional)
 
 You can also predeclare wallets in `config.json`, which seeds the list on first

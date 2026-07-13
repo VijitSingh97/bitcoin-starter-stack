@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] - 2026-07-13
+
+### Added
+
+- **`blockfilterindex` option to speed up watch-only rescans.** Set
+  `"blockfilterindex": true` (full node only) and Bitcoin Core builds a compact
+  block-filter index once; then every wallet rescan — current and future — uses
+  it to skip non-matching blocks, turning a multi-hour scan into minutes. A
+  shared cache, ~a few GB of disk plus a one-time background build. `configure.sh`
+  rejects it on a pruned node (bitcoind can't run both). See
+  [docs/watch-only.md](docs/watch-only.md#speeding-up-the-first-scan).
+
 ## [1.17.0] - 2026-07-13
 
 ### Added
@@ -415,6 +427,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.18.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.0
 [1.17.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.17.0
 [1.16.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.16.0
 [1.15.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.1
