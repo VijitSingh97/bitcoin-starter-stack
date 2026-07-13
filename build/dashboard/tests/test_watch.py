@@ -97,6 +97,14 @@ def test_bare_address_becomes_a_single_address_descriptor():
         assert watch.descriptors_for(addr) == [(f"addr({addr})", False)]
 
 
+def test_satoshi_genesis_pubkey_descriptor_passes_through():
+    # Satoshi's genesis key has no xpub/zpub (pre-BIP32); its pubkey form is a
+    # plain pkh() descriptor, which passes straight through (un-ranged).
+    d = ("pkh(04678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61de"
+         "b649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5f)")
+    assert watch.descriptors_for(d) == [(d, False)]
+
+
 def test_garbage_key_is_rejected():
     for bad in ["hello world", "not-a-key", "xpub-but-broken", "12345"]:
         try:

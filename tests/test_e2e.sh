@@ -106,4 +106,11 @@ for c in bitcoin dashboard; do
   [ -z "$bad6" ] || fail "unexpected IPv6 egress from $c: $bad6"
 done
 
+# Watch-only: provision a wallet of each supported key type against the real
+# node — an xpub, a zpub, Satoshi's genesis address, and his genesis pubkey —
+# exercising watch.descriptors_for + provision_one (incl. the range fix) and
+# confirming a real Core accepts every descriptor form the dashboard builds.
+docker cp build/dashboard/tests/e2e_watch.py dashboard:/app/e2e_watch.py >/dev/null
+docker exec dashboard python /app/e2e_watch.py || fail "watch-only provisioning failed"
+
 echo "PASS: test_e2e.sh"
