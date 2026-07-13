@@ -174,27 +174,39 @@ h2 {
 .tower-stats {
   color: var(--accent);
   font-family: monospace;
-  text-align: center;
   z-index: 0;
+  width: 300px;        /* a fixed width so labels/balances align in two columns */
+  max-width: 88vw;
+  align-self: center;  /* centre the block in the column on mobile */
 }
 .tower-stats .ws-row {
   display: flex;
-  justify-content: center;
+  align-items: center;
   gap: 12px;
   font-size: 1rem;
   margin: 3px 0;
 }
-.tower-stats .ws-name { color: var(--muted); }
-.tower-stats .ws-spark { align-self: center; opacity: 0.85; }
-.watch-hint { color: var(--muted); font-size: 0.72rem; margin-top: 8px; }
-.tower-stats .ws-total-label {
+/* label left (fills the row, truncates if long); balance group hugs the right */
+.tower-stats .ws-name {
   color: var(--muted);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-top: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.tower-stats .ws-total { font-size: 1.6rem; font-weight: 600; }
+.tower-stats .ws-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.tower-stats .ws-bal { white-space: nowrap; }
+.tower-stats .ws-spark { opacity: 0.85; }
+.tower-stats .ws-total-row {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+.tower-stats .ws-total-row .ws-name { color: var(--accent); }
+.watch-hint { color: var(--muted); font-size: 0.72rem; margin-top: 8px; }
 
 @media (min-width: 900px) {
   .tower-stats {

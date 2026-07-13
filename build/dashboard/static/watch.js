@@ -87,19 +87,21 @@ if (typeof document !== "undefined") {
     stats.hidden = false;
     for (const w of view.wallets) {
       const row = el("div", "ws-row");
-      row.append(el("span", "ws-name", w.name), el("span", null, balanceLabel(w)));
+      const right = el("span", "ws-right");            // sparkline + balance, hugs the right
       if (w.history && w.history.length >= 2) {
         const spark = document.createElement("canvas");
         spark.className = "ws-spark";
-        row.append(spark);
+        right.append(spark);
         drawSpark(spark, w.history);
       }
+      right.append(el("span", "ws-bal", balanceLabel(w)));
+      row.append(el("span", "ws-name", w.name), right);  // label left, balance right
       stats.append(row);
     }
     if (view.show_total) {
-      const t = el("div", "ws-total");
-      t.append(el("span", null, `${view.total} BTC`));
-      stats.append(el("div", "ws-total-label", "total"), t);
+      const t = el("div", "ws-row ws-total-row");
+      t.append(el("span", "ws-name", "Total"), el("span", "ws-bal", `${view.total} BTC`));
+      stats.append(t);
     }
     placeStats();
   };
