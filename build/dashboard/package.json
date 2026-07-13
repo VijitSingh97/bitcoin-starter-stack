@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Marks the dashboard's static/*.js as ES modules so `node --test` resolves their imports deterministically on any Node version (not just ones that auto-detect module syntax). No dependencies; not used by the Docker build."
+}
