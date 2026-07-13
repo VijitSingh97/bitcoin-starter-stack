@@ -6,6 +6,7 @@
 // Lives outside #live so the 30s status refresh never clobbers the add form.
 // Every bit of user data (labels, keys) goes in via textContent — no XSS.
 import { towerLayout } from "./tower.js";
+import { points } from "./sparkline.js";
 
 const CSRF = { "X-Requested-With": "fetch" }; // blocks cross-site form posts
 const POLL_MS = 15000;
@@ -49,8 +50,10 @@ if (typeof document !== "undefined") {
   const add = el("button", null, "Add");
   add.type = "submit";
   form.append(name, key, bday, add);
+  const hint = el("div", "watch-hint",
+    "Tip: set the birthday (the date the wallet was first used) to skip years of rescanning.");
 
-  card.append(el("h2", null, "Watch-only wallets"), list, form, msg, warn);
+  card.append(el("h2", null, "Watch-only wallets"), list, form, hint, msg, warn);
 
   const renderManager = (view) => {
     list.textContent = "";
@@ -85,6 +88,12 @@ if (typeof document !== "undefined") {
     for (const w of view.wallets) {
       const row = el("div", "ws-row");
       row.append(el("span", "ws-name", w.name), el("span", null, balanceLabel(w)));
+      if (w.history && w.history.length >= 2) {
+        const spark = document.createElement("canvas");
+        spark.className = "ws-spark";
+        row.append(spark);
+        drawSpark(spark, w.history);
+      }
       stats.append(row);
     }
     if (view.show_total) {
@@ -94,6 +103,29 @@ if (typeof document !== "undefined") {
     }
     placeStats();
   };
+
+  // a tiny gold sparkline of a wallet's persisted balance history
+  function drawSpark(canvas, values) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = 64, h = 16;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const pts = points(values, w, h);
+    if (!pts.length) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent").trim() || "#f2a900";
+    ctx.lineWidth = 1.2;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  }
 
   // On desktop the balances float above the tower, centred on its axis; JS only
   // sets the horizontal centre (the CSS pins the top). On mobile they sit in the

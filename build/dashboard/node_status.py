@@ -10,6 +10,7 @@ from datetime import datetime
 import monitor
 import fee_history
 import watch
+import balance_history
 
 app = Flask(__name__)
 # Revalidate static assets every load (cheap 304s) so a deploy's new CSS/JS is
@@ -122,6 +123,21 @@ def api_fees():
     return {"fee": fee_history.series()}
 
 
+def balance_sampler_loop():
+    # Persist each watch wallet's balance so the trend survives restarts.
+    # Runs every 10 min; balance_history.record() throttles writes to hourly.
+    import time
+    while True:
+        try:
+            if WATCH:
+                bc = get_rpc_data("getblockchaininfo")
+                if bc and not bc.get("initialblockdownload", False):
+                    watch.balances(get_wallet_data, WATCH, on_sample=balance_history.record)
+        except Exception as e:
+            print(f"Balance sampler failed: {e}")
+        time.sleep(600)
+
+
 @app.route('/metrics')
 def metrics():
     """Prometheus text format, hand-rolled — what the dashboard already knows."""
@@ -181,6 +197,8 @@ def _reject_csrf():
 @app.route('/api/watch', methods=['GET'])
 def api_watch_list():
     view = watch.balances_view(get_wallet_data, WATCH)
+    for row in view["wallets"]:
+        row["history"] = balance_history.series(row["name"])  # persisted trend
     view["has_password"] = bool(DASHBOARD_PASSWORD)
     return jsonify(view)
 
@@ -215,6 +233,7 @@ def api_watch_remove(name):
         return bad
     if watch.remove_entry(WATCH, name):
         watch.deprovision(get_rpc_data, name)
+        balance_history.forget(name)
         return jsonify({"ok": True})
     return Response("no such wallet", 404)
 
@@ -381,6 +400,8 @@ if __name__ == '__main__':
     ).start()
     # records the next-block fee once a minute for the sparkline
     threading.Thread(target=fee_sampler_loop, daemon=True).start()
+    # persists watch-only balances so their trend survives restarts
+    threading.Thread(target=balance_sampler_loop, daemon=True).start()
     # provision any watch-only wallets once bitcoind is answering; the first
     # import rescans the chain, so keep it off the request path
     if WATCH:
