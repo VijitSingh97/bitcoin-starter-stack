@@ -18,7 +18,8 @@ The template ([config.example.json](../config.example.json)):
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
         "prune_mb": 0,
-        "inbound_onion": false
+        "inbound_onion": false,
+        "blockfilterindex": false
     },
     "dashboard": {
         "password": "",
@@ -42,6 +43,7 @@ The template ([config.example.json](../config.example.json)):
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node serves blocks to the network — see [Inbound onion service](#inbound-onion-service). |
+| `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
 | `dashboard.password` | `""` (no auth) | Non-empty enables HTTP basic auth on the dashboard (any username, this password). Letters and numbers only. |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |

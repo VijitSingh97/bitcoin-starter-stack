@@ -50,6 +50,7 @@ grep -q '^BITCOIN_DATA_DIR=./data/bitcoin$' "$tmp/.env" || fail "data_dir defaul
 grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applied"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
 grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion default not applied"
+grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
@@ -106,6 +107,17 @@ cat >"$tmp/config.json" <<'EOF'
  "notifications": {"healthchecks_url": "hc-ping.com/uuid"}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-URL healthchecks_url was accepted"
+
+# blockfilterindex: honored on a full node, rejected on a pruned one
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"node_username": "u", "node_password": "p", "blockfilterindex": true}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_BLOCKFILTERINDEX=1$' "$tmp/.env" || fail "blockfilterindex=true not rendered as 1"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": 550, "blockfilterindex": true}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "blockfilterindex was accepted on a pruned node"
 
 # 12. Warns when the onion dashboard has no password
 cat >"$tmp/config.json" <<'EOF'

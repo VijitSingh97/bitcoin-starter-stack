@@ -47,7 +47,7 @@ count=$(echo "$rendered" | grep -c 'testpass' || true)
 # All flags must sit on ONE line with the exec: a YAML-induced line break
 # after -conf silently drops them (found the hard way; see tests/test_e2e.sh).
 # shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
-echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" $$ONION_ARGS' ||
+echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$ONION_ARGS' ||
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked into rendered command line"
 
