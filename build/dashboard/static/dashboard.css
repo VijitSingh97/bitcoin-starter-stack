@@ -185,6 +185,8 @@ h2 {
   margin: 3px 0;
 }
 .tower-stats .ws-name { color: var(--muted); }
+.tower-stats .ws-spark { align-self: center; opacity: 0.85; }
+.watch-hint { color: var(--muted); font-size: 0.72rem; margin-top: 8px; }
 .tower-stats .ws-total-label {
   color: var(--muted);
   font-size: 0.7rem;

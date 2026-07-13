@@ -216,9 +216,10 @@ def deprovision(rpc, name):
     rpc("unloadwallet", [wallet_name(name), False])
 
 
-def balances(wallet_rpc, wallets):
+def balances(wallet_rpc, wallets, on_sample=None):
     """(rows, total_btc_string). Each row: {name, state, btc}. state is 'ok'
-    (btc set), 'scanning' (rescan in progress), or 'error'."""
+    (btc set), 'scanning' (rescan in progress), or 'error'. on_sample(name, btc)
+    is called with the numeric balance of each ready wallet (for history)."""
     rows, total = [], 0.0
     for w in list(wallets):  # snapshot — the list can be mutated by the API
         name = wallet_name(w["name"])
@@ -232,14 +233,16 @@ def balances(wallet_rpc, wallets):
             btc = (bal.get("mine", {}) or {}).get("trusted", 0) or 0
             total += btc
             row = {"name": w["name"], "state": "ok", "btc": fmt_btc(btc)}
+            if on_sample:
+                on_sample(w["name"], btc)
         row["key"] = w["key"]  # the UI shows a truncated form, expandable on click
         rows.append(row)
     return rows, fmt_btc(total)
 
 
-def balances_view(wallet_rpc, wallets):
+def balances_view(wallet_rpc, wallets, on_sample=None):
     """balances() plus show_total (only meaningful with more than one wallet)."""
-    rows, total = balances(wallet_rpc, wallets)
+    rows, total = balances(wallet_rpc, wallets, on_sample=on_sample)
     return {"wallets": rows, "total": total, "show_total": len(rows) > 1}
 
 

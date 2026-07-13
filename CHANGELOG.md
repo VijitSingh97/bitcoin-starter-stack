@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] - 2026-07-13
+
+### Added
+
+- **Watch-only balance history.** Each wallet's balance is now sampled hourly and
+  persisted to the `dashboard_state` volume, so the trend survives restarts (the
+  fee sparkline, by contrast, is in-memory and resets). A small gold sparkline of
+  the history shows next to each balance above the tower. It holds only balance
+  numbers + timestamps — never keys — and never leaves the box.
+- **Birthday hint in the add form** — a note that setting a wallet's birthday
+  skips years of rescanning.
+
 ## [1.16.0] - 2026-07-13
 
 ### Changed
@@ -403,6 +415,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.17.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.17.0
 [1.16.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.16.0
 [1.15.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.1
 [1.15.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.0
