@@ -175,12 +175,10 @@ h2 {
   color: var(--accent);
   font-family: monospace;
   z-index: 0;
-  /* Size to the widest row so labels/balances align in two columns without a
-     large balance (e.g. tens of thousands of BTC) truncating the label; a
-     sensible min for tidiness and a cap so it never overflows a phone. */
-  width: max-content;
-  min-width: 240px;
-  max-width: 92vw;
+  /* A roomy fixed width — wider than the content, ~¾ of the tower's span so it
+     reads as part of it, but not the full width. Capped to the viewport so it
+     stays clean on phones. 460px fits any real BTC balance without truncating. */
+  width: min(460px, 88vw);
   align-self: center;  /* centre the block in the column on mobile */
 }
 .tower-stats .ws-row {
