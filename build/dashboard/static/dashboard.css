@@ -175,8 +175,12 @@ h2 {
   color: var(--accent);
   font-family: monospace;
   z-index: 0;
-  width: 300px;        /* a fixed width so labels/balances align in two columns */
-  max-width: 88vw;
+  /* Size to the widest row so labels/balances align in two columns without a
+     large balance (e.g. tens of thousands of BTC) truncating the label; a
+     sensible min for tidiness and a cap so it never overflows a phone. */
+  width: max-content;
+  min-width: 240px;
+  max-width: 92vw;
   align-self: center;  /* centre the block in the column on mobile */
 }
 .tower-stats .ws-row {
