@@ -56,6 +56,21 @@ wpkh([a1b2c3d4/84h/0h/0h]xpub6CUGRUo.../<0;1>/*)
 The `<0;1>` covers both the receive and change branches. Any checksum (`#abcd…`)
 is fine to leave on or off.
 
+**A single address** — paste an address (`bc1…`, `1…`, or `3…`) to watch just
+that one address. Useful for a specific receive address, a donation address, or a
+paper wallet. Note it tracks only that address, not a whole wallet — for your
+full balance, use the account's xpub instead.
+
+## Exchange / custodial accounts (Coinbase, River, Cash App…)
+
+You **can't** get an xpub from a custodial service, and you can't watch a
+custodial balance at all — the coins aren't held at addresses you control, they're
+in the provider's pooled wallet, and the deposit addresses they show you rotate.
+Watch-only balances only work for wallets where **you** hold the keys (a hardware
+wallet, or a self-custody app like Sparrow/Electrum/BlueWallet). To make an
+exchange balance watchable, withdraw it to your own wallet and add that wallet's
+xpub.
+
 ## Requirements & the first rescan
 
 - A **full node** (`prune_mb: 0`). Finding an existing balance means rescanning

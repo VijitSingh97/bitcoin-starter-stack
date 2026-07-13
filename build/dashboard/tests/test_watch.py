@@ -89,6 +89,23 @@ def test_multipath_descriptor_expands_to_two_branches():
     assert out[1] == ("wpkh([abcd1234/84h/0h/0h]xpub6C.../1/*)", True)
 
 
+def test_bare_address_becomes_a_single_address_descriptor():
+    # legacy, p2sh, and bech32 addresses all wrap into addr()
+    for addr in ["1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+                 "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+                 "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"]:
+        assert watch.descriptors_for(addr) == [(f"addr({addr})", False)]
+
+
+def test_garbage_key_is_rejected():
+    for bad in ["hello world", "not-a-key", "xpub-but-broken", "12345"]:
+        try:
+            watch.descriptors_for(bad)
+            assert False, f"accepted garbage {bad!r}"
+        except ValueError:
+            pass
+
+
 # --- small helpers ---
 
 def test_wallet_name_is_namespaced_and_sanitized():
@@ -241,7 +258,9 @@ class FakeRpc:
         if method == "createwallet":
             return {"name": params[0]}
         if method == "getdescriptorinfo":
-            return {"descriptor": params[0] + "#ck"} if self.descriptor_ok else None
+            # ranged iff the descriptor derives (…/*), like a real node reports
+            return ({"descriptor": params[0] + "#ck", "isrange": "*" in params[0]}
+                    if self.descriptor_ok else None)
         return None
 
 
@@ -257,6 +276,24 @@ def test_ensure_creates_and_imports_new_wallet():
     reqs = imports[0][2][0]
     assert len(reqs) == 2 and all(r["timestamp"] == 1609459200 for r in reqs)
     assert [r["internal"] for r in reqs] == [False, True]
+
+
+def test_import_sends_range_only_for_ranged_descriptors():
+    # a ranged xpub gets range:1000; a single-address addr() must NOT (Core
+    # rejects a range on an un-ranged descriptor)
+    def run(key):
+        rpc = FakeRpc()
+        captured = []
+        wallet_rpc = lambda w, m, p=None: (
+            None if m == "getwalletinfo" else captured.append(p[0]))
+        watch.provision_one(rpc, wallet_rpc, {"name": "W", "key": key})
+        return captured[0]  # the importdescriptors request list
+
+    ranged = run(BIP84_ZPUB)
+    assert all("range" in r for r in ranged)
+    addr = run("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
+    assert len(addr) == 1 and "range" not in addr[0]
+    assert addr[0]["desc"].startswith("addr(1A1zP1eP5")
 
 
 def test_ensure_skips_already_loaded_wallet():
