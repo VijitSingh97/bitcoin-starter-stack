@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.3] - 2026-07-13
+
+### Changed
+
+- **Roomier watch-only balances.** The balances block is wider (up to 460px,
+  ~¾ of the tower's span) and the sparklines are longer/bolder, so the section
+  reads as part of the tower. It's capped to the viewport and the sparkline goes
+  compact on phones, so a long label + large balance still fit on one line
+  across all screen sizes.
+
 ## [1.18.2] - 2026-07-13
 
 ### Fixed
@@ -445,6 +455,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.18.3]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.3
 [1.18.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.2
 [1.18.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.1
 [1.18.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.0

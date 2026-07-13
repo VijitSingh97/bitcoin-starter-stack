@@ -111,7 +111,9 @@ if (typeof document !== "undefined") {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = 64, h = 16;
+    // wider line on desktop; compact on phones so a long name + big balance
+    // still fit on the same row
+    const w = window.innerWidth >= 900 ? 100 : 48, h = 18;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     canvas.style.width = w + "px";
@@ -124,7 +126,7 @@ if (typeof document !== "undefined") {
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.strokeStyle = getComputedStyle(document.documentElement)
       .getPropertyValue("--accent").trim() || "#f2a900";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.stroke();
   }
@@ -139,10 +141,11 @@ if (typeof document !== "undefined") {
       stats.style.left = "";
     }
   }
-  window.addEventListener("resize", placeStats);
-
   let last = { wallets: [] };
   const render = (view) => { last = view; renderManager(view); renderStats(view); };
+  // re-render on resize so the block re-centres and the sparklines redraw at the
+  // width for the new breakpoint
+  window.addEventListener("resize", () => renderStats(last));
 
   async function refresh() {
     try {
