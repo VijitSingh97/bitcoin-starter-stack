@@ -85,17 +85,18 @@ if (typeof document !== "undefined") {
     stats.textContent = "";
     if (!view.wallets.length) { stats.hidden = true; return; }
     stats.hidden = false;
+    // three cells per row — label | sparkline | balance — placed into shared
+    // grid columns (CSS) so they line up across every row regardless of width.
     for (const w of view.wallets) {
       const row = el("div", "ws-row");
-      const right = el("span", "ws-right");            // sparkline + balance, hugs the right
+      row.append(el("span", "ws-name", w.name));
       if (w.history && w.history.length >= 2) {
         const spark = document.createElement("canvas");
         spark.className = "ws-spark";
-        right.append(spark);
+        row.append(spark);
         drawSpark(spark, w.history);
       }
-      right.append(el("span", "ws-bal", balanceLabel(w)));
-      row.append(el("span", "ws-name", w.name), right);  // label left, balance right
+      row.append(el("span", "ws-bal", balanceLabel(w)));
       stats.append(row);
     }
     if (view.show_total) {

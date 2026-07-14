@@ -180,26 +180,35 @@ h2 {
      stays clean on phones. 460px fits any real BTC balance without truncating. */
   width: min(460px, 88vw);
   align-self: center;  /* centre the block in the column on mobile */
+  /* Three shared columns — label | sparkline | balance. Each row is a subgrid,
+     so the lines and balances line up across every row regardless of how wide
+     any one balance is (a subgrid track sizes to the widest cell in it). */
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  column-gap: 12px;
+  row-gap: 3px;
 }
 .tower-stats .ws-row {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px;
   font-size: 1rem;
-  margin: 3px 0;
 }
-/* label left (fills the row, truncates if long); balance group hugs the right */
-.tower-stats .ws-name {
+.tower-stats .ws-name {   /* label, column 1: fills the row, truncates if long */
+  grid-column: 1;
   color: var(--muted);
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tower-stats .ws-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.tower-stats .ws-bal { white-space: nowrap; }
-.tower-stats .ws-spark { opacity: 0.85; }
+.tower-stats .ws-spark { grid-column: 2; opacity: 0.85; }
+.tower-stats .ws-bal {   /* balance, column 3: right-aligned to a common edge */
+  grid-column: 3;
+  justify-self: end;
+  white-space: nowrap;
+}
 .tower-stats .ws-total-row {
   margin-top: 10px;
   padding-top: 8px;
