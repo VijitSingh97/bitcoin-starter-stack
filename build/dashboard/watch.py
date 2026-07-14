@@ -234,7 +234,7 @@ def balances(wallet_rpc, wallets, on_sample=None):
             total += btc
             row = {"name": w["name"], "state": "ok", "btc": fmt_btc(btc)}
             if on_sample:
-                on_sample(w["name"], btc)
+                on_sample(w["key"], btc)
         row["key"] = w["key"]  # the UI shows a truncated form, expandable on click
         rows.append(row)
     return rows, fmt_btc(total)

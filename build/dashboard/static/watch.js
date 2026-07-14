@@ -12,7 +12,7 @@ const CSRF = { "X-Requested-With": "fetch" }; // blocks cross-site form posts
 const POLL_MS = 15000;
 
 export function balanceLabel(w) {
-  if (w.state === "ok") return `${w.btc} BTC`;
+  if (w.state === "ok" || w.state === "stale") return `${w.btc} BTC`;
   if (w.state === "scanning") return "scanning…";
   return "—"; // error / not ready
 }
@@ -96,7 +96,12 @@ if (typeof document !== "undefined") {
         row.append(spark);
         drawSpark(spark, w.history);
       }
-      row.append(el("span", "ws-bal", balanceLabel(w)));
+      const bal = el("span", "ws-bal", balanceLabel(w));
+      if (w.state === "stale") {
+        bal.classList.add("stale");
+        bal.title = "last known balance — node unreachable";
+      }
+      row.append(bal);
       stats.append(row);
     }
     if (view.show_total) {

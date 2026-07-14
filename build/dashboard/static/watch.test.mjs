@@ -16,6 +16,10 @@ test("balanceLabel falls back to a dash on error / not-ready", () => {
   assert.equal(balanceLabel({ state: "whatever" }), "—");
 });
 
+test("balanceLabel shows the cached value when stale (node unreachable)", () => {
+  assert.equal(balanceLabel({ state: "stale", btc: "1.25" }), "1.25 BTC");
+});
+
 test("shortKey shows first 4 … last 4, or the whole thing when short", () => {
   assert.equal(shortKey("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), "1A1z…vfNa");
   assert.equal(shortKey("bc1qshort"), "bc1qshort"); // <= 12 chars, shown whole

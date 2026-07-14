@@ -418,6 +418,31 @@ def test_api_watch_accepts_every_key_type(monkeypatch, tmp_path):
     assert len(provisioned) == len(cases)  # each type started provisioning
 
 
+def test_api_watch_shows_stale_balance_when_node_down(monkeypatch, tmp_path):
+    # node unreachable (getwalletinfo → None) but we have cached history → show
+    # the last known value flagged stale, not a dash
+    monkeypatch.setenv("BALANCE_HISTORY", str(tmp_path / "bh.json"))
+    monkeypatch.setattr(node_status.balance_history, "_data", None)
+    node_status.balance_history.record("zkey", 1.25, now=0)  # a cached point
+    monkeypatch.setattr(node_status, "WATCH", [{"name": "Cold", "key": "zkey"}])
+    monkeypatch.setattr(node_status, "get_wallet_data", lambda w, m, p=None, timeout=8: None)
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "")
+    row = node_status.app.test_client().get(
+        "/api/watch", headers={"X-Requested-With": "fetch"}).get_json()["wallets"][0]
+    assert row["state"] == "stale" and row["btc"] == "1.25"
+
+
+def test_api_watch_remove_keeps_history(monkeypatch, tmp_path):
+    monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
+    monkeypatch.setenv("BALANCE_HISTORY", str(tmp_path / "bh.json"))
+    monkeypatch.setattr(node_status.balance_history, "_data", None)
+    node_status.balance_history.record("zkey", 2.5, now=0)
+    monkeypatch.setattr(node_status, "WATCH", [{"name": "Cold", "key": "zkey"}])
+    monkeypatch.setattr(node_status, "get_rpc_data", lambda m, p=None: None)
+    node_status.app.test_client().delete("/api/watch/Cold", headers={"X-Requested-With": "fetch"})
+    assert node_status.balance_history.series("zkey") == [2.5]  # retained, not forgotten
+
+
 def test_api_watch_add_then_remove(monkeypatch, tmp_path):
     monkeypatch.setenv("WATCH_STORE", str(tmp_path / "w.json"))
     store = []
