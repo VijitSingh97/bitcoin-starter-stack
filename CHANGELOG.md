@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.4] - 2026-07-13
+
+### Fixed
+
+- **The mid-width layout (~900–1024px) no longer overlaps.** In that range the
+  tower was squeezed against the card, so the balances floating on its axis ran
+  under the card and off the right edge. The side-by-side breakpoint is now
+  1024px (was 900); below it everything stacks (balances centred at the top,
+  card, tower behind) — the same clean layout as on phones. At ≥1024px the
+  balances float above the tower as before, now guaranteed to clear the card and
+  the viewport edge.
+
 ## [1.18.3] - 2026-07-13
 
 ### Changed
@@ -455,6 +467,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.18.4]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.4
 [1.18.3]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.3
 [1.18.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.2
 [1.18.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.1
