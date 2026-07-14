@@ -73,6 +73,10 @@ def get_rpc_data(method, params=None):
 # The saved watch-only wallet list (managed from the UI, seeded once from
 # config.json). Empty unless the operator adds any, so this is inert otherwise.
 WATCH = watch.load_store()
+# One-time: carry any history stored under the old name-based id to the new
+# key-hash id (harmless no-op once migrated).
+for _w in WATCH:
+    balance_history.migrate(_w["name"], _w["key"])
 
 def get_wallet_data(wallet, method, params=None, timeout=8):
     # Wallet-scoped RPC lives at /wallet/<name>. Balance reads are quick;
@@ -198,7 +202,13 @@ def _reject_csrf():
 def api_watch_list():
     view = watch.balances_view(get_wallet_data, WATCH)
     for row in view["wallets"]:
-        row["history"] = balance_history.series(row["name"])  # persisted trend
+        hist = balance_history.series(row["key"])  # persisted trend (keyed by key)
+        row["history"] = hist
+        # Node unreachable but we have a cached balance → show the last known
+        # value, flagged stale, instead of a dash.
+        if row["state"] == "error" and hist:
+            row["state"] = "stale"
+            row["btc"] = watch.fmt_btc(hist[-1])
     view["has_password"] = bool(DASHBOARD_PASSWORD)
     return jsonify(view)
 
@@ -233,7 +243,8 @@ def api_watch_remove(name):
         return bad
     if watch.remove_entry(WATCH, name):
         watch.deprovision(get_rpc_data, name)
-        balance_history.forget(name)
+        # Keep the history (and the unloaded Core wallet) so re-adding the same
+        # key restores the sparkline and reloads instantly — no rescan.
         return jsonify({"ok": True})
     return Response("no such wallet", 404)
 

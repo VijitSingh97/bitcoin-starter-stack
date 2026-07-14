@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] - 2026-07-13
+
+### Added
+
+- **Watch-only history is cached across removal.** Removing a wallet no longer
+  discards its balance history — re-adding the same key restores the sparkline
+  (and the unloaded Core wallet reloads instantly, no rescan). History is now
+  keyed by a hash of the wallet's key rather than its label, so a differently-
+  keyed wallet that reuses an old name gets a fresh series (and existing history
+  is migrated over automatically). Balances themselves already update live as new
+  transactions arrive — the node keeps the loaded wallet current and the
+  dashboard re-reads it every 15s.
+- **Last-known balance while the node is unreachable.** If the node can't be
+  reached, a wallet shows its last cached balance (dimmed, "last known" on hover)
+  instead of a dash.
+
 ## [1.18.5] - 2026-07-13
 
 ### Fixed
@@ -476,6 +492,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.19.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.19.0
 [1.18.5]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.5
 [1.18.4]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.4
 [1.18.3]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.3

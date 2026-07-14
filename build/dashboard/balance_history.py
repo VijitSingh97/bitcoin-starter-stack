@@ -7,6 +7,7 @@ holds only balance numbers + timestamps, never keys, and never leaves the box.
 
 Thread-safe: a background sampler writes, request handlers read.
 """
+import hashlib
 import json
 import os
 import threading
@@ -15,7 +16,15 @@ import time
 MIN_INTERVAL = 3600   # at most one sample per wallet per hour
 MAX_POINTS = 2160     # ~90 days of hourly points
 _lock = threading.Lock()
-_data = None          # {wallet_name: [[ts, btc], ...]}, loaded once
+_data = None          # {key_id: [[ts, btc], ...]}, loaded once
+
+
+def key_id(key):
+    """Stable storage id for a wallet, derived from its KEY (xpub/descriptor/
+    address). Keying by the key — not the display name — means history follows
+    the wallet across a remove/re-add, and a differently-keyed wallet that reuses
+    an old name gets a fresh series. Also avoids storing the xpub a second time."""
+    return hashlib.sha256((key or "").strip().encode()).hexdigest()[:16]
 
 
 def _path():
@@ -45,29 +54,41 @@ def _save():
         print(f"balance history not saved: {e}")
 
 
-def record(name, btc, now=None):
-    """Append a sample for `name`, skipped if the last one is under an hour old.
-    `now` is injectable for tests."""
+def record(key, btc, now=None):
+    """Append a sample for a wallet (by its key), skipped if the last one is
+    under an hour old. `now` is injectable for tests."""
     if not isinstance(btc, (int, float)):
         return
     now = time.time() if now is None else now
+    kid = key_id(key)
     with _lock:
         data = _loaded()
-        s = data.get(name, [])
+        s = data.get(kid, [])
         if s and now - s[-1][0] < MIN_INTERVAL:
             return
-        data[name] = (s + [[round(now, 3), round(float(btc), 8)]])[-MAX_POINTS:]
+        data[kid] = (s + [[round(now, 3), round(float(btc), 8)]])[-MAX_POINTS:]
         _save()
 
 
-def series(name):
+def series(key):
     """The balance values for a wallet (for the sparkline)."""
     with _lock:
-        return [pt[1] for pt in _loaded().get(name, [])]
+        return [pt[1] for pt in _loaded().get(key_id(key), [])]
 
 
-def forget(name):
-    """Drop a removed wallet's history."""
+def forget(key):
+    """Drop a wallet's history."""
     with _lock:
-        if _loaded().pop(name, None) is not None:
+        if _loaded().pop(key_id(key), None) is not None:
+            _save()
+
+
+def migrate(old_id, key):
+    """One-time carry-over: move history stored under an old id (e.g. the wallet
+    name, from before we keyed by the key) to the key-hash id."""
+    new = key_id(key)
+    with _lock:
+        data = _loaded()
+        if old_id in data and new not in data:
+            data[new] = data.pop(old_id)
             _save()
