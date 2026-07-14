@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.5] - 2026-07-13
+
+### Fixed
+
+- **Watch-only rows now line up in three columns** — label, sparkline, balance —
+  that stay aligned across every row (and the total) regardless of how wide any
+  balance is. The sparkline used to drift left/right with the balance width; it's
+  now a shared subgrid so the lines and numbers all align.
+
 ## [1.18.4] - 2026-07-13
 
 ### Fixed
@@ -467,6 +476,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.18.5]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.5
 [1.18.4]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.4
 [1.18.3]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.3
 [1.18.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.2
