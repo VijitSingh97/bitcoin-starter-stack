@@ -93,9 +93,9 @@ body {
 }
 
 /* With room to spare, put the card on the left and give the tower the right
-   half of the page (tower.js mirrors this 900px breakpoint). Below it, the
-   card stays centred and the tower sits behind it. */
-@media (min-width: 900px) {
+   half of the page (mirrors tower.js WIDE_MIN = 1024px). Below it, everything
+   stacks: the card stays centred and the tower sits behind it. */
+@media (min-width: 1024px) {
   .center,
   .center-screen {
     justify-content: flex-start;
@@ -210,14 +210,14 @@ h2 {
 .tower-stats .ws-total-row .ws-name { color: var(--accent); }
 .watch-hint { color: var(--muted); font-size: 0.72rem; margin-top: 8px; }
 
-@media (min-width: 900px) {
+@media (min-width: 1024px) {
   .tower-stats {
     position: fixed;
     top: 32px;
     transform: translateX(-50%); /* JS sets left = the tower's centre axis */
   }
 }
-@media (max-width: 899px) {
+@media (max-width: 1023px) {
   /* room to scroll the cards away and see the tower on its own. flex-basis
      (not height) because as a flex-column child a plain height is ignored. */
   .stack-col::after { content: ""; flex: 0 0 80vh; }

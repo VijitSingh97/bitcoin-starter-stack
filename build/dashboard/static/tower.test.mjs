@@ -66,14 +66,16 @@ test("smooth clamps to [0,1] and eases the ends", () => {
   assert.ok(smooth(0.25) < 0.25);
 });
 
-test("towerLayout centres behind the card on mobile", () => {
-  const m = towerLayout(375);
-  assert.equal(m.wide, false);
-  assert.equal(m.ox, 187.5);
+test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {
+  for (const W of [375, 900, 1023]) {  // phones through the awkward mid-range
+    const m = towerLayout(W);
+    assert.equal(m.wide, false, `W=${W} should stack`);
+    assert.equal(m.ox, W / 2);
+  }
 });
 
 test("towerLayout keeps the tower clear of the card zone on wide screens", () => {
-  for (const W of [900, 1024, 1280, 1920]) {
+  for (const W of [1024, 1280, 1920]) {
     const { wide, ox, tw } = towerLayout(W, GRID);
     assert.equal(wide, true);
     assert.ok(ox - (GRID * tw) / 2 >= 500, `W=${W} overlaps card`);

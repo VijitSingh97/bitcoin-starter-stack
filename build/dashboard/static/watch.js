@@ -5,7 +5,7 @@
 //
 // Lives outside #live so the 30s status refresh never clobbers the add form.
 // Every bit of user data (labels, keys) goes in via textContent — no XSS.
-import { towerLayout } from "./tower.js";
+import { towerLayout, WIDE_MIN } from "./tower.js";
 import { points } from "./sparkline.js";
 
 const CSRF = { "X-Requested-With": "fetch" }; // blocks cross-site form posts
@@ -135,7 +135,7 @@ if (typeof document !== "undefined") {
   // sets the horizontal centre (the CSS pins the top). On mobile they sit in the
   // normal flow at the top of the column.
   function placeStats() {
-    if (window.innerWidth >= 900) {
+    if (window.innerWidth >= WIDE_MIN) {
       stats.style.left = towerLayout(window.innerWidth).ox + "px";
     } else {
       stats.style.left = "";

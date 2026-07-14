@@ -10,6 +10,11 @@
 // for tower.test.mjs; the canvas wiring is guarded on `document`.
 export const GRID = 12;
 export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
+// Side-by-side card + tower (and balances floating above the tower) only above
+// this width; below it everything stacks. Kept in sync with the CSS media
+// queries. Set high enough that the ~460px balances block clears the card and
+// the viewport edge (a squeeze in the 900–1024 range looked broken).
+export const WIDE_MIN = 1024;
 const ROLLOVER_DROP = 12; // a fall this far below the shown fill = midnight rolled over
 
 // Fill order of cube `index` (0..143): row by row, back to front.
@@ -53,7 +58,7 @@ export function smooth(t) {
 }
 
 export function towerLayout(W, cols = GRID) {
-  if (W < 900) {
+  if (W < WIDE_MIN) {
     return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
   }
   const cardZone = 500; // left padding + 420px card + a gap
