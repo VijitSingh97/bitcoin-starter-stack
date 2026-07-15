@@ -146,6 +146,31 @@ EOF
 out=$(cd "$tmp" && ./configure.sh)
 echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
 
+# 13. Version string: release number for a clean tagged checkout, branch-commit
+#     for a dev build (drives the dashboard's version display).
+if command -v git >/dev/null; then
+  gtmp=$(mktemp -d)
+  cp configure.sh "$gtmp/"
+  printf '9.9.9\n' >"$gtmp/VERSION"
+  (
+    cd "$gtmp"
+    git init -q && git config user.email t@t && git config user.name t
+    git add -A && git commit -qm init && git tag v9.9.9
+    ./configure.sh >/dev/null
+    grep -q '^STACK_VERSION=9.9.9$' .env || {
+      echo "FAIL: tagged checkout should show release number"
+      exit 1
+    }
+    git checkout -qb feature && git commit -q --allow-empty -m more
+    ./configure.sh >/dev/null
+    grep -qE '^STACK_VERSION=feature-[0-9a-f]{7,}$' .env || {
+      echo "FAIL: dev build should show branch-commit"
+      exit 1
+    }
+  ) || exit 1
+  rm -rf "$gtmp"
+fi
+
 # The zero-config .env must render a valid compose config (what `./stack up` runs)
 if command -v docker >/dev/null; then
   rm -f "$tmp/config.json"

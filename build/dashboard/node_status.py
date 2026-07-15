@@ -1,5 +1,6 @@
 import hmac
 import os
+import re
 import shutil
 import threading
 import requests
@@ -28,8 +29,13 @@ DISK_WARN_FREE_GB = 50
 
 
 def _read_stack_version():
-    # baked into the image at build time (COPY VERSION), so the displayed
-    # version always matches the running code — not a stale .env value
+    # configure.sh computes this from the git checkout: the release number for a
+    # clean tagged checkout, else branch-commit for a dev build. Prefer it so a
+    # pulled release image (VERSION baked in) still shows the dev id when run off
+    # an unreleased checkout. Fall back to the baked VERSION, then "dev".
+    v = os.environ.get("STACK_VERSION", "").strip()
+    if v:
+        return v
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")) as f:
             v = f.read().strip()
@@ -37,7 +43,7 @@ def _read_stack_version():
                 return v
     except OSError:
         pass
-    return os.environ.get("STACK_VERSION", "dev")
+    return "dev"
 
 
 STACK_VERSION = _read_stack_version()
@@ -45,8 +51,11 @@ monitor.STACK_VERSION = STACK_VERSION  # keep the update-checker in sync
 
 
 def version_label():
-    # "v1.3.0" for a real release, "dev" for an unversioned checkout
-    return f"v{STACK_VERSION}" if STACK_VERSION and STACK_VERSION != "dev" else "dev"
+    # "v1.3.0" for a release (semver), the raw "branch-commit" for a dev build,
+    # "dev" for an unversioned checkout
+    if not STACK_VERSION or STACK_VERSION == "dev":
+        return "dev"
+    return f"v{STACK_VERSION}" if re.fullmatch(r"\d+\.\d+\.\d+", STACK_VERSION) else STACK_VERSION
 
 
 @app.before_request

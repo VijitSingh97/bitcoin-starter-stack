@@ -122,6 +122,14 @@ def test_index_shows_dev_when_unversioned(monkeypatch):
     assert "vdev" not in body  # not v-prefixed
 
 
+def test_index_shows_branch_commit_for_dev_build(monkeypatch):
+    # a non-semver version (branch-commit) renders as-is, no "v" prefix
+    monkeypatch.setattr(node_status, "STACK_VERSION", "main-abc1234")
+    body = render_index(monkeypatch).data.decode()
+    assert "main-abc1234" in body
+    assert "vmain-abc1234" not in body
+
+
 def test_loading_page_shows_version(monkeypatch):
     monkeypatch.setattr(node_status, "get_rpc_data", lambda method, params=None: None)
     monkeypatch.setattr(node_status, "STACK_VERSION", "1.3.0")
