@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.24.1] - 2026-07-14
+
+### Fixed
+
+- **A tagged release deploy now shows the release number, not `HEAD-<commit>`.**
+  Release tags are annotated, so `git rev-parse v<version>` returns the tag
+  object rather than its commit; the 1.24.0 check compared that against HEAD's
+  commit, never matched, and every deploy looked like a dev build. Dereference
+  the tag with `^{commit}`, ignore untracked runtime files when judging a clean
+  tree, and render a detached-HEAD dev build as the bare short commit instead of
+  `HEAD-<commit>`.
+
 ## [1.24.0] - 2026-07-14
 
 ### Changed
