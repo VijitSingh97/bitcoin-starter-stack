@@ -28,8 +28,8 @@ rpc_user=$(get '.bitcoin.node_username')
 rpc_password=$(get '.bitcoin.node_password')
 [ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env 2>/dev/null || true)
 [ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env 2>/dev/null || true)
-[ -n "$rpc_user" ] || rpc_user="rpc$(openssl rand -hex 8)"
-[ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24)
+[ -n "$rpc_user" ] || rpc_user="bitcoin"                       # conventional default username
+[ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24) # strong random
 
 data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
 dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
