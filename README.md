@@ -55,11 +55,15 @@ Details in [Hardware Requirements](docs/hardware.md).
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
 cd bitcoin-starter-stack   # or unpack the tarball from the latest release
-cp config.example.json config.json
-nano config.json    # set node_username and node_password (letters/numbers only)
-./configure.sh      # writes .env, creates the data dir
-docker compose up -d
+./stack up                 # generates config, creates the data dir, and starts — nothing to edit
 ```
+
+That's it — no file to edit. `./stack up` writes a `.env` with sensible defaults
+and auto-generated internal credentials (a full node over Tor), then starts the
+stack. Everything below is **optional**: to set a dashboard password, a Tor onion,
+Telegram/Healthchecks alerts, pruning, or preloaded watch-only wallets, copy
+`config.example.json` to `config.json`, edit it, and run `./stack apply`. See
+[Configuration](docs/configuration.md).
 
 Then watch it come up:
 

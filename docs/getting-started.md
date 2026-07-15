@@ -23,15 +23,19 @@ sudo apt install jq avahi-daemon
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
 cd bitcoin-starter-stack
-cp config.example.json config.json
-nano config.json    # set node_username and node_password
-./configure.sh
-docker compose up -d
+./stack up          # generates config + data dir, then starts — nothing to edit
 ```
 
-`configure.sh` renders your settings into a gitignored `.env` and creates
-the data directory. Stick to letters and numbers in the credentials — they
-pass through shell and env-file layers where special characters can bite.
+`./stack up` runs `configure.sh` on first launch, which renders a gitignored
+`.env` and creates the data directory. With no `config.json` it uses sensible
+defaults (a full archival node over Tor) and **auto-generates** the internal RPC
+credentials — the dashboard and bitcoind use them over a private network; you
+never type or see them.
+
+Everything is optional. To set a dashboard password, a Tor onion service,
+Telegram/Healthchecks alerts, pruning, `blockfilterindex`, or preloaded
+watch-only wallets, copy `config.example.json` to `config.json`, edit it, and run
+`./stack apply`. Stick to letters and numbers in any credentials you set by hand.
 The full key reference is in [Configuration](configuration.md).
 
 ## First start: what to expect

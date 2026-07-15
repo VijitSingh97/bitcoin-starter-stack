@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# configure.sh end-to-end: placeholder guard, .env rendering, permissions.
+# configure.sh end-to-end: zero-config auto-generation, .env rendering, validation.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,16 +12,26 @@ fail() {
   exit 1
 }
 
-# 1. Refuses to run without a config.json
-(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "missing config.json was accepted"
+# 1. Runs with NO config.json — defaults applied, RPC credentials auto-generated
+(cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
+grep -qE '^BITCOIN_RPC_USER=[a-zA-Z0-9]+$' "$tmp/.env" || fail "RPC user not auto-generated"
+grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
+grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
 
-# 2. Refuses to run with placeholder credentials
-cp config.example.json "$tmp/config.json"
-(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "placeholder config was accepted"
+# 2. Re-running keeps the same auto-generated credentials (idempotent)
+u1=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
+p1=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
+(cd "$tmp" && ./configure.sh) >/dev/null
+[ "$u1" = "$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")" ] &&
+  [ "$p1" = "$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")" ] ||
+  fail "credentials changed on re-run (not idempotent)"
 
-# 3. Refuses empty/missing credentials
-echo '{"bitcoin": {"node_username": "u"}}' >"$tmp/config.json"
-(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "missing password was accepted"
+# 3. A config.json without credentials still gets auto-generated ones
+rm -f "$tmp/.env"
+echo '{"bitcoin": {"dbcache_mb": 512}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -qE '^BITCOIN_RPC_USER=[a-zA-Z0-9]+$' "$tmp/.env" || fail "creds not auto-generated with partial config"
+grep -q '^BITCOIN_DBCACHE=512$' "$tmp/.env" || fail "partial config override not applied"
 
 # 4. Refuses special characters in credentials (they'd hit shell/env-file layers)
 # shellcheck disable=SC2016 # non-expansion of the backtick is the point
@@ -125,5 +135,13 @@ cat >"$tmp/config.json" <<'EOF'
 EOF
 out=$(cd "$tmp" && ./configure.sh)
 echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
+
+# The zero-config .env must render a valid compose config (what `./stack up` runs)
+if command -v docker >/dev/null; then
+  rm -f "$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null
+  docker compose --env-file "$tmp/.env" config >/dev/null 2>&1 ||
+    fail "zero-config .env does not render a valid compose config"
+fi
 
 echo "PASS: test_configure.sh"
