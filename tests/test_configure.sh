@@ -22,9 +22,11 @@ grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied witho
 u1=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p1=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 (cd "$tmp" && ./configure.sh) >/dev/null
-[ "$u1" = "$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")" ] &&
-  [ "$p1" = "$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")" ] ||
+u2=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
+p2=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
+if [ "$u1" != "$u2" ] || [ "$p1" != "$p2" ]; then
   fail "credentials changed on re-run (not idempotent)"
+fi
 
 # 3. A config.json without credentials still gets auto-generated ones
 rm -f "$tmp/.env"
