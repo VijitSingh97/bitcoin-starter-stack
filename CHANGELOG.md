@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.20.1] - 2026-07-13
+
+### Changed
+
+- The auto-generated RPC username now defaults to the conventional `bitcoin`
+  (was a random `rpc<hex>`); the password stays strong-random. Internal only —
+  used between the dashboard and bitcoind.
+
 ## [1.20.0] - 2026-07-13
 
 ### Changed
@@ -506,6 +514,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.20.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.1
 [1.20.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.0
 [1.19.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.19.0
 [1.18.5]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.5

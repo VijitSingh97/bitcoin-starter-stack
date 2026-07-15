@@ -14,7 +14,7 @@ fail() {
 
 # 1. Runs with NO config.json — defaults applied, RPC credentials auto-generated
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
-grep -qE '^BITCOIN_RPC_USER=[a-zA-Z0-9]+$' "$tmp/.env" || fail "RPC user not auto-generated"
+grep -q '^BITCOIN_RPC_USER=bitcoin$' "$tmp/.env" || fail "RPC user default is not 'bitcoin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
 
