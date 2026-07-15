@@ -42,3 +42,35 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" bitcoin-starter-stack.tar.gz \
             --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
+
+  # Publish prebuilt multi-arch images (amd64 + arm64/Pi) to GHCR so end users
+  # pull instead of building. Independent of `publish`: a registry hiccup here
+  # won't block the source release, and compose falls back to a local build.
+  images:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Enable arm64 emulation (QEMU)
+        run: docker run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5@sha256:2d2918e86e5327d0661f7083d67a95280b0f7be8f77ed79a8418f81d7d90ce6f --install arm64
+
+      - name: Set up buildx (container driver for multi-arch)
+        run: docker buildx create --use --driver docker-container
+
+      - name: Log in to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push multi-arch images
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          base="ghcr.io/$owner/bitcoin-starter-stack"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t "$base-tor:$v" -t "$base-tor:latest" --push ./build/tor
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f build/dashboard/Dockerfile \
+            -t "$base-dashboard:$v" -t "$base-dashboard:latest" --push .

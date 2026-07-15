@@ -32,6 +32,11 @@ defaults (a full archival node over Tor) and **auto-generates** the internal RPC
 credentials — the dashboard and bitcoind use them over a private network; you
 never type or see them.
 
+The `tor` and `dashboard` images are **pulled prebuilt** from GHCR
+(`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`), published multi-arch for amd64
+and arm64 (Raspberry Pi). Nothing compiles on your box unless you're on a commit
+with no matching published tag, in which case compose builds them locally.
+
 Everything is optional. Two ways to customize:
 
 - **`./stack init`** — an interactive wizard that asks about a dashboard password,
