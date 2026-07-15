@@ -104,6 +104,21 @@ fi
 rpcauth_salt=$(openssl rand -hex 16)
 rpcauth_hash=$(printf '%s' "$rpc_password" | openssl dgst -sha256 -hmac "$rpcauth_salt" -r | cut -d' ' -f1)
 
+# Displayed version: the release number when this checkout IS the tagged release
+# (or an unpacked release tarball, which has no git), otherwise branch-commit so
+# dev builds are identifiable rather than masquerading as the release.
+version=$(cat VERSION 2>/dev/null || echo dev)
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "v$version" 2>/dev/null)" ] &&
+    [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+    stack_version="$version" # clean checkout of the release tag
+  else
+    stack_version="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  fi
+else
+  stack_version="$version" # release tarball (no .git)
+fi
+
 cat >.env <<EOF
 BITCOIN_RPC_USER=$rpc_user
 BITCOIN_RPC_PASSWORD=$rpc_password
@@ -122,7 +137,7 @@ TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
 ALERT_NEW_BLOCK=$alert_new_block
 NODE_NAME=$(hostname)
-STACK_VERSION=$(cat VERSION 2>/dev/null || echo dev)
+STACK_VERSION=$stack_version
 WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
 chmod 600 .env

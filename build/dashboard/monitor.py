@@ -96,7 +96,10 @@ def check_updates(subversion, state):
     notes = []
 
     latest_stack = _latest_release_tag(STACK_RELEASES_URL)
-    if STACK_VERSION and latest_stack and _newer(latest_stack, STACK_VERSION):
+    # Only compare against releases when running one — a dev build's version is
+    # "branch-commit", not a version to rank against the latest tag.
+    on_release = bool(re.fullmatch(r"\d+\.\d+\.\d+", STACK_VERSION or ""))
+    if on_release and latest_stack and _newer(latest_stack, STACK_VERSION):
         notes.append(f"stack v{latest_stack} available (running v{STACK_VERSION})")
         if state.get("notified_stack") != latest_stack:
             send_telegram(f"🆕 stack v{latest_stack} available (running v{STACK_VERSION})")

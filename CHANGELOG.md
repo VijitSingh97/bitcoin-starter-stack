@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.24.0] - 2026-07-14
+
+### Changed
+
+- **Version display distinguishes releases from dev builds.** A clean checkout of
+  a release tag (or an unpacked release tarball) shows the release number
+  (`v1.24.0`); any other checkout shows `branch-commit` (e.g. `main-a1b2c3d`), so
+  a dev build never masquerades as a release. `configure.sh` computes this from
+  the git state and the dashboard prefers it over the image-baked `VERSION` —
+  which matters now that release images are pulled prebuilt: a pulled image run
+  off an unreleased checkout still reports the dev id. The update-checker only
+  compares against releases when actually running one.
+
 ## [1.23.0] - 2026-07-14
 
 ### Added
