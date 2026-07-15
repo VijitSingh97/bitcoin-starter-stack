@@ -60,10 +60,13 @@ cd bitcoin-starter-stack   # or unpack the tarball from the latest release
 
 That's it — no file to edit. `./stack up` writes a `.env` with sensible defaults
 and auto-generated internal credentials (a full node over Tor), then starts the
-stack. Everything below is **optional**: to set a dashboard password, a Tor onion,
-Telegram/Healthchecks alerts, pruning, or preloaded watch-only wallets, copy
-`config.example.json` to `config.json`, edit it, and run `./stack apply`. See
-[Configuration](docs/configuration.md).
+stack.
+
+Prefer to be asked? **`./stack init`** walks you through the options — a dashboard
+password, a Tor onion, inbound Tor connections, a fast clearnet initial sync,
+pruning — each with a default you accept by pressing Enter. Everything is
+optional; you can also set it later by editing `config.json` and running
+`./stack apply`. See [Configuration](docs/configuration.md).
 
 Then watch it come up:
 

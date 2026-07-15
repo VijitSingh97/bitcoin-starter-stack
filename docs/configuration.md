@@ -42,7 +42,7 @@ shows the overridable settings with their defaults:
 | `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
-| `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node serves blocks to the network — see [Inbound onion service](#inbound-onion-service). |
+| `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node accepts inbound connections and serves blocks to the network. **Encouraged** — it strengthens the network with **no IP exposure** (it's over Tor); the only cost is some extra bandwidth. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
 | `bitcoin.sync_over_clearnet` | `false` | `true` runs the initial block download over **clearnet** (hours, vs. days over Tor) — but this **exposes your home IP** to peers during the sync. Onion peers still go through Tor. Set it back to `false` and `./stack apply` once synced to return to Tor-only. Opt-in; leave `false` for a fully private node. |
 | `dashboard.password` | `""` (no auth) | Non-empty enables HTTP basic auth on the dashboard (any username, this password). Letters and numbers only. |
@@ -94,7 +94,10 @@ Apply like any other change: edit `config.json`, `./configure.sh`,
 By default the node is outbound-only. Setting `"inbound_onion": true` has
 bitcoind register an onion service over Tor's control port, so other nodes
 can fetch blocks from you **without your IP ever being visible** — you
-contribute to the network from behind Tor.
+contribute to the network from behind Tor. It's **encouraged**: more reachable
+nodes make Bitcoin healthier, and over Tor it's private. The only cost is some
+extra outbound bandwidth serving blocks to peers. (`./stack init` offers it as a
+prompt.)
 
 Mechanics (already wired, just flip the flag): tor exposes a cookie-authed
 control port on the internal network; the tor data volume is mounted

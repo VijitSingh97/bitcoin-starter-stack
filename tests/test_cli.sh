@@ -40,4 +40,21 @@ perms=$(ls -l .env | cut -c1-10)
 # restore without -y aborts on anything but yes
 echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded without confirmation"
 
+# init wizard builds config.json from piped answers (Enter = default; last = don't start)
+rm -f config.json .env
+# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y inbound=y clearnet=n prune=10 start=n
+printf '\n\nhunter2\ny\ny\nn\n10\nn\n' | ./stack init >/dev/null
+[ -f config.json ] || fail "init did not write config.json"
+[ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
+[ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
+[ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "true" ] || fail "init: inbound onion"
+[ "$(jq -r '.bitcoin.sync_over_clearnet // false' config.json)" = "false" ] || fail "init: clearnet should be off"
+[ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
+[ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
+[ "$(jq -r '.bitcoin.node_password // "unset"' config.json)" = "unset" ] || fail "init: random password should be omitted"
+# the generated config must feed configure.sh cleanly (creds auto-generated)
+./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
+grep -q '^BITCOIN_RPC_USER=bitcoin$' .env || fail "wizard config: username default not applied"
+grep -q '^DASHBOARD_PASSWORD=hunter2$' .env || fail "wizard config: dashboard password not rendered"
+
 echo "PASS: test_cli.sh"
