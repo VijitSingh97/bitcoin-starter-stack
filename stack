@@ -8,6 +8,7 @@ usage() {
 Usage: ./stack <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
+  init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
   apply                      Re-render .env from config.json and apply changes
   status                     Container + health summary; warns on anything down
@@ -19,6 +20,58 @@ EOF
 }
 
 env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+
+# Interactive setup: every prompt has a sensible default — press Enter to skip.
+# Writes config.json (only the values you change), then offers to start. Plain
+# `./stack up` needs none of this; it just uses the defaults.
+init() {
+  if [ -f config.json ]; then
+    printf "config.json already exists — overwrite it? [y/N] "
+    read -r reply
+    case "$reply" in y | Y) ;; *)
+      echo "Kept existing config.json. (Edit it and ./stack apply, or ./stack up.)"
+      return 0
+      ;;
+    esac
+  fi
+
+  echo "Setup — press Enter to accept the [default]. Nothing here is required."
+  echo
+  read -r -p "RPC username [bitcoin]: " w_user
+  read -rsp "RPC password [Enter = strong random]: " w_pass; echo
+  read -rsp "Dashboard web password [Enter = no login]: " w_dashpass; echo
+  read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
+  read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [y/N] " w_inbound
+  read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet
+  read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
+
+  yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
+  cfg=$(jq -n '{}')
+  [ -n "$w_user" ] && [ "$w_user" != "bitcoin" ] && cfg=$(jq --arg v "$w_user" '.bitcoin.node_username=$v' <<<"$cfg")
+  [ -n "$w_pass" ] && cfg=$(jq --arg v "$w_pass" '.bitcoin.node_password=$v' <<<"$cfg")
+  [ -n "$w_dashpass" ] && cfg=$(jq --arg v "$w_dashpass" '.dashboard.password=$v' <<<"$cfg")
+  yes "$w_dashonion" && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
+  yes "$w_inbound" && cfg=$(jq '.bitcoin.inbound_onion=true' <<<"$cfg")
+  yes "$w_clearnet" && cfg=$(jq '.bitcoin.sync_over_clearnet=true' <<<"$cfg")
+  if [ -n "$w_prune_gb" ]; then
+    case "$w_prune_gb" in
+      *[!0-9]*) echo "  (prune must be a whole number of GB — ignoring)" ;;
+      *) cfg=$(jq --argjson v "$((w_prune_gb * 1000))" '.bitcoin.prune_mb=$v' <<<"$cfg") ;;
+    esac
+  fi
+
+  echo "$cfg" | jq . >config.json
+  echo
+  echo "Wrote config.json:"
+  sed 's/^/  /' config.json
+  echo
+  printf "Start the stack now? [Y/n] "
+  read -r reply
+  case "$reply" in n | N) echo "Later: ./stack up" ;; *)
+    ./configure.sh && docker compose up -d
+    ;;
+  esac
+}
 
 status() {
   docker compose ps
@@ -143,6 +196,7 @@ case "$cmd" in
     [ -f .env ] || ./configure.sh   # first run: generate .env (auto-config)
     docker compose up -d "$@"
     ;;
+  init) init ;;
   down) docker compose down "$@" ;;
   restart) docker compose restart "$@" ;;
   logs) docker compose logs -f --tail=100 "$@" ;;

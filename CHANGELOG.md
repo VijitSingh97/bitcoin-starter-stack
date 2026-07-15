@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] - 2026-07-13
+
+### Added
+
+- **Interactive setup wizard: `./stack init`.** An optional, friendlier path than
+  editing `config.json`: it asks about a dashboard password, a Tor onion, inbound
+  Tor connections, a fast clearnet initial sync, and pruning — each with a default
+  you accept by pressing Enter. Writes a minimal `config.json` (only what you
+  change) and offers to start. `./stack up` still needs none of this. Inbound Tor
+  connections (`inbound_onion`) are documented as **encouraged** — they help the
+  network with no IP exposure.
+
 ## [1.21.0] - 2026-07-13
 
 ### Added
@@ -526,6 +538,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.22.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.22.0
 [1.21.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.21.0
 [1.20.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.1
 [1.20.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.0

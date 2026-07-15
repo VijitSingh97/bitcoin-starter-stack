@@ -32,10 +32,14 @@ defaults (a full archival node over Tor) and **auto-generates** the internal RPC
 credentials — the dashboard and bitcoind use them over a private network; you
 never type or see them.
 
-Everything is optional. To set a dashboard password, a Tor onion service,
-Telegram/Healthchecks alerts, pruning, `blockfilterindex`, or preloaded
-watch-only wallets, copy `config.example.json` to `config.json`, edit it, and run
-`./stack apply`. Stick to letters and numbers in any credentials you set by hand.
+Everything is optional. Two ways to customize:
+
+- **`./stack init`** — an interactive wizard that asks about a dashboard password,
+  a Tor onion, inbound Tor connections, a fast clearnet initial sync, and pruning.
+  Every prompt has a default you accept by pressing Enter.
+- Or edit `config.json` by hand (copy `config.example.json`) and run
+  `./stack apply`. Stick to letters and numbers in any credentials you set.
+
 The full key reference is in [Configuration](configuration.md).
 
 ## First start: what to expect
