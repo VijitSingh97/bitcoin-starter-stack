@@ -36,6 +36,7 @@ dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
 prune=$(jq -r '.bitcoin.prune_mb // 0' <<<"$config")
 inbound_onion=$(flag '.bitcoin.inbound_onion')
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
+sync_over_clearnet=$(flag '.bitcoin.sync_over_clearnet')
 dashboard_password=$(get '.dashboard.password')
 dashboard_onion=$(flag '.dashboard.onion')
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
@@ -76,6 +77,13 @@ if [ "$dashboard_onion" = "1" ] && [ -z "$dashboard_password" ]; then
   echo "         anyone who learns the onion address can view the dashboard."
 fi
 
+if [ "$sync_over_clearnet" = "1" ]; then
+  echo "WARNING: sync_over_clearnet is ON — the initial sync connects to clearnet"
+  echo "         peers directly, which EXPOSES YOUR HOME IP (the opposite of the"
+  echo "         Tor-only default). Set it back to false and run ./stack apply once"
+  echo "         synced to return to Tor-only."
+fi
+
 # bitcoind rejects prune targets between 1 and 549 MB
 case "$prune" in *[!0-9]*) prune=-1 ;; esac
 if [ "$prune" -lt 0 ] || { [ "$prune" -ne 0 ] && [ "$prune" -lt 550 ]; }; then
@@ -106,6 +114,7 @@ BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
 BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
+BITCOIN_SYNC_OVER_CLEARNET=$sync_over_clearnet
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 TELEGRAM_BOT_TOKEN=$telegram_bot_token

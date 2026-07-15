@@ -131,6 +131,14 @@ cat >"$tmp/config.json" <<'EOF'
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "blockfilterindex was accepted on a pruned node"
 
+# sync_over_clearnet: renders the flag and warns loudly about IP exposure
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin": {"sync_over_clearnet": true}}
+EOF
+out=$(cd "$tmp" && ./configure.sh)
+grep -q '^BITCOIN_SYNC_OVER_CLEARNET=1$' "$tmp/.env" || fail "sync_over_clearnet not rendered as 1"
+echo "$out" | grep -qi "EXPOSES YOUR HOME IP" || fail "no IP-exposure warning for sync_over_clearnet"
+
 # 12. Warns when the onion dashboard has no password
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"onion": true}}

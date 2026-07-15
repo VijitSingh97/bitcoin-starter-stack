@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] - 2026-07-13
+
+### Added
+
+- **Optional clearnet initial sync (`bitcoin.sync_over_clearnet`).** Tor-only IBD
+  takes days; set this `true` to run the initial block download over clearnet
+  (hours), then set it back to `false` and `./stack apply` to return to Tor-only.
+  It **exposes your home IP** to peers during the sync (onion peers still route
+  through Tor) — `configure.sh` warns loudly, and it's opt-in with a Tor-only
+  default. The Tor-only routing moved from `bitcoin.conf` to the entrypoint so it
+  can be toggled; the default and its egress audit are unchanged.
+
 ## [1.20.1] - 2026-07-13
 
 ### Changed
@@ -514,6 +526,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.21.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.21.0
 [1.20.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.1
 [1.20.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.0
 [1.19.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.19.0

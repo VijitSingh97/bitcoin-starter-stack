@@ -42,6 +42,7 @@ services:
       PRUNE: ${BITCOIN_PRUNE:-0}
       INBOUND_ONION: ${BITCOIN_INBOUND_ONION:-0}
       BLOCKFILTERINDEX: ${BITCOIN_BLOCKFILTERINDEX:-0}
+      SYNC_OVER_CLEARNET: ${BITCOIN_SYNC_OVER_CLEARNET:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
@@ -60,7 +61,8 @@ services:
         RPCAUTH=$$(printf '%s:%s$$%s' "$$RPC_USER" "$$RPCAUTH_SALT" "$$RPCAUTH_HASH")
         ONION_ARGS=""
         if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$ONION_ARGS
+        if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"; fi
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped

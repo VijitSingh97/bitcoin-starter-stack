@@ -4,7 +4,8 @@
         "dbcache_mb": 3000,
         "prune_mb": 0,
         "inbound_onion": false,
-        "blockfilterindex": false
+        "blockfilterindex": false,
+        "sync_over_clearnet": false
     },
     "dashboard": {
         "password": "",
