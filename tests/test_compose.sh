@@ -47,9 +47,12 @@ count=$(echo "$rendered" | grep -c 'testpass' || true)
 # All flags must sit on ONE line with the exec: a YAML-induced line break
 # after -conf silently drops them (found the hard way; see tests/test_e2e.sh).
 # shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
-echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$ONION_ARGS' ||
+echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS' ||
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked into rendered command line"
+# default outbound routing is Tor-only (clearnet sync is opt-in)
+echo "$rendered" | grep -qF 'NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"' ||
+  fail "default (Tor-only) routing missing from the entrypoint"
 
 # The only published port is the dashboard on host port 80
 ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
