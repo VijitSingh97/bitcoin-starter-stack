@@ -155,10 +155,18 @@ if command -v git >/dev/null; then
   (
     cd "$gtmp"
     git init -q && git config user.email t@t && git config user.name t
-    git add -A && git commit -qm init && git tag v9.9.9
+    git add -A && git commit -qm init
+    git tag -a v9.9.9 -m "Release v9.9.9" # annotated, exactly as scripts/release.sh does
     ./configure.sh >/dev/null
     grep -q '^STACK_VERSION=9.9.9$' .env || {
       echo "FAIL: tagged checkout should show release number"
+      exit 1
+    }
+    # detached HEAD at the tag (how a box deploys: git checkout v9.9.9) is still official
+    git checkout -q v9.9.9
+    ./configure.sh >/dev/null
+    grep -q '^STACK_VERSION=9.9.9$' .env || {
+      echo "FAIL: detached checkout of the tag should show release number"
       exit 1
     }
     git checkout -qb feature && git commit -q --allow-empty -m more

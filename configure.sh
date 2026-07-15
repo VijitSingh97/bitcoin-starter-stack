@@ -109,11 +109,22 @@ rpcauth_hash=$(printf '%s' "$rpc_password" | openssl dgst -sha256 -hmac "$rpcaut
 # dev builds are identifiable rather than masquerading as the release.
 version=$(cat VERSION 2>/dev/null || echo dev)
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  if [ "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "v$version" 2>/dev/null)" ] &&
-    [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+  head=$(git rev-parse HEAD 2>/dev/null || echo)
+  # ^{commit} dereferences the (annotated) release tag to its commit; without it
+  # the tag-object sha never equals HEAD and every deploy looks like a dev build.
+  tag=$(git rev-parse "v$version^{commit}" 2>/dev/null || echo)
+  # diff-index checks tracked files only, so runtime files (.env, data/) don't
+  # demote a clean release checkout to a dev build.
+  if [ -n "$head" ] && [ "$head" = "$tag" ] && git diff-index --quiet HEAD -- 2>/dev/null; then
     stack_version="$version" # clean checkout of the release tag
   else
-    stack_version="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo)
+    short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+    if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
+      stack_version="$branch-$short" # a named branch
+    else
+      stack_version="$short" # detached HEAD, not at the release tag
+    fi
   fi
 else
   stack_version="$version" # release tarball (no .git)
