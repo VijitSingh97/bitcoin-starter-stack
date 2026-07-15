@@ -1,20 +1,20 @@
 # Configuration
 
-All per-box settings live in `config.json` — created by copying the
-tracked template (`cp config.example.json config.json`) and gitignored
-from then on. `configure.sh` renders it into a gitignored `.env`, which
-docker compose reads. Tracked files are never modified, so your
-credentials can't end up in a commit.
+**`config.json` is optional.** `./stack up` runs with no config at all — it uses
+the defaults below and auto-generates the internal RPC credentials. Create a
+`config.json` (copy the tracked template, `cp config.example.json config.json`)
+only to override something. `configure.sh` renders it into a gitignored `.env`,
+which docker compose reads. Tracked files are never modified, so your settings
+can't end up in a commit.
 
 ## config.json reference
 
-The template ([config.example.json](../config.example.json)):
+Every key is optional. The template ([config.example.json](../config.example.json))
+shows the overridable settings with their defaults:
 
 ```json
 {
     "bitcoin": {
-        "node_username": "create_a_username_for_node",
-        "node_password": "create_a_password_for_node",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
         "prune_mb": 0,
@@ -37,8 +37,8 @@ The template ([config.example.json](../config.example.json)):
 
 | Key | Default | What it does |
 |---|---|---|
-| `bitcoin.node_username` | — (required) | RPC username for Bitcoin Core. Letters and numbers only. |
-| `bitcoin.node_password` | — (required) | RPC password. Letters and numbers only — it passes through shell and env-file layers. bitcoind receives only a salted hash (`rpcauth`); the plaintext goes to the dashboard alone. |
+| `bitcoin.node_username` | auto-generated | Internal RPC username (dashboard ↔ bitcoind, private network). Omit it and one is generated for you; set it only if you have a reason. Letters and numbers only. |
+| `bitcoin.node_password` | auto-generated | Internal RPC password. Auto-generated (strong random) unless you set one. bitcoind receives only a salted hash (`rpcauth`); the plaintext goes to the dashboard alone. Letters and numbers only. |
 | `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
@@ -52,15 +52,14 @@ The template ([config.example.json](../config.example.json)):
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
 | `wallets` | `[]` | Optional **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is an `xpub`/`ypub`/`zpub` or a full output descriptor. Loaded on first start; after that you add/remove wallets from the dashboard UI and this is ignored. Full node only. See [Watch-only](watch-only.md). |
 
-`configure.sh` refuses to run while the placeholder credentials are still
-in place, and applies the defaults above for any omitted key.
+`configure.sh` applies the defaults above for any omitted key, and generates
+strong random RPC credentials on first run (reused on later runs).
 
 ## Applying changes
 
 ```bash
 nano config.json
-./configure.sh
-docker compose up -d    # recreates only the containers whose config changed
+./stack apply    # re-renders .env and recreates only the containers that changed
 ```
 
 ## Pruned node

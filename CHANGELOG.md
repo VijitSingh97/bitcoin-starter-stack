@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] - 2026-07-13
+
+### Changed
+
+- **Zero-config setup — `./stack up` and you're running.** The only thing setup
+  used to require was inventing an RPC username/password; those are internal
+  (dashboard ↔ bitcoind, private network) and are now **auto-generated** (strong
+  random, reused on re-runs). `config.json` is fully optional — with none, the
+  stack starts a full node over Tor on sensible defaults. `./stack up` renders the
+  config and starts on first launch, so first-run setup is a single command with
+  nothing to edit. `config.json` (copy `config.example.json`, then `./stack apply`)
+  is now only for the optional extras: dashboard password, Tor onion, notifications,
+  pruning, `blockfilterindex`, preloaded wallets.
+
 ## [1.19.0] - 2026-07-13
 
 ### Added
@@ -492,6 +506,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.20.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.0
 [1.19.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.19.0
 [1.18.5]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.5
 [1.18.4]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.4

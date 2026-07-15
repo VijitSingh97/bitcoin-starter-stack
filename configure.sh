@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Render config.json into a gitignored .env for docker compose,
-# and create the data directory. Run once before `docker compose up`.
+# Render config.json into a gitignored .env for docker compose, and create the
+# data directory. config.json is OPTIONAL: with none, everything uses sensible
+# defaults and the internal RPC credentials are auto-generated — zero setup.
+# Usually run for you by `./stack up`; safe to run directly and to re-run.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,37 +13,38 @@ for tool in jq openssl; do
   }
 done
 
-if [ ! -f config.json ]; then
-  echo "No config.json. Create yours with: cp config.example.json config.json"
-  exit 1
-fi
+# config.json is optional — default to an empty object so every field falls back.
+config='{}'
+[ -f config.json ] && config=$(cat config.json)
 
-if grep -q "create_a_" config.json; then
-  echo "Edit config.json first: set your own node username and password."
-  exit 1
-fi
+get() { jq -r "$1 // \"${2:-}\"" <<<"$config"; }
+flag() { jq -r "if $1 == true then 1 else 0 end" <<<"$config"; }
 
-rpc_user=$(jq -r '.bitcoin.node_username // empty' config.json)
-rpc_password=$(jq -r '.bitcoin.node_password // empty' config.json)
-data_dir=$(jq -r '.bitcoin.data_dir // "./data/bitcoin"' config.json)
-dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' config.json)
-prune=$(jq -r '.bitcoin.prune_mb // 0' config.json)
-inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == true then 1 else 0 end' config.json)
-blockfilterindex=$(jq -r 'if .bitcoin.blockfilterindex == true then 1 else 0 end' config.json)
-dashboard_password=$(jq -r '.dashboard.password // empty' config.json)
-dashboard_onion=$(jq -r 'if .dashboard.onion == true then 1 else 0 end' config.json)
-telegram_bot_token=$(jq -r '.notifications.telegram_bot_token // empty' config.json)
-telegram_chat_id=$(jq -r '.notifications.telegram_chat_id // empty' config.json)
-healthchecks_url=$(jq -r '.notifications.healthchecks_url // empty' config.json)
-alert_new_block=$(jq -r 'if .notifications.alert_new_block == true then 1 else 0 end' config.json)
+# Internal RPC credentials — used only between the dashboard and bitcoind on the
+# private Docker network; you never type or see these. Honour config.json if set,
+# otherwise reuse whatever is already in .env (so re-running is idempotent),
+# otherwise generate fresh strong random values.
+rpc_user=$(get '.bitcoin.node_username')
+rpc_password=$(get '.bitcoin.node_password')
+[ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env 2>/dev/null || true)
+[ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env 2>/dev/null || true)
+[ -n "$rpc_user" ] || rpc_user="rpc$(openssl rand -hex 8)"
+[ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24)
+
+data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
+dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
+prune=$(jq -r '.bitcoin.prune_mb // 0' <<<"$config")
+inbound_onion=$(flag '.bitcoin.inbound_onion')
+blockfilterindex=$(flag '.bitcoin.blockfilterindex')
+dashboard_password=$(get '.dashboard.password')
+dashboard_onion=$(flag '.dashboard.onion')
+telegram_bot_token=$(get '.notifications.telegram_bot_token')
+telegram_chat_id=$(get '.notifications.telegram_chat_id')
+healthchecks_url=$(get '.notifications.healthchecks_url')
+alert_new_block=$(flag '.notifications.alert_new_block')
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
-watch_wallets_b64=$(jq -cj '.wallets // []' config.json | base64 | tr -d '\n')
-
-if [ -z "$rpc_user" ] || [ -z "$rpc_password" ]; then
-  echo "config.json is missing bitcoin.node_username or bitcoin.node_password."
-  exit 1
-fi
+watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
 
 case "$rpc_user$rpc_password$dashboard_password" in
   *[!a-zA-Z0-9]*)
@@ -119,4 +122,4 @@ chmod 600 .env
 # and bitcoind (uid 1000) can't write to it
 mkdir -p "$data_dir"
 
-echo "Done. Start the stack with: docker compose up -d"
+echo "Done. Start the stack with: ./stack up   (or: docker compose up -d)"
