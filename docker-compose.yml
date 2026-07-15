@@ -8,6 +8,9 @@ x-logging: &logging
 
 services:
   tor:
+    # Prebuilt multi-arch image from GHCR (published per release). `up` pulls it
+    # when available and falls back to building locally from `build:` if not.
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:-latest}
     build: ./build/tor
     container_name: tor
     environment:
@@ -79,6 +82,9 @@ services:
         ipv4_address: 172.29.0.26
 
   dashboard:
+    # Prebuilt multi-arch image from GHCR (see tor above); builds locally if the
+    # tag isn't published (e.g. an unreleased commit).
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
     build:
       context: .
       dockerfile: build/dashboard/Dockerfile

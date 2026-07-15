@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.23.0] - 2026-07-14
+
+### Added
+
+- **Prebuilt multi-arch images on GHCR.** Each release now publishes
+  `ghcr.io/vijitsingh97/bitcoin-starter-stack-tor` and `-dashboard` for
+  `linux/amd64` and `linux/arm64` (Raspberry Pi). `./stack up` pulls them instead
+  of compiling — the compose services keep their `build:` blocks, so an
+  unreleased commit (no matching published tag) still builds locally, with no
+  change to the workflow. A new `images` job in the release workflow builds and
+  pushes them, independent of the GitHub Release so a registry hiccup can't block
+  the source tarball.
+
 ## [1.22.0] - 2026-07-13
 
 ### Added
