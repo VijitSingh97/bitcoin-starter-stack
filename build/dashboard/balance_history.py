@@ -74,21 +74,3 @@ def series(key):
     """The balance values for a wallet (for the sparkline)."""
     with _lock:
         return [pt[1] for pt in _loaded().get(key_id(key), [])]
-
-
-def forget(key):
-    """Drop a wallet's history."""
-    with _lock:
-        if _loaded().pop(key_id(key), None) is not None:
-            _save()
-
-
-def migrate(old_id, key):
-    """One-time carry-over: move history stored under an old id (e.g. the wallet
-    name, from before we keyed by the key) to the key-hash id."""
-    new = key_id(key)
-    with _lock:
-        data = _loaded()
-        if old_id in data and new not in data:
-            data[new] = data.pop(old_id)
-            _save()

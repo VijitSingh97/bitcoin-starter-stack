@@ -44,13 +44,6 @@ def test_ignores_non_numeric(monkeypatch, tmp_path):
     assert bh.series("A") == []
 
 
-def test_forget_drops_history(monkeypatch, tmp_path):
-    fresh(monkeypatch, tmp_path)
-    bh.record("A", 1.0, now=0)
-    bh.forget("A")
-    assert bh.series("A") == []
-
-
 def test_save_survives_unwritable_path(monkeypatch):
     monkeypatch.setenv("BALANCE_HISTORY", "/nonexistent-xyz/no/perms/bh.json")
     monkeypatch.setattr(bh, "_data", None)
@@ -66,13 +59,3 @@ def test_history_is_keyed_by_key_not_name(monkeypatch, tmp_path):
     assert bh.series("xpub-AAA") == [1.0]
     assert bh.series("xpub-BBB") == [9.0]
     assert bh.series("never-seen") == []
-
-
-def test_migrate_carries_old_name_history_to_the_key(monkeypatch, tmp_path):
-    fresh(monkeypatch, tmp_path)
-    # simulate pre-migration data keyed by the display name
-    bh._data = {"Satoshi": [[0, 1.0], [3600, 2.0]]}
-    bh.migrate("Satoshi", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
-    assert bh.series("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa") == [1.0, 2.0]
-    assert "Satoshi" not in bh._data           # old id removed
-    bh.migrate("Satoshi", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")  # idempotent no-op

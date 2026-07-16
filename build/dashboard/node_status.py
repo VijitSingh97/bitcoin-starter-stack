@@ -82,10 +82,6 @@ def get_rpc_data(method, params=None):
 # The saved watch-only wallet list (managed from the UI, seeded once from
 # config.json). Empty unless the operator adds any, so this is inert otherwise.
 WATCH = watch.load_store()
-# One-time: carry any history stored under the old name-based id to the new
-# key-hash id (harmless no-op once migrated).
-for _w in WATCH:
-    balance_history.migrate(_w["name"], _w["key"])
 
 def get_wallet_data(wallet, method, params=None, timeout=8):
     # Wallet-scoped RPC lives at /wallet/<name>. Balance reads are quick;
