@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.26.2] - 2026-07-17
+
+### Fixed
+
+- **Adding a watch-only wallet on a pruned node no longer silently fails.** It
+  used to accept the wallet, show "scanning…", then sit at `—` forever (a full
+  rescan can't run on a pruned node). The dashboard now rejects it up front with
+  a clear "a full node is required" message and doesn't add it to the list.
+- **`./stack backup` is more robust and honest:** it no longer aborts if it
+  can't read the node onion key, warns (instead of silently skipping) when a
+  container is down so an incomplete archive isn't mistaken for a complete one,
+  and captures the watch-only roster (from 1.26.1).
+- **`./stack restore` with no argument** prints a clean usage line instead of a
+  raw bash error; **`./stack init`** checks for `jq`/`openssl` up front.
+- **`configure.sh` validation errors name the offending field** instead of
+  blaming all three at once.
+- **Loading page** no longer shows an internal Docker IP and points you at
+  `./stack doctor` if it's stuck; add-form errors are now visually distinct from
+  the "scanning" message.
+- Documentation consistency pass: corrected the stale "images aren't published"
+  note, matched the two doc indexes, and completed the config.json example.
+
+### Changed
+
+- **CI now measures code coverage** (pytest-cov, floor 85%; currently ~93%) and
+  cancels superseded runs; new tests pin the inbound-onion entrypoint branch and
+  cover previously-dark error paths (wallet RPC, alert channels, version/update
+  logic).
+
 ## [1.26.1] - 2026-07-17
 
 ### Fixed
