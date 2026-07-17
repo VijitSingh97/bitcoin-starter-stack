@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.28.0] - 2026-07-17
+
+### Added
+
+- **One-command upgrade: `./stack upgrade`.** Fetches the latest release tag,
+  **backs up first**, checks it out, and re-applies — pulling the new prebuilt
+  images and recreating the changed containers. It only ever moves forward
+  (never downgrades), prints a rollback line, and points a tarball (non-git)
+  install at the release page. Pairs with the dashboard's existing "update
+  available" badge: the badge tells you, `./stack upgrade` does it. (CLI only by
+  design — no dashboard button, which would require giving the non-root
+  dashboard host/docker control.) Covered end-to-end by a new `test_upgrade.sh`
+  that boots one release and upgrades to the next in CI.
+
 ## [1.27.0] - 2026-07-17
 
 ### Changed
