@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_call: # reused as the release gate (.github/workflows/release.yml)
 
+# Least privilege: the job only reads the repo to test/lint. Image publishing
+# lives in release.yml, which declares its own packages: write.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
