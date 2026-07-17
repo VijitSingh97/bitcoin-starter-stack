@@ -6,9 +6,12 @@
 # wiring end to end: bitcoind accepts the rpcauth-hashed credentials over
 # RPC, the plaintext password never enters the bitcoin container, the
 # inbound onion service comes up, and the dashboard enforces its auth.
-# With E2E_SYNC=1 it additionally waits for the node to find onion-only
-# peers and start header sync — real Tor traffic, takes minutes, so it's
-# opt-in (off in CI; run it on real hardware).
+# With E2E_SYNC=1 it additionally proves sync STARTS (onion-only peers
+# found, headers advancing — not the whole sync) for BOTH setup paths:
+# the wizard config it booted with, and a second zero-config boot (bare
+# ./stack up). Real Tor traffic, takes minutes, so it's opt-in (off in
+# CI; run it on real hardware). Post-sync behavior on an already-synced
+# node is tests/test_postsync.sh.
 # This is the test that catches config-plumbing bugs the static contract
 # test can't.
 #
@@ -130,10 +133,11 @@ docker exec dashboard python /app/e2e_watch.py || fail "watch-only provisioning 
 
 # Sync-start check (opt-in: real Tor traffic, takes many minutes). Proves the
 # node finds peers, that every peer is an onion peer, and that header sync
-# begins. Cold-cache onion peer discovery on an empty datadir is slow, so the
-# budgets are generous — run this on real hardware, not in the CI gate.
-if [ -n "${E2E_SYNC:-}" ]; then
-  # separate the two failure modes: Tor itself not bootstrapping (up to 5 min)
+# begins — not the whole sync, just that it starts. Cold-cache onion peer
+# discovery on an empty datadir is slow, so the budgets are generous — run
+# this on real hardware, not in the CI gate.
+sync_starts() { # $1: label for messages
+  # separate the failure modes: Tor itself not bootstrapping (up to 5 min)
   # vs. bitcoind not finding onion peers through a working Tor
   boot_ok=""
   for _ in $(seq 1 30); do
@@ -143,7 +147,7 @@ if [ -n "${E2E_SYNC:-}" ]; then
     fi
     sleep 10
   done
-  [ -n "$boot_ok" ] || fail "tor never reached Bootstrapped 100%"
+  [ -n "$boot_ok" ] || fail "$1: tor never reached Bootstrapped 100%"
 
   peer_ok=""
   for _ in $( # up to 20 min for the first peer: cold onion discovery is slow
@@ -156,10 +160,10 @@ if [ -n "${E2E_SYNC:-}" ]; then
     fi
     sleep 10
   done
-  [ -n "$peer_ok" ] || fail "no peers found over Tor within 20 minutes (tor was bootstrapped)"
+  [ -n "$peer_ok" ] || fail "$1: no peers found over Tor within 20 minutes (tor was bootstrapped)"
 
   clearnet_peers=$(docker exec bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep '"addr":' | grep -v '\.onion' || true)
-  [ -z "$clearnet_peers" ] || fail "non-onion peer(s) connected: $clearnet_peers"
+  [ -z "$clearnet_peers" ] || fail "$1: non-onion peer(s) connected: $clearnet_peers"
 
   hdr_ok=""
   for _ in $( # up to 5 more min for the first headers
@@ -172,10 +176,30 @@ if [ -n "${E2E_SYNC:-}" ]; then
     fi
     sleep 10
   done
-  [ -n "$hdr_ok" ] || fail "headers never advanced — sync did not start"
-  echo "  sync: $conns peer(s), all onion, headers at $hdrs"
+  [ -n "$hdr_ok" ] || fail "$1: headers never advanced — sync did not start"
+  echo "  $1: sync starts — $conns peer(s), all onion, headers at $hdrs"
+}
+
+if [ -n "${E2E_SYNC:-}" ]; then
+  sync_starts "wizard setup"
+
+  # Second setup variant: the headline ZERO-CONFIG path — no config.json at
+  # all, exactly what a bare ./stack up renders. Tear the wizard stack down
+  # (cleanup between phases), boot from configure.sh defaults, and prove
+  # sync starts there too. Images are already built; only the datadir is
+  # redirected at the temp dir so cleanup stays single-path.
+  docker compose down -v --remove-orphans >/dev/null 2>&1
+  rm -f config.json .env
+  docker run --rm -v "$BITCOIN_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
+  ./configure.sh >/dev/null # zero-config: defaults + auto-generated creds
+  sed -i.bak "s|^BITCOIN_DATA_DIR=.*|BITCOIN_DATA_DIR=$BITCOIN_DATA_DIR|" .env && rm -f .env.bak
+  docker compose up -d --wait --wait-timeout 300 ||
+    fail "zero-config: stack did not reach healthy"
+  code=$(curl -s -o /dev/null -w '%{http_code}' localhost:80)
+  [ "$code" = "200" ] || fail "zero-config: dashboard not open without a password (HTTP $code)"
+  sync_starts "zero-config setup"
 else
-  echo "  (sync-start check skipped — set E2E_SYNC=1 to include it)"
+  echo "  (sync-start checks skipped — set E2E_SYNC=1 to include them)"
 fi
 
 echo "PASS: test_e2e.sh"
