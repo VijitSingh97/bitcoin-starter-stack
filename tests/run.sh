@@ -15,6 +15,7 @@ tests/test_cli.sh
 tests/test_release.sh
 tests/test_compose.sh
 tests/test_e2e.sh
+tests/test_upgrade.sh
 tests/test_postsync.sh
 
 if python3 -c "import pytest, flask" 2>/dev/null; then

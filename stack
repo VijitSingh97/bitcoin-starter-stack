@@ -11,6 +11,7 @@ Usage: ./stack <command> [args]
   init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
   apply                      Re-render .env from config.json and apply changes
+  upgrade                    Fetch the latest release and apply it (backs up first)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -220,6 +221,50 @@ do_restore() {
   echo "Done. Apply with: ./stack apply"
 }
 
+# One-command upgrade: fetch the latest release tag and apply it. Backs up
+# first, only ever moves forward (never downgrades), and prints a rollback line.
+do_upgrade() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Not a git checkout — upgrade by unpacking the latest release tarball:"
+    echo "  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest"
+    exit 1
+  fi
+  current=$(cat VERSION 2>/dev/null || echo 0)
+  echo "Current: v$current — fetching release tags..."
+  git fetch --tags --quiet 2>/dev/null || {
+    echo "git fetch failed — check your network, then retry."
+    exit 1
+  }
+  latest=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+  latest=${latest#v}
+  [ -n "$latest" ] || {
+    echo "No release tags found on the remote."
+    exit 1
+  }
+  if [ "$latest" = "$current" ]; then
+    echo "Already on the latest release (v$current). Nothing to do."
+    return 0
+  fi
+  if [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" != "$latest" ]; then
+    echo "Installed v$current is newer than the latest release v$latest — nothing to do."
+    return 0
+  fi
+  echo "Upgrading v$current -> v$latest"
+  echo "== Backing up first (safety net)"
+  do_backup
+  echo "== Checking out v$latest"
+  git checkout --quiet "v$latest" || {
+    echo "checkout failed — commit or stash local changes to tracked files, then retry."
+    exit 1
+  }
+  echo "== Applying (pull new images, recreate changed containers)"
+  ./configure.sh
+  docker compose up -d
+  echo
+  echo "Upgraded to v$latest. Verify with: ./stack status"
+  echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
+}
+
 cmd=${1:-help}
 [ $# -gt 0 ] && shift
 
@@ -236,6 +281,7 @@ case "$cmd" in
     ./configure.sh
     docker compose up -d
     ;;
+  upgrade) do_upgrade ;;
   status) status ;;
   doctor) doctor ;;
   backup) do_backup ;;
