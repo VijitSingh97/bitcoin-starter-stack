@@ -168,8 +168,10 @@ sync_starts() { # $1: label for messages
   [ -z "$clearnet_peers" ] || fail "$1: non-onion peer(s) connected: $clearnet_peers"
 
   hdr_ok=""
-  for _ in $( # up to 5 more min for the first headers
-    seq 1 30
+  for _ in $( # up to 20 more min: Core downloads initial headers from ONE
+    # peer and only abandons a stalling one after ~15 min, so a slow first
+    # Tor peer can legitimately hold headers at 0 for that long
+    seq 1 120
   ); do
     hdrs=$(docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo | grep -o '"headers": *[0-9]*' | grep -o '[0-9]*' || echo 0)
     if [ "${hdrs:-0}" -gt 0 ]; then
