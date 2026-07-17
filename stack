@@ -39,7 +39,11 @@ init() {
   echo
   read -r -p "RPC username [bitcoin]: " w_user
   read -rsp "RPC password [Enter = strong random]: " w_pass; echo
-  read -rsp "Dashboard web password [Enter = no login]: " w_dashpass; echo
+  read -rsp "Dashboard web password [Enter = strong random]: " w_dashpass; echo
+  if [ -z "$w_dashpass" ]; then
+    w_dashpass=$(openssl rand -hex 16)
+    echo "  generated dashboard password: $w_dashpass  (log in with any username — save it)"
+  fi
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
   read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [y/N] " w_inbound
   read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet

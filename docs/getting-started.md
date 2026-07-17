@@ -39,9 +39,10 @@ with no matching published tag, in which case compose builds them locally.
 
 Everything is optional. Two ways to customize:
 
-- **`./stack init`** — an interactive wizard that asks about a dashboard password,
-  a Tor onion, inbound Tor connections, a fast clearnet initial sync, and pruning.
-  Every prompt has a default you accept by pressing Enter.
+- **`./stack init`** — an interactive wizard that asks about a dashboard password
+  (Enter generates a strong one, shown once), a Tor onion, inbound Tor
+  connections, a fast clearnet initial sync, and pruning. Every prompt has a
+  default you accept by pressing Enter.
 - Or edit `config.json` by hand (copy `config.example.json`) and run
   `./stack apply`. Stick to letters and numbers in any credentials you set.
 
