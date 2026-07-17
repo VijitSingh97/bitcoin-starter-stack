@@ -167,21 +167,25 @@ sync_starts() { # $1: label for messages
   clearnet_peers=$(docker exec bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep '"addr":' | grep -v '\.onion' || true)
   [ -z "$clearnet_peers" ] || fail "$1: non-onion peer(s) connected: $clearnet_peers"
 
+  # "sync started" = headers flowing. Core's headers PRESYNC (redownload
+  # protection) downloads the whole ~950k-header chain from one peer before
+  # getblockchaininfo.headers ever moves off 0 — 15+ min over Tor — so watch
+  # getpeerinfo's presynced_headers too; it moves within ~a minute of a good
+  # peer.
   hdr_ok=""
-  for _ in $( # up to 20 more min: Core downloads initial headers from ONE
-    # peer and only abandons a stalling one after ~15 min, so a slow first
-    # Tor peer can legitimately hold headers at 0 for that long
-    seq 1 120
+  for _ in $( # 10 min for the first headers to flow
+    seq 1 60
   ); do
     hdrs=$(docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo | grep -o '"headers": *[0-9]*' | grep -o '[0-9]*' || echo 0)
-    if [ "${hdrs:-0}" -gt 0 ]; then
+    presync=$(docker exec bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep -oE '"presynced_headers": [0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1 || echo 0)
+    if [ "${hdrs:-0}" -gt 0 ] || [ "${presync:-0}" -gt 0 ]; then
       hdr_ok=1
       break
     fi
     sleep 10
   done
-  [ -n "$hdr_ok" ] || fail "$1: headers never advanced — sync did not start"
-  echo "  $1: sync starts — $conns peer(s), all onion, headers at $hdrs"
+  [ -n "$hdr_ok" ] || fail "$1: headers never started flowing — sync did not start"
+  echo "  $1: sync starts — $conns peer(s), all onion, headers=$hdrs presync=$presync"
 }
 
 if [ -n "${E2E_SYNC:-}" ]; then
