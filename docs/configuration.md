@@ -19,7 +19,8 @@ shows the overridable settings with their defaults:
         "dbcache_mb": 3000,
         "prune_mb": 0,
         "inbound_onion": false,
-        "blockfilterindex": false
+        "blockfilterindex": false,
+        "sync_over_clearnet": false
     },
     "dashboard": {
         "password": "",
@@ -37,7 +38,7 @@ shows the overridable settings with their defaults:
 
 | Key | Default | What it does |
 |---|---|---|
-| `bitcoin.node_username` | auto-generated | Internal RPC username (dashboard ↔ bitcoind, private network). Omit it and one is generated for you; set it only if you have a reason. Letters and numbers only. |
+| `bitcoin.node_username` | `bitcoin` | Internal RPC username (dashboard ↔ bitcoind, private network). Defaults to `bitcoin`; set it only if you want a different internal username. Letters and numbers only. |
 | `bitcoin.node_password` | auto-generated | Internal RPC password. Auto-generated (strong random) unless you set one. bitcoind receives only a salted hash (`rpcauth`); the plaintext goes to the dashboard alone. Letters and numbers only. |
 | `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
@@ -124,16 +125,20 @@ Two requirements:
 
 - The directory must be **owned by uid 1000** (the first user on most
   Ubuntu installs) — the bitcoin container runs as `1000:1000`.
-- The chain must come from a compatible Bitcoin Core version (v28 or
-  earlier data upgrades in place automatically).
+- The chain must come from a compatible Bitcoin Core version — the datadir
+  upgrades in place from older releases; this stack currently ships Core
+  31.1. Downgrading to an earlier major version on this datadir is one-way
+  and not supported.
 
 The dashboard mounts the same directory read-only for its disk-usage
 stats.
 
 ## What's deliberately not configurable
 
-Static node settings (Tor-only networking, RPC bind/allow ranges) live in
-[build/bitcoin/bitcoin.conf](../build/bitcoin/bitcoin.conf) and apply to
-every deployment. If you need to diverge, edit that file — but you're
+Static node settings apply to every deployment. RPC bind/allow ranges live in
+[build/bitcoin/bitcoin.conf](../build/bitcoin/bitcoin.conf). Tor-only
+networking is set in the `docker-compose.yml` bitcoin entrypoint (and
+toggled by `bitcoin.sync_over_clearnet` — see the config table above). If you
+need to diverge from the routing defaults, edit the entrypoint — but you're
 forking the privacy model at that point; read
 [Architecture](architecture.md) first.

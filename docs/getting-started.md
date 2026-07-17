@@ -29,8 +29,8 @@ cd bitcoin-starter-stack
 `./stack up` runs `configure.sh` on first launch, which renders a gitignored
 `.env` and creates the data directory. With no `config.json` it uses sensible
 defaults (a full archival node over Tor) and **auto-generates** the internal RPC
-credentials — the dashboard and bitcoind use them over a private network; you
-never type or see them.
+password (username defaults to `bitcoin`) — the dashboard and bitcoind use them
+over a private network; you never type or see them.
 
 The `tor` and `dashboard` images are **pulled prebuilt** from GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`), published multi-arch for amd64
