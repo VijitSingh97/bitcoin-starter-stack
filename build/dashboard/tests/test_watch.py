@@ -352,3 +352,8 @@ def test_ensure_skips_bad_key_without_crashing_or_orphaning():
     created = [p[0] for m, p in rpc.calls if m == "createwallet"]
     assert created == ["watch_Good"]          # bad one skipped, no orphan
     assert imports and imports[0][0] == "watch_Good"  # good one still imported
+
+    # The createwallet call must disable private keys (arg index 1) — this is
+    # the "watch-only, cannot spend" guarantee. Pin it here, not only in the e2e.
+    cw_params = next(p for m, p in rpc.calls if m == "createwallet")
+    assert cw_params[1] is True, "watch-only wallet must be created with disable_private_keys=True"

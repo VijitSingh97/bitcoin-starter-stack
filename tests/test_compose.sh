@@ -54,6 +54,25 @@ echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked int
 echo "$rendered" | grep -qF 'NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"' ||
   fail "default (Tor-only) routing missing from the entrypoint"
 
+# The clearnet-sync branch (the IP-exposing path) must resolve to -onion and
+# drop -onlynet; the default branch must stay Tor-only. Evaluate the real line.
+netargs_line=$(printf '%s\n' "$rendered" | grep -F 'SYNC_OVER_CLEARNET' | grep -F 'NET_ARGS=')
+[ -n "$netargs_line" ] || fail "NET_ARGS branch line not found in rendered entrypoint"
+# docker compose config keeps the compose-escaped $$VAR as-is (it re-emits a
+# valid, round-trippable compose file) rather than collapsing it to $VAR, so
+# unescape before handing the line to sh -c.
+netargs_line=$(printf '%s\n' "$netargs_line" | sed 's/\$\$/\$/g')
+
+got_clearnet=$(SYNC_OVER_CLEARNET=1 sh -c "$netargs_line"'; printf %s "$NET_ARGS"')
+[ "$got_clearnet" = "-onion=172.29.0.25:9050" ] ||
+  fail "clearnet branch NET_ARGS wrong: [$got_clearnet]"
+
+got_tor=$(SYNC_OVER_CLEARNET=0 sh -c "$netargs_line"'; printf %s "$NET_ARGS"')
+case "$got_tor" in
+*"-proxy=172.29.0.25:9050 -onlynet=onion"*) ;;
+*) fail "tor-only branch NET_ARGS wrong: [$got_tor]" ;;
+esac
+
 # The only published port is the dashboard on host port 80
 ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
 published=$(echo "$rendered" | grep -c 'published:' || true)

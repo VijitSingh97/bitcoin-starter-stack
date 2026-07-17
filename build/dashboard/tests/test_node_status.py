@@ -389,6 +389,12 @@ def test_api_watch_add_requires_csrf_header(monkeypatch):
     assert resp.status_code == 403  # no X-Requested-With
 
 
+def test_api_watch_remove_requires_csrf_header(monkeypatch):
+    # DELETE without X-Requested-With must be rejected (CSRF guard), like POST.
+    resp = node_status.app.test_client().delete("/api/watch/Cold")
+    assert resp.status_code == 403  # no X-Requested-With header
+
+
 def test_api_watch_add_rejects_bad_key(monkeypatch):
     monkeypatch.setattr(node_status, "WATCH", [])
     resp = node_status.app.test_client().post(
