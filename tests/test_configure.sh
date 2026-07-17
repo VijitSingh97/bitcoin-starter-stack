@@ -175,6 +175,14 @@ if command -v git >/dev/null; then
       echo "FAIL: dev build should show branch-commit"
       exit 1
     }
+    # a slashed branch name must NOT produce a slash (invalid Docker image tag,
+    # since STACK_VERSION is the compose image tag)
+    git checkout -qb feat/thing && git commit -q --allow-empty -m more
+    ./configure.sh >/dev/null
+    grep -qE '^STACK_VERSION=feat-thing-[0-9a-f]{7,}$' .env || {
+      echo "FAIL: slashed branch should render as feat-thing-<hash>, got: $(grep '^STACK_VERSION=' .env)"
+      exit 1
+    }
   ) || exit 1
   rm -rf "$gtmp"
 fi

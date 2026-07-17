@@ -48,27 +48,27 @@ alert_new_block=$(flag '.notifications.alert_new_block')
 watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
 
 case "$rpc_user$rpc_password$dashboard_password" in
-  *[!a-zA-Z0-9]*)
-    echo "Use only letters and numbers in node_username, node_password, and dashboard password."
-    exit 1
-    ;;
+*[!a-zA-Z0-9]*)
+  echo "Use only letters and numbers in node_username, node_password, and dashboard password."
+  exit 1
+  ;;
 esac
 
 # Notification values pass through .env — reject anything env-file-unsafe
 case "$telegram_bot_token$telegram_chat_id$healthchecks_url" in
-  *[\ \	\'\"\$]*)
-    echo "Notification settings must not contain spaces, quotes, or \$."
-    exit 1
-    ;;
+*[\ \	\'\"\$]*)
+  echo "Notification settings must not contain spaces, quotes, or \$."
+  exit 1
+  ;;
 esac
 
 if [ -n "$healthchecks_url" ]; then
   case "$healthchecks_url" in
-    http://* | https://*) ;;
-    *)
-      echo "healthchecks_url must be a full URL (paste it from healthchecks.io)."
-      exit 1
-      ;;
+  http://* | https://*) ;;
+  *)
+    echo "healthchecks_url must be a full URL (paste it from healthchecks.io)."
+    exit 1
+    ;;
   esac
 fi
 
@@ -118,7 +118,10 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [ -n "$head" ] && [ "$head" = "$tag" ] && git diff-index --quiet HEAD -- 2>/dev/null; then
     stack_version="$version" # clean checkout of the release tag
   else
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo)
+    # '/' is legal in a git branch name but not in a Docker image tag, and
+    # STACK_VERSION is used as the compose image tag — sanitize so a branch like
+    # feat/x doesn't render an invalid ghcr reference and break `docker compose`.
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')
     short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
     if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
       stack_version="$branch-$short" # a named branch
