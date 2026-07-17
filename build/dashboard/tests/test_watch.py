@@ -177,6 +177,20 @@ def test_balances_sums_only_ready_wallets():
     assert all("key" in r for r in rows)  # every row carries its key for the UI
 
 
+def test_balances_on_sample_fires_only_for_ready_wallets():
+    # on_sample feeds balance_history — it must fire only for "ok" rows, keyed by
+    # the wallet's KEY, with a numeric balance (never for scanning/error rows)
+    wallets = [{"name": "A", "key": "keyA"}, {"name": "B", "key": "keyB"}, {"name": "C", "key": "keyC"}]
+    table = {
+        "watch_A": {"getwalletinfo": {"scanning": False}, "getbalances": {"mine": {"trusted": 1.25}}},
+        "watch_B": {"getwalletinfo": {"scanning": {"duration": 5}}},  # scanning
+        "watch_C": {"getwalletinfo": None},                           # error
+    }
+    samples = []
+    watch.balances(FakeWalletRpc(table), wallets, on_sample=lambda k, btc: samples.append((k, btc)))
+    assert samples == [("keyA", 1.25)]  # only the ok wallet, by key, numeric
+
+
 def test_balances_view_show_total_only_when_more_than_one():
     one = [{"name": "A", "key": "z"}]
     two = [{"name": "A", "key": "z"}, {"name": "B", "key": "z"}]

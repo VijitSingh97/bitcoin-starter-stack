@@ -284,3 +284,57 @@ def test_update_check_survives_api_failure(monkeypatch):
     monkeypatch.setattr(monitor, "_latest_release_tag", lambda url: "")
     monitor.check_updates("/Satoshi:31.1.0/", {})  # no exception, no alert
     assert cap.telegrams == []
+
+# --- error/exception branches of the alert channels (previously dark) ---
+
+def test_ping_healthchecks_returns_false_on_exception(monkeypatch):
+    monkeypatch.setattr(monitor, "HEALTHCHECKS_URL", "https://hc-ping.com/uuid")
+
+    def boom(*a, **k):
+        raise monitor.requests.exceptions.ConnectionError("down")
+
+    monkeypatch.setattr(monitor.requests, "get", boom)
+    # a failed ping returns False so tick() keeps retrying rather than advancing
+    assert monitor.ping_healthchecks(True) is False
+
+
+def test_send_telegram_swallows_exceptions(monkeypatch):
+    monkeypatch.setattr(monitor, "TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setattr(monitor, "TELEGRAM_CHAT_ID", "c")
+
+    def boom(*a, **k):
+        raise monitor.requests.exceptions.Timeout("slow")
+
+    monkeypatch.setattr(monitor.requests, "post", boom)
+    monitor.send_telegram("hi")  # must not raise
+
+
+def test_latest_release_tag_empty_on_non_200_and_errors(monkeypatch):
+    class R:
+        status_code = 403
+
+        @staticmethod
+        def json():
+            return {"tag_name": "v9.9.9"}
+
+    monkeypatch.setattr(monitor.requests, "get", lambda *a, **k: R())
+    assert monitor._latest_release_tag("http://x") == ""  # non-200 -> ""
+
+    def boom(*a, **k):
+        raise monitor.requests.exceptions.ConnectionError("x")
+
+    monkeypatch.setattr(monitor.requests, "get", boom)
+    assert monitor._latest_release_tag("http://x") == ""  # exception -> ""
+
+
+def test_tick_fires_update_check_only_on_the_boundary(monkeypatch):
+    cap = Capture()
+    cap.install(monkeypatch)
+    monkeypatch.setattr(monitor, "UPDATE_CHECK_EVERY_TICKS", 3)
+    fired = []
+    monkeypatch.setattr(monitor, "check_updates", lambda sub, state: fired.append(state.get("ticks", 0)))
+    state = {}
+    net = lambda: {"subversion": "/Satoshi:31.1.0/"}
+    for _ in range(7):
+        state = monitor.tick(lambda: HEALTHY, state, get_network_info=net)
+    assert fired == [0, 3, 6]  # daily boundary only, not every tick

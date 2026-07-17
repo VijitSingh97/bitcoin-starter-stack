@@ -39,15 +39,17 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Dashboard unit tests
+      - name: Dashboard unit tests + coverage
         run: |
-          pip install -r build/dashboard/requirements.txt pytest
-          python -m pytest build/dashboard/tests -q
+          pip install -r build/dashboard/requirements.txt pytest pytest-cov
+          cd build/dashboard
+          python -m pytest tests -q --cov=. --cov-report=term-missing --cov-fail-under=85
 
       - name: Frontend unit tests
         run: node --test build/dashboard/static/*.test.mjs
 
-      # Runs the configure.sh e2e, the compose contract test, and the
-      # full-stack boot test (which builds the images) — same as local.
+      # configure.sh e2e, compose contract, CLI test, AND the full-stack boot
+      # (test_e2e.sh runs here because CI=true — it builds + boots the stack,
+      # provisions watch-only wallets, and runs the egress audit).
       - name: Stack tests
         run: tests/run.sh
