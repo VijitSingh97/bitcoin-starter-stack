@@ -34,6 +34,7 @@ rpc_password=$(get '.bitcoin.node_password')
 data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
 dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
 prune=$(jq -r '.bitcoin.prune_mb // 0' <<<"$config")
+mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
 inbound_onion=$(flag '.bitcoin.inbound_onion')
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
 sync_over_clearnet=$(flag '.bitcoin.sync_over_clearnet')
@@ -91,6 +92,23 @@ if [ "$prune" -lt 0 ] || { [ "$prune" -ne 0 ] && [ "$prune" -lt 550 ]; }; then
   exit 1
 fi
 
+# Optional bitcoind container memory cap. 0 (default) = unlimited (Docker's
+# default, i.e. today's behavior). A cap turns a bitcoind memory blowup into a
+# contained restart instead of a whole-host OOM. Rendered as e.g. "5000m".
+case "$mem_limit_mb" in *[!0-9]*)
+  echo "mem_limit_mb must be a whole number of MB (0 = unlimited)."
+  exit 1
+  ;;
+esac
+if [ "$mem_limit_mb" = "0" ]; then
+  bitcoin_mem_limit=0
+else
+  bitcoin_mem_limit="${mem_limit_mb}m"
+  if [ "$mem_limit_mb" -le "$dbcache" ]; then
+    echo "WARNING: mem_limit_mb ($mem_limit_mb) is not above dbcache_mb ($dbcache) — bitcoind may be OOM-killed and restart-loop. Leave ~1.5-2 GB headroom above dbcache."
+  fi
+fi
+
 # blockfilterindex needs the full chain — bitcoind refuses to start with pruning
 if [ "$blockfilterindex" = "1" ] && [ "$prune" != "0" ]; then
   echo "blockfilterindex requires a full node (prune_mb: 0) — it can't run on a pruned node."
@@ -144,6 +162,7 @@ BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
 BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
 BITCOIN_SYNC_OVER_CLEARNET=$sync_over_clearnet
+BITCOIN_MEM_LIMIT=$bitcoin_mem_limit
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 TELEGRAM_BOT_TOKEN=$telegram_bot_token

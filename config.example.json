@@ -5,7 +5,8 @@
         "prune_mb": 0,
         "inbound_onion": false,
         "blockfilterindex": false,
-        "sync_over_clearnet": false
+        "sync_over_clearnet": false,
+        "mem_limit_mb": 0
     },
     "dashboard": {
         "password": "",

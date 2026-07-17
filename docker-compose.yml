@@ -41,6 +41,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # optional memory cap (0 = unlimited; see bitcoin.mem_limit_mb in config).
+    # Bounds a bitcoind memory blowup to a container restart, not a host OOM.
+    mem_limit: ${BITCOIN_MEM_LIMIT:-0}
     # tor's group (gid 101 in the tor image) — lets bitcoind read the
     # control-auth cookie for the optional inbound onion service
     group_add:
