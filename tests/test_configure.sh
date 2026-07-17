@@ -61,7 +61,7 @@ grep -q '^BITCOIN_RPC_PASSWORD=mypass123$' "$tmp/.env" || fail "password not ren
 grep -q '^BITCOIN_DATA_DIR=./data/bitcoin$' "$tmp/.env" || fail "data_dir default not applied"
 grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applied"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
-grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion default not applied"
+grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion should default ON"
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
@@ -138,6 +138,11 @@ EOF
 out=$(cd "$tmp" && ./configure.sh)
 grep -q '^BITCOIN_SYNC_OVER_CLEARNET=1$' "$tmp/.env" || fail "sync_over_clearnet not rendered as 1"
 echo "$out" | grep -qi "EXPOSES YOUR HOME IP" || fail "no IP-exposure warning for sync_over_clearnet"
+
+# inbound_onion defaults ON (encouraged); explicit false opts out
+echo '{"bitcoin": {"inbound_onion": false}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion: false should render 0"
 
 # mem_limit_mb: default 0 -> unlimited; a set value renders as "<n>m"; a value
 # not above dbcache warns; non-numeric is rejected

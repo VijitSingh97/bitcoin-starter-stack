@@ -3,7 +3,7 @@
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
         "prune_mb": 0,
-        "inbound_onion": false,
+        "inbound_onion": true,
         "blockfilterindex": false,
         "sync_over_clearnet": false,
         "mem_limit_mb": 0

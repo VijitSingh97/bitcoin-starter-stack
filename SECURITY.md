@@ -12,9 +12,9 @@ Please don't open public issues for security problems.
 
 - **Your IP from the Bitcoin network.** All P2P traffic goes through Tor
   (`onlynet=onion`, `proxy=` to the tor container). No clearnet P2P
-  connections are ever made. Outbound-only by default; the opt-in
-  `inbound_onion` mode serves blocks via a Tor onion service, still without
-  exposing your IP or opening a host port.
+  connections are ever made. Inbound is accepted over a Tor onion service by
+  default (`inbound_onion`) — it serves blocks to the network without exposing
+  your IP or opening a host port; set it `false` to run outbound-only.
 - **RPC from the outside.** Bitcoin Core's RPC port is never published to
   the host; it is reachable only from containers on the internal Docker
   network (`rpcallowip=172.16.0.0/12`).

@@ -38,7 +38,7 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
   [bitcoin.conf](../build/bitcoin/bitcoin.conf): every P2P connection is
   outbound, to an onion peer, through the tor container. The node never
   dials clearnet and, by default, never accepts inbound.
-- **Optional inbound onion service** (`inbound_onion` in `config.json`):
+- **Inbound onion service** (`inbound_onion` in `config.json`, on by default):
   bitcoind registers an onion address over tor's cookie-authed control
   port and serves blocks to the network — still no clearnet, no host port,
   no IP exposure. The tor data volume is mounted read-only into the

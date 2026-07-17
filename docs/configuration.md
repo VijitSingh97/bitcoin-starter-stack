@@ -18,7 +18,7 @@ shows the overridable settings with their defaults:
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
         "prune_mb": 0,
-        "inbound_onion": false,
+        "inbound_onion": true,
         "blockfilterindex": false,
         "sync_over_clearnet": false,
         "mem_limit_mb": 0
@@ -44,7 +44,7 @@ shows the overridable settings with their defaults:
 | `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
-| `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node accepts inbound connections and serves blocks to the network. **Encouraged** — it strengthens the network with **no IP exposure** (it's over Tor); the only cost is some extra bandwidth. See [Inbound onion service](#inbound-onion-service). |
+| `bitcoin.inbound_onion` | `true` | Publishes a Tor onion service so your node accepts inbound connections and serves blocks to the network — **on by default**: it strengthens the network with **no IP exposure** (it's over Tor), the only cost being some extra upload bandwidth. Set `false` to run outbound-only. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
 | `bitcoin.sync_over_clearnet` | `false` | `true` runs the initial block download over **clearnet** (hours, vs. days over Tor) — but this **exposes your home IP** to peers during the sync. Onion peers still go through Tor. Set it back to `false` and `./stack apply` once synced to return to Tor-only. Opt-in; leave `false` for a fully private node. |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |
@@ -94,8 +94,9 @@ Apply like any other change: edit `config.json`, `./configure.sh`,
 
 ## Inbound onion service
 
-By default the node is outbound-only. Setting `"inbound_onion": true` has
-bitcoind register an onion service over Tor's control port, so other nodes
+The node accepts inbound over a Tor onion service **by default**
+(`inbound_onion: true`; set it `false` to run outbound-only). bitcoind
+registers an onion service over Tor's control port, so other nodes
 can fetch blocks from you **without your IP ever being visible** — you
 contribute to the network from behind Tor. It's **encouraged**: more reachable
 nodes make Bitcoin healthier, and over Tor it's private. The only cost is some
