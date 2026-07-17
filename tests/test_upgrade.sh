@@ -27,11 +27,11 @@ chmod 777 "$data" # bitcoind runs as uid 1000; CI runners often aren't
 
 fail() {
   echo "FAIL: $1"
-  (cd "$work" && docker compose logs --tail 30 2>/dev/null || true)
+  (cd "$work" && docker compose logs --tail 30 2>/dev/null) || true
   exit 1
 }
 cleanup() {
-  (cd "$work" && docker compose down -v --remove-orphans >/dev/null 2>&1 || true)
+  (cd "$work" && docker compose down -v --remove-orphans >/dev/null 2>&1) || true
   docker run --rm -v "$data":/c alpine:3.24 sh -c 'rm -rf /c/* /c/.[!.]*' >/dev/null 2>&1 || true
   rm -rf "$work" "${bare%/*}" "$data" 2>/dev/null || true
 }
