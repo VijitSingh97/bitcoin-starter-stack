@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.0] - 2026-07-17
+
+### Changed
+
+- **`./stack init` now generates a dashboard password by default.** Pressing
+  Enter at the wizard's dashboard-password prompt generates a strong random one
+  (shown once — save it) instead of leaving the dashboard open, so guided setups
+  get basic auth out of the box. Type your own to use it instead. A bare
+  `./stack up` is unchanged: zero-config, open on the LAN only.
+
 ## [1.24.2] - 2026-07-17
 
 ### Fixed

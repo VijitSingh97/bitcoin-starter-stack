@@ -66,8 +66,9 @@ there's nothing to compile — it only builds locally if you're on an unreleased
 commit.
 
 Prefer to be asked? **`./stack init`** walks you through the options — a dashboard
-password, a Tor onion, inbound Tor connections, a fast clearnet initial sync,
-pruning — each with a default you accept by pressing Enter. Everything is
+password (Enter generates a strong one), a Tor onion, inbound Tor connections, a
+fast clearnet initial sync, pruning — each with a default you accept by pressing
+Enter. Everything is
 optional; you can also set it later by editing `config.json` and running
 `./stack apply`. See [Configuration](docs/configuration.md).
 
