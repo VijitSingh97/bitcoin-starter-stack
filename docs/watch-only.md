@@ -104,8 +104,8 @@ start (handy for a fresh deploy):
 ]
 ```
 
-After that first start the dashboard's own list is authoritative — edits you make
-in the UI stick, and further `config.json` changes are ignored.
+After that first start the dashboard's own list (the roster) is authoritative —
+edits you make in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 

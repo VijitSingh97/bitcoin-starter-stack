@@ -20,7 +20,8 @@ shows the overridable settings with their defaults:
         "prune_mb": 0,
         "inbound_onion": false,
         "blockfilterindex": false,
-        "sync_over_clearnet": false
+        "sync_over_clearnet": false,
+        "mem_limit_mb": 0
     },
     "dashboard": {
         "password": "",
@@ -47,7 +48,7 @@ shows the overridable settings with their defaults:
 | `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
 | `bitcoin.sync_over_clearnet` | `false` | `true` runs the initial block download over **clearnet** (hours, vs. days over Tor) — but this **exposes your home IP** to peers during the sync. Onion peers still go through Tor. Set it back to `false` and `./stack apply` once synced to return to Tor-only. Opt-in; leave `false` for a fully private node. |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |
-| `dashboard.password` | `""` (no auth) | Non-empty enables HTTP basic auth on the dashboard (any username, this password). Letters and numbers only. `./stack init` generates one by default (Enter at its prompt); a bare `./stack up` stays open on the LAN. |
+| `dashboard.password` | `""` (no auth) | Non-empty enables basic auth on the dashboard (any username, this password). Letters and numbers only. `./stack init` generates one by default (Enter at its prompt); a bare `./stack up` stays open on the LAN. |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |

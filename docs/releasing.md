@@ -18,9 +18,14 @@ The pins are the ingredients manifest of each release: bumping any of
 them — including a Bitcoin Core security update — is a normal release
 (bump the pin, cut a patch, the gate re-tests the composed set).
 
-NOTE: unlike Pithead, no container images are published. Users build the
-two small first-party images locally from digest-pinned bases; the release
-artifact is the source tarball, and the pins make the build reproducible.
+Multi-arch images (amd64 and arm64/Raspberry Pi) for the two first-party
+components — `tor` and `dashboard` — are built and published to GHCR
+(`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) per release by the `images`
+job in the [Release workflow](../.github/workflows/release.yml).
+`docker compose up` pulls these prebuilt tags; it only builds locally as a
+fallback (e.g. on an unreleased commit with no matching published tag). The
+release artifact is also a source tarball, and the digest-pinned bases make
+the build reproducible if you do build.
 
 ## Single source of truth
 
