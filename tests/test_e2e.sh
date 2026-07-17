@@ -65,7 +65,9 @@ jq --arg d "$BITCOIN_DATA_DIR" '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 3
 # The credentials the setup generated — every later assertion uses these.
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
-[ -n "$rpc_user" ] && [ -n "$rpc_pass" ] || fail "configure.sh did not render RPC credentials into .env"
+if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ]; then
+  fail "configure.sh did not render RPC credentials into .env"
+fi
 
 docker compose up -d --build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"
