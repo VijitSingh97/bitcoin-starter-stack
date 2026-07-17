@@ -4,6 +4,36 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.26.0] - 2026-07-17
+
+### Changed
+
+- **Container hardening (2026-07 best-practices sweep).** The `dashboard` now runs
+  **non-root** (uid 1000, like `bitcoin`) — it's the only service with a host port,
+  and it needs no root. All three services also get `security_opt:
+  no-new-privileges:true` and `cap_drop: [ALL]`. Verified end-to-end: the full stack
+  boots healthy under the new restrictions and the non-root dashboard writes its
+  state volume on a fresh install.
+  - **Upgrade note:** the existing `dashboard_state` volume was written as root, so
+    chown it once before upgrading (the dashboard degrades gracefully without this
+    — it just can't persist the wallet roster until done):
+    `docker run --rm -v bitcoin-starter-stack_dashboard_state:/state alpine chown -R 1000:1000 /state`
+
+### Added
+
+- **Optional `bitcoin.mem_limit_mb`** (default `0` = unlimited). Caps the bitcoin
+  container's memory so a bitcoind blowup is a contained restart instead of a
+  whole-host OOM — worth setting on a RAM-tight box. `configure.sh` validates it and
+  warns if it isn't above `dbcache_mb`; see [Configuration](docs/configuration.md) for
+  sizing.
+
+### Fixed
+
+- A slash-named git branch (`feat/x`) made `STACK_VERSION` contain `/`, which Docker
+  rejects as an image tag — `docker compose` failed with "invalid reference format"
+  on any feature branch. Sanitized (`/`→`-`).
+- CI's `GITHUB_TOKEN` is now least-privilege (`permissions: contents: read`).
+
 ## [1.25.1] - 2026-07-17
 
 ### Fixed
