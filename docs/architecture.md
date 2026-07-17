@@ -24,16 +24,17 @@ flowchart LR
 
 | Service | Image | Runs as | Role |
 |---|---|---|---|
-| `tor` | `alpine:3.22` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.29.0.25:9050`. Fresh onion identity per volume. |
+| `tor` | `alpine:3.24` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.29.0.25:9050`. Fresh onion identity per volume. |
 | `bitcoin` | [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) (official, digest-pinned) | `1000:1000` | Full or pruned node. `-datadir=/data` bind-mounted from the host. Credentials, `dbcache`, and `prune` injected from `.env` at runtime. |
-| `dashboard` | `python:3.11-slim` + Flask (built locally) | root (container) | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
+| `dashboard` | `python:3.14-slim` + Flask (built locally) | root (container) | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
 
-Static IPs keep `bitcoin.conf`'s `proxy=` line and the dashboard's RPC URL
-simple and deterministic.
+Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
+`docker-compose.yml`) and the dashboard's RPC URL simple and deterministic.
 
 ## Privacy model
 
-- **`onlynet=onion` + `proxy=` + `listen=0`** in
+- **`-onlynet=onion` + `-proxy=…`**, set by the bitcoin entrypoint in
+  [docker-compose.yml](../docker-compose.yml), plus **`listen=0`** in
   [bitcoin.conf](../build/bitcoin/bitcoin.conf): every P2P connection is
   outbound, to an onion peer, through the tor container. The node never
   dials clearnet and, by default, never accepts inbound.

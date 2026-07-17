@@ -59,8 +59,9 @@ cd bitcoin-starter-stack   # or unpack the tarball from the latest release
 ```
 
 That's it — no file to edit. `./stack up` writes a `.env` with sensible defaults
-and auto-generated internal credentials (a full node over Tor), then starts the
-stack. It **pulls prebuilt images** (amd64 and arm64/Raspberry Pi) from GHCR, so
+and an auto-generated RPC password (username defaults to `bitcoin`), for a full
+node over Tor, then starts the stack. It **pulls prebuilt images** (amd64 and
+arm64/Raspberry Pi) from GHCR, so
 there's nothing to compile — it only builds locally if you're on an unreleased
 commit.
 
