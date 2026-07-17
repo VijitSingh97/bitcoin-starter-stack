@@ -42,11 +42,14 @@ if (typeof document !== "undefined") {
   const name = el("input");
   name.placeholder = "Label (e.g. Cold storage)";
   name.maxLength = 40;
+  name.setAttribute("aria-label", "Wallet label");
   const key = el("input");
   key.placeholder = "xpub / zpub / address / descriptor";
+  key.setAttribute("aria-label", "Wallet key: xpub, zpub, address, or descriptor");
   const bday = el("input");
   bday.type = "date";
   bday.title = "Wallet birthday (optional) — bounds the first rescan";
+  bday.setAttribute("aria-label", "Wallet birthday (optional)");
   const add = el("button", null, "Add");
   add.type = "submit";
   form.append(name, key, bday, add);
@@ -72,6 +75,7 @@ if (typeof document !== "undefined") {
       const x = el("button", "watch-x", "✕");
       x.type = "button";
       x.title = `Remove ${w.name}`;
+      x.setAttribute("aria-label", `Remove ${w.name}`);
       x.addEventListener("click", () => remove(w.name));
       row.append(x);
       list.append(row);

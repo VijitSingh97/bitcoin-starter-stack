@@ -147,10 +147,13 @@ do_backup() {
   fi
   # the dashboard onion keys live in the tor volume
   docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 || true
+  # the watch-only roster (wallets.json) + balance history live in the dashboard
+  # state volume — UI-managed and not otherwise re-derivable
+  docker compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 || true
   out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
   chmod 600 "$out"
-  echo "Wrote $out (config, credentials, onion keys — chain data excluded, it's re-derivable)"
+  echo "Wrote $out (config, credentials, onion keys, watch-only roster — chain data excluded, it's re-derivable)"
 }
 
 do_restore() {
@@ -187,6 +190,16 @@ do_restore() {
       echo "Restored dashboard onion keys (tor restarted)"
     else
       echo "WARN: could not restore dashboard onion keys (is the tor container up?)"
+    fi
+  fi
+  if [ -d "$tmp/dashboard_state" ]; then
+    # restore the roster into the volume; chown to the dashboard's uid (1000) in
+    # case the backup came from an older root-owned /state
+    if docker compose cp "$tmp/dashboard_state/." dashboard:/state >/dev/null 2>&1; then
+      docker compose exec -u root dashboard chown -R 1000:1000 /state >/dev/null 2>&1 || true
+      echo "Restored watch-only roster"
+    else
+      echo "WARN: could not restore watch-only roster (is the dashboard container up?)"
     fi
   fi
   echo "Done. Apply with: ./stack apply"
