@@ -150,7 +150,8 @@ do_backup() {
   # bitcoind stores its inbound-onion key in the datadir
   data_dir=$(env_get BITCOIN_DATA_DIR)
   if [ -n "$data_dir" ] && [ -f "$data_dir/onion_v3_private_key" ]; then
-    cp "$data_dir/onion_v3_private_key" "$tmp/"
+    cp "$data_dir/onion_v3_private_key" "$tmp/" 2>/dev/null ||
+      echo "WARN: node onion key not captured (unreadable — run backup as the node's user, uid 1000)"
   fi
   # the dashboard onion keys live in the tor volume
   docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 ||
