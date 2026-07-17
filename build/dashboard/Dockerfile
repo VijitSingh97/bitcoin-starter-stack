@@ -19,4 +19,10 @@ COPY VERSION ./VERSION
 
 EXPOSE 8000
 
+# Run non-root (uid 1000, matching the bitcoin service). Pre-create the state
+# mountpoint owned by 1000 so a fresh `dashboard_state` named volume inherits
+# that ownership on first mount and the non-root process can write it.
+RUN mkdir -p /state && chown 1000:1000 /state
+USER 1000:1000
+
 CMD ["python", "node_status.py"]
