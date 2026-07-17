@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.26.1] - 2026-07-17
+
+### Fixed
+
+- **`./stack backup` now captures the watch-only roster.** It previously saved
+  config, credentials, and onion keys but not the `dashboard_state` volume — so a
+  lost volume (or a restore onto a fresh box) dropped your curated wallet list
+  (labels, keys, birthdays) and balance history. Backup and restore now include
+  it (verified against a live stack). No action needed; just re-run `./stack backup`.
+- **Accessibility:** the watch-only add-form inputs (label / key / birthday) and
+  the remove button now carry `aria-label`s, so screen readers announce them.
+
+### Changed
+
+- **CI robustness:** workflows now cancel superseded in-progress runs
+  (`concurrency`, keyed by ref) and carry `timeout-minutes`, so a redundant or
+  hung run no longer wastes CI minutes.
+
 ## [1.26.0] - 2026-07-17
 
 ### Changed
