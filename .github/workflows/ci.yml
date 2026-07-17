@@ -48,19 +48,8 @@ jobs:
       - name: Frontend unit tests
         run: node --test build/dashboard/static/*.test.mjs
 
-      # configure.sh e2e, compose contract test, CLI test (the full-stack boot
-      # test runs in the separate `e2e` job below).
+      # configure.sh e2e, compose contract, CLI test, AND the full-stack boot
+      # (test_e2e.sh runs here because CI=true — it builds + boots the stack,
+      # provisions watch-only wallets, and runs the egress audit).
       - name: Stack tests
         run: tests/run.sh
-
-  # Full-stack boot in its own job so the fast unit tests give quick feedback
-  # while this (~image build + boot + provisioning) runs in parallel. Also runs
-  # as part of the release gate. Health + watch-only provisioning are local
-  # (no dependency on Tor bootstrapping), so it's deterministic in CI.
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Boot the full stack (build, health, watch-only provisioning, egress audit)
-        run: RUN_E2E=1 tests/test_e2e.sh
