@@ -48,20 +48,30 @@ alert_new_block=$(flag '.notifications.alert_new_block')
 # pass through .env untouched (no quoting or $-expansion footguns).
 watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
 
-case "$rpc_user$rpc_password$dashboard_password" in
-*[!a-zA-Z0-9]*)
-  echo "Use only letters and numbers in node_username, node_password, and dashboard password."
-  exit 1
-  ;;
-esac
+check_alnum() {
+  case "$2" in
+  *[!a-zA-Z0-9]*)
+    echo "$1 must contain only letters and numbers."
+    exit 1
+    ;;
+  esac
+}
+check_alnum "node_username" "$rpc_user"
+check_alnum "node_password" "$rpc_password"
+check_alnum "dashboard password" "$dashboard_password"
 
 # Notification values pass through .env — reject anything env-file-unsafe
-case "$telegram_bot_token$telegram_chat_id$healthchecks_url" in
-*[\ \	\'\"\$]*)
-  echo "Notification settings must not contain spaces, quotes, or \$."
-  exit 1
-  ;;
-esac
+check_envsafe() {
+  case "$2" in
+  *[\ \	\'\"\$]*)
+    echo "$1 must not contain spaces, quotes, or \$."
+    exit 1
+    ;;
+  esac
+}
+check_envsafe "telegram_bot_token" "$telegram_bot_token"
+check_envsafe "telegram_chat_id" "$telegram_chat_id"
+check_envsafe "healthchecks_url" "$healthchecks_url"
 
 if [ -n "$healthchecks_url" ]; then
   case "$healthchecks_url" in

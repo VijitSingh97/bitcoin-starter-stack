@@ -403,6 +403,22 @@ def test_api_watch_add_rejects_bad_key(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_api_watch_add_rejects_pruned_node(monkeypatch):
+    # A pruned node can't rescan for a new import — provision_one would just
+    # silently skip it forever, so the API must refuse before the wallet is
+    # ever added to the store.
+    store = []
+    monkeypatch.setattr(node_status, "WATCH", store)
+    monkeypatch.setattr(node_status, "get_rpc_data",
+                        lambda m, p=None: {"pruned": True} if m == "getblockchaininfo" else None)
+    resp = node_status.app.test_client().post(
+        "/api/watch", json={"name": "X", "key": BIP84_ZPUB},
+        headers={"X-Requested-With": "fetch"})
+    assert resp.status_code == 400
+    assert "pruned" in resp.get_data(as_text=True).lower()
+    assert store == []  # never added
+
+
 def test_api_watch_accepts_every_key_type(monkeypatch, tmp_path):
     # the mock-data (CI) counterpart of the e2e provisioning test: each
     # supported input type is accepted and kicks off provisioning. Satoshi's

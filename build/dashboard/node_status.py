@@ -224,13 +224,19 @@ def api_watch_add():
     if bad:
         return bad
     data = request.get_json(silent=True) or {}
+    # A new import needs a full-chain rescan, which a pruned node can't do —
+    # check before validating/starting the thread, so the wallet is never
+    # added to the store only to sit unprovisioned forever (provision_one
+    # would otherwise silently skip the import — watch.py:178).
+    pruned = (get_rpc_data("getblockchaininfo") or {}).get("pruned", False)
+    if pruned:
+        return Response("This node is pruned — a full node is required to add watch-only wallets", 400)
     try:
         entry = watch.add_entry(WATCH, data.get("name"), data.get("key"), data.get("birthday"))
     except ValueError as e:
         return Response(str(e), 400)
     # Import rescans the chain — do it off the request thread with a long
     # timeout; the UI shows "scanning…" until it finishes.
-    pruned = (get_rpc_data("getblockchaininfo") or {}).get("pruned", False)
     threading.Thread(
         target=lambda: watch.provision_one(
             get_rpc_data,
@@ -282,8 +288,9 @@ def index():
                 <div class="loading-card">
                     <h2>Bitcoin Node Initializing</h2>
                     <div class="spinner"></div>
-                    <p>Connecting to RPC at 172.29.0.26...</p>
+                    <p>Connecting to the Bitcoin node...</p>
                     <p style="color: var(--muted); font-size: 0.8rem;">The dashboard will load automatically when the node is ready.</p>
+                    <p style="color: var(--muted); font-size: 0.8rem;">Still stuck after a few minutes? Run <code>./stack doctor</code> to check what's wrong.</p>
                     <p style="color: var(--faint); font-size: 0.7rem;">{{version}}</p>
                 </div>
                 </div>

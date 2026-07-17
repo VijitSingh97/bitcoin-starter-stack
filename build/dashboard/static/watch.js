@@ -164,19 +164,27 @@ if (typeof document !== "undefined") {
     } catch { /* blip — next poll */ }
   }
 
+  // success/"scanning" text stays the default muted color; errors get a
+  // distinct (warn/red) class so a failed add doesn't read the same as one
+  // in progress.
+  const setMsg = (text, isError) => {
+    msg.textContent = text;
+    msg.classList.toggle("watch-msg-error", !!isError);
+  };
+
   async function remove(walletName) {
-    msg.textContent = "";
+    setMsg("");
     try {
       const res = await fetch(`/api/watch/${encodeURIComponent(walletName)}`,
                              { method: "DELETE", headers: CSRF });
-      if (!res.ok) msg.textContent = await res.text();
-    } catch { msg.textContent = "Network error."; }
+      if (!res.ok) setMsg(await res.text(), true);
+    } catch { setMsg("Network error.", true); }
     refresh();
   }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    msg.textContent = "";
+    setMsg("");
     add.disabled = true;
     try {
       const res = await fetch("/api/watch", {
@@ -186,11 +194,11 @@ if (typeof document !== "undefined") {
       });
       if (res.ok) {
         name.value = key.value = bday.value = "";
-        msg.textContent = "Added — scanning the chain for its history…";
+        setMsg("Added — scanning the chain for its history…");
       } else {
-        msg.textContent = await res.text();
+        setMsg(await res.text(), true);
       }
-    } catch { msg.textContent = "Network error."; }
+    } catch { setMsg("Network error.", true); }
     add.disabled = false;
     refresh();
   });
