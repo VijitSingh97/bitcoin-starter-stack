@@ -54,10 +54,12 @@ echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked int
 echo "$rendered" | grep -qF 'NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"' ||
   fail "default (Tor-only) routing missing from the entrypoint"
 
-# the opt-in clearnet-sync branch (the IP-exposing path) must be present too —
-# same string-presence check as the Tor-only branch above
-echo "$rendered" | grep -qF 'NET_ARGS="-onion=172.29.0.25:9050"' ||
-  fail "clearnet-sync (SYNC_OVER_CLEARNET=1) routing missing/wrong in the entrypoint"
+# the full branch line, pinned verbatim: clearnet-sync (the IP-exposing opt-in)
+# must sit in the then-branch and Tor-only in the else — a value typo OR a
+# then/else swap both fail this (same whole-line style as the exec check above)
+# shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
+echo "$rendered" | grep -qF -- 'if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"; fi' ||
+  fail "SYNC_OVER_CLEARNET branch line changed — check both routing branches in the entrypoint"
 
 # The only published port is the dashboard on host port 80
 ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
