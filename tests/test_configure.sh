@@ -139,6 +139,21 @@ out=$(cd "$tmp" && ./configure.sh)
 grep -q '^BITCOIN_SYNC_OVER_CLEARNET=1$' "$tmp/.env" || fail "sync_over_clearnet not rendered as 1"
 echo "$out" | grep -qi "EXPOSES YOUR HOME IP" || fail "no IP-exposure warning for sync_over_clearnet"
 
+# mem_limit_mb: default 0 -> unlimited; a set value renders as "<n>m"; a value
+# not above dbcache warns; non-numeric is rejected
+rm -f "$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_MEM_LIMIT=0$' "$tmp/.env" || fail "mem_limit default should render 0 (unlimited)"
+echo '{"bitcoin": {"mem_limit_mb": 5000, "dbcache_mb": 3000}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_MEM_LIMIT=5000m$' "$tmp/.env" || fail "mem_limit_mb: 5000 should render 5000m"
+echo '{"bitcoin": {"mem_limit_mb": 2000, "dbcache_mb": 3000}}' >"$tmp/config.json"
+out=$(cd "$tmp" && ./configure.sh)
+echo "$out" | grep -qi "WARNING: mem_limit_mb" || fail "no warning when mem_limit_mb <= dbcache_mb"
+echo '{"bitcoin": {"mem_limit_mb": "lots"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric mem_limit_mb was accepted"
+rm -f "$tmp/config.json"
+
 # 12. Warns when the onion dashboard has no password
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"onion": true}}
