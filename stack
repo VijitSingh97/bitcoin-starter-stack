@@ -52,7 +52,7 @@ init() {
     echo "  generated dashboard password: $w_dashpass  (log in with any username — save it)"
   fi
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
-  read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [y/N] " w_inbound
+  read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
   read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet
   read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
 
@@ -62,7 +62,8 @@ init() {
   [ -n "$w_pass" ] && cfg=$(jq --arg v "$w_pass" '.bitcoin.node_password=$v' <<<"$cfg")
   [ -n "$w_dashpass" ] && cfg=$(jq --arg v "$w_dashpass" '.dashboard.password=$v' <<<"$cfg")
   yes "$w_dashonion" && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
-  yes "$w_inbound" && cfg=$(jq '.bitcoin.inbound_onion=true' <<<"$cfg")
+  # inbound is default-on; only record a deviation when the user declines
+  case "$w_inbound" in n | N | no | NO) cfg=$(jq '.bitcoin.inbound_onion=false' <<<"$cfg") ;; esac
   yes "$w_clearnet" && cfg=$(jq '.bitcoin.sync_over_clearnet=true' <<<"$cfg")
   if [ -n "$w_prune_gb" ]; then
     case "$w_prune_gb" in

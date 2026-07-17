@@ -25,9 +25,9 @@ watching sync progress, peers, and disk usage.
   validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
   config key.
 - 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
-  (`onlynet=onion`) — your home IP is never associated with your node. Outbound-only by
-  default; opt in to an **inbound onion service** to serve blocks back to the network,
-  still without exposing your IP.
+  (`onlynet=onion`) — your home IP is never associated with your node. Accepts **inbound
+  over a Tor onion service by default** to serve blocks back to the network (no IP
+  exposure, no host port); set `inbound_onion: false` to run outbound-only.
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning) on your LAN at port `80` — optionally behind basic auth. RPC stays
   inside the Docker network; nothing but the dashboard port is exposed.

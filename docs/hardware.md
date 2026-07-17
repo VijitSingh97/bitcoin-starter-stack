@@ -46,4 +46,5 @@ idles.
 ## Network
 
 Initial sync pulls ~800 GB through Tor. Steady state is a few GB per day.
-No inbound ports are needed — the node is outbound-only by design.
+No inbound host ports are needed — inbound arrives over the Tor onion service
+(`inbound_onion`, on by default), never a forwarded port.

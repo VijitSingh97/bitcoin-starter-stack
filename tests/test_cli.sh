@@ -42,12 +42,12 @@ echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded w
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y inbound=y clearnet=n prune=10 start=n
-printf '\n\nhunter2\ny\ny\nn\n10\nn\n' | ./stack init >/dev/null
+# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y inbound=n clearnet=n prune=10 start=n
+printf '\n\nhunter2\ny\nn\nn\n10\nn\n' | ./stack init >/dev/null
 [ -f config.json ] || fail "init did not write config.json"
 [ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
 [ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
-[ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "true" ] || fail "init: inbound onion"
+[ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "false" ] || fail "init: declining inbound records false (default is on)"
 [ "$(jq -r '.bitcoin.sync_over_clearnet // false' config.json)" = "false" ] || fail "init: clearnet should be off"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
