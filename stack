@@ -25,6 +25,13 @@ env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
 # Writes config.json (only the values you change), then offers to start. Plain
 # `./stack up` needs none of this; it just uses the defaults.
 init() {
+  for tool in jq openssl; do
+    command -v "$tool" >/dev/null || {
+      echo "$tool is required: sudo apt install $tool"
+      exit 1
+    }
+  done
+
   if [ -f config.json ]; then
     printf "config.json already exists — overwrite it? [y/N] "
     read -r reply
@@ -121,7 +128,7 @@ doctor() {
   echo "== Node"
   if docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
     jq -r '"      blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
-    echo "      RPC unreachable (normal during startup)"
+    echo "      RPC unreachable (normal during startup; if it's been up a while, check ./stack logs bitcoin)"
   fi
 
   echo "== Tor"
@@ -143,13 +150,16 @@ do_backup() {
   # bitcoind stores its inbound-onion key in the datadir
   data_dir=$(env_get BITCOIN_DATA_DIR)
   if [ -n "$data_dir" ] && [ -f "$data_dir/onion_v3_private_key" ]; then
-    cp "$data_dir/onion_v3_private_key" "$tmp/"
+    cp "$data_dir/onion_v3_private_key" "$tmp/" 2>/dev/null ||
+      echo "WARN: node onion key not captured (unreadable — run backup as the node's user, uid 1000)"
   fi
   # the dashboard onion keys live in the tor volume
-  docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 || true
+  docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 ||
+    echo "WARN: dashboard onion keys not captured (is the tor container up?)"
   # the watch-only roster (wallets.json) + balance history live in the dashboard
   # state volume — UI-managed and not otherwise re-derivable
-  docker compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 || true
+  docker compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
+    echo "WARN: watch-only roster not captured (is the dashboard container up?)"
   out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
   chmod 600 "$out"
@@ -162,7 +172,11 @@ do_restore() {
     yes=1
     shift
   fi
-  archive=${1:?usage: ./stack restore [-y] <archive>}
+  if [ -z "${1:-}" ]; then
+    echo "usage: ./stack restore [-y] <archive>"
+    exit 1
+  fi
+  archive=$1
   if [ "$yes" != "1" ]; then
     printf "This overwrites config.json, .env, and onion keys from %s. Continue? [y/N] " "$archive"
     read -r reply

@@ -263,6 +263,7 @@ h2 {
 }
 .watch-add button:disabled { opacity: 0.5; cursor: default; }
 .watch-msg { color: var(--muted); font-size: 0.8rem; margin-top: 8px; min-height: 1em; }
+.watch-msg.watch-msg-error { color: #ff5252; }
 .watch-warn { color: #e0a800; font-size: 0.75rem; margin-top: 8px; }
 
 .peer-box {
