@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.24.2] - 2026-07-17
+
+### Fixed
+
+- **Docs corrected against the code** (2026-07 repo audit): Tor-only routing
+  (`-onlynet=onion`, `-proxy=`) is documented where it actually lives — the
+  `docker-compose.yml` bitcoin entrypoint — not `bitcoin.conf` (it moved in
+  v1.21.0); stale versions updated (alpine 3.24, python 3.14, Core 31.1); the
+  RPC username is documented as defaulting to `bitcoin` (only the password is
+  random); the dashboard healthcheck accepts any HTTP response (401 under auth
+  is healthy); the config snippet now includes `sync_over_clearnet`.
+
+### Added
+
+- **Audit-driven test hardening.** The `SYNC_OVER_CLEARNET` routing branch line
+  is pinned verbatim in the compose contract test (a value typo or a then/else
+  swap — clearnet args leaking into the default branch — both fail);
+  `DELETE /api/watch` is asserted to reject requests without the CSRF header;
+  the watch-only cannot-spend guarantee (`disable_private_keys=True`) is pinned
+  in the fast unit suite instead of only the e2e.
+
 ## [1.24.1] - 2026-07-14
 
 ### Fixed
