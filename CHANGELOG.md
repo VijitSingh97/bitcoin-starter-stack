@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.1] - 2026-07-17
+
+### Fixed
+
+- **`inbound_onion` silently killed all outbound Tor connections.** With
+  `-torcontrol` active, bitcoind asks tor for its SOCKS listener, gets
+  `0.0.0.0:9050`, rewrites it to `127.0.0.1:9050` (dead inside the bitcoin
+  container), and — because `-onion` wasn't explicitly set — used it for every
+  onion destination: the onion service registered fine, but the node never made
+  an outbound connection. `-onion=172.29.0.25:9050` is now pinned explicitly.
+  Found by the new e2e sync-start check on real hardware (0 peers in 20 min
+  before; 10 onion peers within minutes after).
+
+### Added
+
+- **E2e now covers setup and sync-start.** The e2e boots through the documented
+  setup path (wizard → `config.json` → `configure.sh` → `.env`), and with
+  `E2E_SYNC=1` proves sync starts (onion-only peers, headers advancing) for
+  both the wizard and zero-config paths. New `tests/test_postsync.sh` runs
+  read-only post-sync assertions against an already-synced node.
+
 ## [1.25.0] - 2026-07-17
 
 ### Changed
