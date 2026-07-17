@@ -53,6 +53,10 @@ services:
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
     # Auth uses rpcauth (salted hash) — the plaintext RPC password never
     # enters this container. Settings come from the environment (configure.sh).
+    # -onion must be EXPLICIT: with -torcontrol (inbound onion), bitcoind asks
+    # tor for its SOCKS listener, gets 0.0.0.0:9050, rewrites it to
+    # 127.0.0.1:9050 (dead in this container), and silently overrides a
+    # non-explicit onion proxy — killing all outbound onion connections.
     # The exec line must stay a single line: a YAML line break here becomes a
     # shell line break, silently dropping every flag after it (see tests/test_e2e.sh).
     entrypoint:
@@ -64,7 +68,7 @@ services:
         RPCAUTH=$$(printf '%s:%s$$%s' "$$RPC_USER" "$$RPCAUTH_SALT" "$$RPCAUTH_HASH")
         ONION_ARGS=""
         if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi
-        if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onlynet=onion"; fi
+        if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"; fi
         exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
