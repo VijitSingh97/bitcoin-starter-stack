@@ -56,6 +56,54 @@ def test_rpc_uses_credentials_from_env(monkeypatch):
     assert seen["auth"] == ("testuser", "testpass")
 
 
+# --- get_wallet_data (the wallet-scoped twin of get_rpc_data) ---
+
+def test_wallet_rpc_error_returns_none(monkeypatch):
+    def boom(*a, **k):
+        raise node_status.requests.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(node_status.requests, "post", boom)
+    assert node_status.get_wallet_data("watch_A", "getwalletinfo") is None
+
+
+def test_wallet_rpc_non_200_returns_none(monkeypatch):
+    class Resp:
+        status_code = 500
+
+    monkeypatch.setattr(node_status.requests, "post", lambda *a, **kw: Resp())
+    assert node_status.get_wallet_data("watch_A", "getwalletinfo") is None
+
+
+def test_wallet_rpc_hits_wallet_path_with_credentials(monkeypatch):
+    seen = {}
+
+    class Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"result": {"ok": True}}
+
+    def capture(url, auth, data, timeout):
+        seen.update(url=url, auth=auth, timeout=timeout)
+        return Resp()
+
+    monkeypatch.setattr(node_status.requests, "post", capture)
+    assert node_status.get_wallet_data("watch_A", "getwalletinfo", timeout=3) == {"ok": True}
+    assert seen["url"].endswith("/wallet/watch_A")  # wallet-scoped endpoint
+    assert seen["auth"] == ("testuser", "testpass")
+    assert seen["timeout"] == 3
+
+
+# --- _read_stack_version: env wins, else baked VERSION, else "dev" ---
+
+def test_read_stack_version_prefers_env_then_dev(monkeypatch):
+    monkeypatch.setenv("STACK_VERSION", "1.2.3")
+    assert node_status._read_stack_version() == "1.2.3"
+    monkeypatch.setenv("STACK_VERSION", "")  # empty -> fall through; no baked VERSION here
+    assert node_status._read_stack_version() == "dev"
+
+
 # --- index route ---
 
 FAKE_RPC = {

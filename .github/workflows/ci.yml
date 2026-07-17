@@ -39,15 +39,28 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Dashboard unit tests
+      - name: Dashboard unit tests + coverage
         run: |
-          pip install -r build/dashboard/requirements.txt pytest
-          python -m pytest build/dashboard/tests -q
+          pip install -r build/dashboard/requirements.txt pytest pytest-cov
+          cd build/dashboard
+          python -m pytest tests -q --cov=. --cov-report=term-missing --cov-fail-under=85
 
       - name: Frontend unit tests
         run: node --test build/dashboard/static/*.test.mjs
 
-      # Runs the configure.sh e2e, the compose contract test, and the
-      # full-stack boot test (which builds the images) — same as local.
+      # configure.sh e2e, compose contract test, CLI test (the full-stack boot
+      # test runs in the separate `e2e` job below).
       - name: Stack tests
         run: tests/run.sh
+
+  # Full-stack boot in its own job so the fast unit tests give quick feedback
+  # while this (~image build + boot + provisioning) runs in parallel. Also runs
+  # as part of the release gate. Health + watch-only provisioning are local
+  # (no dependency on Tor bootstrapping), so it's deterministic in CI.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Boot the full stack (build, health, watch-only provisioning, egress audit)
+        run: RUN_E2E=1 tests/test_e2e.sh

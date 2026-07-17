@@ -61,6 +61,12 @@ echo "$rendered" | grep -qF 'NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.2
 echo "$rendered" | grep -qF -- 'if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"; fi' ||
   fail "SYNC_OVER_CLEARNET branch line changed — check both routing branches in the entrypoint"
 
+# inbound-onion branch, pinned verbatim: regressing this once silently killed
+# outbound onion sync (commit 0654ac0). Only appears when INBOUND_ONION=1.
+# shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
+echo "$rendered" | grep -qF -- 'if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi' ||
+  fail "INBOUND_ONION branch line changed — check the inbound onion-service flags in the entrypoint"
+
 # The only published port is the dashboard on host port 80
 ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
 published=$(echo "$rendered" | grep -c 'published:' || true)

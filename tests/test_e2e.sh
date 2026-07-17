@@ -133,6 +133,16 @@ done
 docker cp build/dashboard/tests/e2e_watch.py dashboard:/app/e2e_watch.py >/dev/null
 docker exec dashboard python /app/e2e_watch.py || fail "watch-only provisioning failed"
 
+# ./stack backup must capture the dashboard state volume (the watch-only roster
+# path) — verifies the docker-cp added in the backup, against a live stack
+./stack backup >/dev/null || fail "stack backup failed"
+# shellcheck disable=SC2012 # fixed-pattern glob, ls -t is the simple way to the newest
+_arc=$(ls -t backups/stack-backup-*.tar.gz | head -1)
+tar tzf "$_arc" | grep -q 'dashboard_state/wallets.json' ||
+  fail "backup did not capture the watch-only roster (/state)"
+rm -f "$_arc"
+echo "PASS: backup captures the watch-only roster (/state)"
+
 # Sync-start check (opt-in: real Tor traffic, takes many minutes). Proves the
 # node finds peers, that every peer is an onion peer, and that header sync
 # begins — not the whole sync, just that it starts. Cold-cache onion peer

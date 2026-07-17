@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 config.json
 backups/
+
+# coverage data
+.coverage

@@ -1,0 +1,10 @@
+# Coverage config for the dashboard modules. Runs from build/dashboard.
+[run]
+omit =
+    tests/*
+
+[report]
+# The app bootstrap (thread wiring + app.run) can't be unit-tested.
+exclude_also =
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
