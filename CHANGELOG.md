@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.0] - 2026-07-17
+
+### Changed
+
+- **The node now accepts inbound connections by default.** `inbound_onion` flips
+  from opt-in to **on by default** — the node publishes a Tor onion service and
+  serves blocks back to the network, still with **no IP exposure and no host
+  port** (it's all over Tor). This is the encouraged posture and makes the
+  network healthier; the only cost is some extra upload bandwidth. To run
+  outbound-only, set `"inbound_onion": false` in `config.json` (or answer *n* to
+  the `./stack init` prompt, now `[Y/n]`). Existing deployments keep whatever
+  their `config.json` says; a bare `./stack up`/`./stack apply` will enable it.
+
 ## [1.26.2] - 2026-07-17
 
 ### Fixed
