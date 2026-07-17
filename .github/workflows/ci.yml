@@ -11,9 +11,16 @@ on:
 permissions:
   contents: read
 
+# Cancel a superseded run on the same ref (a new push to the same PR/branch).
+# Keyed by ref, so a release-gate run on a tag never collides with branch CI.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
