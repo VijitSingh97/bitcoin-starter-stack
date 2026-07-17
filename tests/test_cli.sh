@@ -63,4 +63,31 @@ printf 'y\n\n\n\nn\nn\nn\n\nn\n' | ./stack init >/dev/null
 jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
   fail "init: empty dashboard password should generate a 32-hex one"
 
+# ./stack upgrade: the decision paths that don't touch docker (the real
+# checkout+apply is covered by tests/test_upgrade.sh).
+# (a) not a git checkout -> points at the release tarball (it exits 1, so capture
+# the output rather than piping under pipefail)
+out=$(./stack upgrade 2>&1 || true)
+printf '%s' "$out" | grep -q "Not a git checkout" || fail "upgrade: non-git should point at the tarball"
+# (b) HEAD already at the latest tag -> nothing to do
+gtmp=$(mktemp -d)
+cp stack configure.sh "$gtmp/"
+printf '9.9.9\n' >"$gtmp/VERSION"
+(
+  cd "$gtmp"
+  git init -q && git config user.email t@t && git config user.name t
+  git add -A && git commit -qm v && git tag v9.9.9
+  ./stack upgrade 2>&1 | grep -q "Already on the latest release (v9.9.9)" || {
+    echo "FAIL: upgrade should no-op when HEAD is the latest tag"
+    exit 1
+  }
+  # (c) installed newer than the newest tag -> refuse to downgrade
+  git tag -d v9.9.9 >/dev/null && git tag v0.0.1
+  ./stack upgrade 2>&1 | grep -q "newer than the latest release" || {
+    echo "FAIL: upgrade should refuse to downgrade"
+    exit 1
+  }
+) || exit 1
+rm -rf "$gtmp"
+
 echo "PASS: test_cli.sh"

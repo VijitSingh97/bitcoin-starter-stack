@@ -81,7 +81,9 @@ Then watch it come up:
 ```
 
 `./stack` wraps day-to-day operations (`up`, `down`, `logs`, `status`,
-`doctor`, `apply`, `backup`/`restore`) — see [Operations](docs/operations.md).
+`doctor`, `apply`, `upgrade`, `backup`/`restore`) — see [Operations](docs/operations.md).
+Upgrading is one command: **`./stack upgrade`** fetches the latest release,
+backs up, and applies it.
 
 The initial block download is ~800 GB over Tor — expect days, with live progress on the
 dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-started.md).

@@ -31,6 +31,12 @@ shows recent probe output when diagnosing.
 
 ## Upgrading
 
+- **One command: `./stack upgrade`.** Fetches the latest release tag, **backs up
+  first**, checks it out, and re-applies — pulling the new prebuilt images and
+  recreating the changed containers. It only ever moves **forward** (never
+  downgrades) and prints a rollback line if you need it. This is the normal way
+  to update the stack itself. (Requires a git checkout; for a tarball install,
+  unpack the latest release over it and `./stack apply`.)
 - **Bitcoin Core:** the stack uses the official
   [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) image,
   pinned to an exact version and digest in `docker-compose.yml`. Dependabot
@@ -38,8 +44,8 @@ shows recent probe output when diagnosing.
   before you merge. To upgrade manually, bump the tag+digest and
   `docker compose up -d`. Chain data upgrades in place; downgrades across
   major versions are not generally supported, so read the release notes.
-- **Dashboard / Tor images:** `git pull`, then
-  `docker compose up -d --build`.
+- **Dashboard / Tor images:** handled by `./stack upgrade` (or manually:
+  `git pull`, then `docker compose up -d --build`).
 - Everything is pinned (image digests, pip versions, action SHAs) and
   Dependabot maintains all of it with weekly PRs.
 
