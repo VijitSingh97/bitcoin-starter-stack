@@ -144,6 +144,8 @@ the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 | [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
 | [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
+| [Notifications & Remote Access](docs/notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |
+| [Releasing](docs/releasing.md) | How versions are cut: VERSION file, changelog discipline, the tag-triggered gate, and tarballs. |
 
 ## 🧪 Testing
 

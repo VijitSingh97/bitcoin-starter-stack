@@ -5,6 +5,7 @@
 | [Getting Started](getting-started.md) | Prerequisites, install, first start, and what to expect during the initial sync. |
 | [Hardware Requirements](hardware.md) | CPU, RAM, and disk sizing — with real numbers from a reference deployment. |
 | [Configuration](configuration.md) | Every `config.json` key, applying changes, and reusing an existing node's data. |
+| [Watch-only](watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
 | [Architecture](architecture.md) | The three services, the network layout, and the privacy model. |
 | [Operations](operations.md) | Day-to-day commands, health checks, upgrades, backup, and troubleshooting. |
 | [Notifications & Remote Access](notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |
