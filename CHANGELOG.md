@@ -768,6 +768,19 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.29.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.1
+[1.29.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.0
+[1.28.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.28.0
+[1.27.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.27.0
+[1.26.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.2
+[1.26.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.1
+[1.26.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.0
+[1.25.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.25.1
+[1.25.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.25.0
+[1.24.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.2
+[1.24.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.1
+[1.24.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.0
+[1.23.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.23.0
 [1.22.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.22.0
 [1.21.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.21.0
 [1.20.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.1
