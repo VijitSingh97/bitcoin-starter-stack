@@ -18,14 +18,24 @@ grep -q '^BITCOIN_RPC_USER=bitcoin$' "$tmp/.env" || fail "RPC user default is no
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
 
-# 2. Re-running keeps the same auto-generated credentials (idempotent)
+# 2. Re-running keeps the same auto-generated credentials AND the rpcauth
+#    salt/hash (idempotent). A rotating salt re-derives the hash every run, which
+#    changes the bitcoin container's env and needlessly recreates bitcoind on
+#    every apply/upgrade (5-min flush each time).
 u1=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p1=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
+s1=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
+h1=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
 (cd "$tmp" && ./configure.sh) >/dev/null
 u2=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p2=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
+s2=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
+h2=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
 if [ "$u1" != "$u2" ] || [ "$p1" != "$p2" ]; then
   fail "credentials changed on re-run (not idempotent)"
+fi
+if [ "$s1" != "$s2" ] || [ "$h1" != "$h2" ]; then
+  fail "rpcauth salt/hash changed on re-run — would recreate bitcoind on every apply/upgrade"
 fi
 
 # 3. A config.json without credentials still gets auto-generated ones
