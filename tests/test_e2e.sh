@@ -53,9 +53,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Setup exactly as a user does it. Wizard answers: RPC user/pass Enter
-# (auto-generate), dashboard password e2edash, dashboard onion y, inbound
-# onion y, clearnet n, prune 1 GB, don't start yet.
-printf '\n\ne2edash\ny\ny\nn\n1\nn\n' | ./stack init >/dev/null
+# (auto-generate), dashboard password e2edash, dashboard onion y, upgrade
+# button n (agent covered by test_upgrade.sh), inbound onion y, clearnet n,
+# prune 1 GB, don't start yet.
+printf '\n\ne2edash\ny\nn\ny\nn\n1\nn\n' | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
 # datadir at the temp dir and shrink dbcache for CI-sized runners.
 jq --arg d "$BITCOIN_DATA_DIR" '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300' \
