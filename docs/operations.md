@@ -64,7 +64,10 @@ the button never touches the host directly. Instead:
    ./stack upgrade-agent      # watches for button requests; runs ./stack upgrade
    ```
 
-   Keep it running with a systemd unit so it survives reboots:
+   Keep it running with a systemd unit so it survives reboots. Run it as the
+   user who owns the checkout (and is in the `docker` group) — **not root**, or
+   git refuses the upgrade's `fetch`/`checkout` with "dubious ownership" on a
+   user-owned repo. Replace `YOU` with that username:
 
    ```ini
    # /etc/systemd/system/bitcoin-stack-upgrade-agent.service
@@ -74,9 +77,11 @@ the button never touches the host directly. Instead:
    Requires=docker.service
 
    [Service]
+   User=YOU
    WorkingDirectory=/home/YOU/bitcoin-starter-stack
    ExecStart=/home/YOU/bitcoin-starter-stack/stack upgrade-agent
    Restart=always
+   RestartSec=10
 
    [Install]
    WantedBy=multi-user.target
