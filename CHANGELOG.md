@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.29.1] - 2026-07-18
+
+### Fixed
+
+- **`./stack apply` / `./stack upgrade` no longer needlessly recreate bitcoind.**
+  `configure.sh` regenerated a fresh rpcauth salt on every run, which rotated the
+  derived hash and changed the bitcoin container's env — so `docker compose up -d`
+  recreated bitcoind (triggering its 5-minute flush grace) on **every** apply or
+  upgrade, even for an unrelated change like a dashboard-only edit. The salt is
+  now preserved across runs (like the RPC password already was), so an unchanged
+  password re-renders byte-identical and only the containers that actually changed
+  are recreated. A changed password still rotates the hash and correctly recreates
+  bitcoind.
+- **The upgrade-agent systemd example now runs as the repo owner, not root.** The
+  1.29.0 unit in `docs/operations.md` omitted `User=`, so it defaulted to root and
+  the upgrade's `git fetch`/`checkout` failed with "dubious ownership" on a
+  user-owned checkout. Added `User=YOU` (must be in the `docker` group) and
+  `RestartSec`.
+
 ## [1.29.0] - 2026-07-17
 
 ### Added
