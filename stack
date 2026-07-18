@@ -123,8 +123,11 @@ doctor() {
     echo "OK    config.json rendered into .env"
   fi
   if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
-    pgrep -f "stack upgrade-agent" >/dev/null 2>&1 && echo "OK    upgrade-agent (dashboard Upgrade button)" ||
+    if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
+      echo "OK    upgrade-agent (dashboard Upgrade button)"
+    else
       echo "WARN  upgrade-agent not running — ./stack up starts it"
+    fi
   fi
 
   echo "== Disk"
@@ -310,10 +313,12 @@ ensure_agent() {
     fi
   else
     if crontab -l 2>/dev/null | grep -qF "stack upgrade-agent"; then
-      crontab -l 2>/dev/null | grep -vF "stack upgrade-agent" | crontab -
+      # grep -v exits 1 when ours is the only line — that's fine, write it empty
+      crontab -l 2>/dev/null | { grep -vF "stack upgrade-agent" || true; } | crontab -
     fi
-    pkill -f "stack upgrade-agen[t]" 2>/dev/null &&
-      echo "upgrade-agent: stopped (dashboard.control is off)" || true
+    if pkill -f "stack upgrade-agen[t]" 2>/dev/null; then
+      echo "upgrade-agent: stopped (dashboard.control is off)"
+    fi
   fi
 }
 

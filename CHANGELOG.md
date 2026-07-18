@@ -16,6 +16,11 @@ All notable changes to this project are documented here. Format follows
   the stack defers to it. `./stack init` asks one new question ("One-click
   upgrades from the dashboard?", default no), and `./stack doctor` reports
   whether the agent is running.
+- **Sandboxed lifecycle tests for the agent manager.** `test_cli.sh` stubs
+  `crontab`/`docker`/`pgrep`/`pkill`/`setsid`/`systemctl` onto PATH and drives
+  enable → re-apply (idempotence) → disable → systemd-deference without
+  touching the host. The suite immediately caught a `pipefail` crash in the
+  disable path when the agent's entry was the only crontab line.
 
 ### Changed
 

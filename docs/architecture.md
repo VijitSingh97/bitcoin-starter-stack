@@ -59,9 +59,15 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 
 ## Trust boundaries — and non-boundaries
 
-- The dashboard has **no authentication**. LAN exposure is the feature;
-  internet exposure is on you not to configure. See
-  [SECURITY.md](../SECURITY.md).
+- The dashboard has **no authentication by default** (`dashboard.password`
+  adds basic auth). LAN exposure is the feature; internet exposure is on you
+  not to configure. See [SECURITY.md](../SECURITY.md).
+- The opt-in Upgrade button keeps the container↔host boundary intact: the
+  dashboard writes a fixed marker file to its own volume — content never read,
+  no Docker socket, no host access — and the host-side `upgrade-agent` polls
+  for the marker and runs the same predetermined `./stack upgrade` you would.
+  Even with a stolen dashboard password, the only possible action is
+  "upgrade to the latest release" ([Upgrade button](operations.md#upgrade-button-opt-in)).
 - Docker host access is **not** a boundary: `docker inspect` reveals RPC
   credentials. Anyone who can run Docker commands owns the box anyway.
 

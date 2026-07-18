@@ -66,6 +66,77 @@ jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
 
+# ensure_agent: up/apply must start the agent + install the @reboot cron entry
+# when dashboard.control is on, remove both when off, and defer to systemd.
+# Everything host-touching (crontab, docker, pgrep/pkill, setsid, systemctl) is
+# stubbed onto PATH so the real machine is never modified.
+stub=$tmp/stubs
+mkdir -p "$stub"
+export FAKE_CRON="$tmp/fake-crontab" FAKE_LOG="$tmp/stub-calls.log"
+cat >"$stub/crontab" <<'EOS'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-l" ]; then [ -f "$FAKE_CRON" ] && cat "$FAKE_CRON" || exit 1; else cat >"$FAKE_CRON"; fi
+EOS
+cat >"$stub/docker" <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+cat >"$stub/pgrep" <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+cat >"$stub/pkill" <<'EOS'
+#!/usr/bin/env bash
+echo "pkill $*" >>"$FAKE_LOG"; exit 0
+EOS
+cat >"$stub/setsid" <<'EOS'
+#!/usr/bin/env bash
+echo "setsid $*" >>"$FAKE_LOG"; exit 0
+EOS
+cat >"$stub/systemctl" <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+chmod +x "$stub"/*
+echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
+
+# control on -> cron entry installed, agent started
+out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
+grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
+# the agent start is backgrounded — give the stub a moment to log the call
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -f "$FAKE_LOG" ] && break
+  sleep 0.3
+done
+grep -q "setsid ./stack upgrade-agent" "$FAKE_LOG" || fail "ensure_agent: agent not started"
+printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: start not reported"
+
+# idempotent: a second apply must not duplicate the cron entry
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+[ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
+
+# control off -> cron entry removed, agent killed
+echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json
+out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: cron entry not removed"
+grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: agent not stopped"
+printf '%s' "$out" | grep -q "upgrade-agent: stopped" || fail "ensure_agent: stop not reported"
+
+# systemd unit enabled -> stack stays out of the way entirely
+cat >"$stub/systemctl" <<'EOS'
+#!/usr/bin/env bash
+exit 0
+EOS
+chmod +x "$stub/systemctl"
+rm -f "$FAKE_LOG"
+echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+sleep 0.5
+[ -s "$FAKE_LOG" ] && fail "ensure_agent: touched the host despite an enabled systemd unit"
+grep -q "stack upgrade-agent" "$FAKE_CRON" 2>/dev/null && fail "ensure_agent: installed cron despite systemd"
+rm -f config.json .env "$FAKE_CRON" "$FAKE_LOG"
+
 # ./stack upgrade: the decision paths that don't touch docker (the real
 # checkout+apply is covered by tests/test_upgrade.sh).
 # (a) not a git checkout -> points at the release tarball (it exits 1, so capture
