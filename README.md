@@ -11,7 +11,7 @@
 
 Docker Compose stack for a [Bitcoin Core](https://bitcoincore.org/) full node with all P2P
 traffic routed through a built-in Tor daemon, plus a lightweight web dashboard for
-watching sync progress, peers, and disk usage.
+sync progress, peers, mempool fees, and watch-only wallet balances.
 
 <img src="./images/dashboard.png" width="80%" alt="Bitcoin node dashboard: live node status card, watch-only wallet balances in gold with sparklines above a 3D block tower" />
 
@@ -44,6 +44,12 @@ watching sync progress, peers, and disk usage.
   balance and a total, read straight off your own node, your addresses never touching a block
   explorer. Add and remove them from the UI; watch-only, so no keys and no spend risk. See
   [Watch-only](docs/watch-only.md).
+- ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
+  applies it — or flip on `dashboard.control` and upgrade with a button from the dashboard
+  when a new release is out.
+- 🔭 **Knows when it's stale.** A daily update check (over Tor) surfaces new Bitcoin Core and
+  stack releases on the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
+  monitoring you already run.
 
 ## 🚀 Quick Start
 
@@ -155,9 +161,12 @@ the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 tests/run.sh
 ```
 
-Runs shellcheck, a `configure.sh` end-to-end test, a docker-compose contract test, and the
-dashboard's unit tests — the same suite [CI](.github/workflows/ci.yml) runs on every push,
-plus a full image build. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Runs shellcheck, `configure.sh` and CLI tests, a docker-compose contract test, a
+release-consistency check, an upgrade-path test, the dashboard's Python and frontend unit
+tests, and a real end-to-end boot whose **egress audit asserts every established connection
+from the containers is Tor-only** — the same suite [CI](.github/workflows/ci.yml) runs on
+every push, plus a full image build, secret scanning (gitleaks), and Dockerfile lint
+(hadolint). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## ⚠️ Disclaimer
 
