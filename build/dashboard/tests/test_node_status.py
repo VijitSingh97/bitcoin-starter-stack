@@ -544,3 +544,36 @@ def test_api_watch_add_then_remove(monkeypatch, tmp_path):
 
     r = client.delete("/api/watch/Cold", headers={"X-Requested-With": "fetch"})
     assert r.status_code == 404  # already gone
+
+
+# --- opt-in upgrade control endpoint ---
+
+def test_upgrade_refused_when_control_disabled(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_CONTROL", False)
+    r = node_status.app.test_client().post("/api/upgrade", headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 403  # feature off -> no-op
+
+
+def test_upgrade_requires_csrf_header(monkeypatch):
+    monkeypatch.setattr(node_status, "DASHBOARD_CONTROL", True)
+    r = node_status.app.test_client().post("/api/upgrade")  # no X-Requested-With
+    assert r.status_code == 403
+
+
+def test_upgrade_writes_marker_when_enabled(monkeypatch, tmp_path):
+    monkeypatch.setattr(node_status, "DASHBOARD_CONTROL", True)
+    marker = tmp_path / "upgrade.request"
+    monkeypatch.setattr(node_status, "UPGRADE_REQUEST", str(marker))
+    r = node_status.app.test_client().post("/api/upgrade", headers={"X-Requested-With": "fetch"})
+    assert r.status_code == 200
+    assert marker.exists()  # the agent will pick this up
+
+
+def test_upgrade_get_reports_enabled_and_pending(monkeypatch, tmp_path):
+    monkeypatch.setattr(node_status, "DASHBOARD_CONTROL", True)
+    marker = tmp_path / "upgrade.request"
+    monkeypatch.setattr(node_status, "UPGRADE_REQUEST", str(marker))
+    j = node_status.app.test_client().get("/api/upgrade").get_json()
+    assert j["enabled"] is True and j["pending"] is False
+    marker.write_text("x")
+    assert node_status.app.test_client().get("/api/upgrade").get_json()["pending"] is True

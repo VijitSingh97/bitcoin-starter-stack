@@ -93,4 +93,24 @@ done
 # and serving the new baked version
 curl -fsS localhost 2>/dev/null | grep -q "v0.0.2" || fail "dashboard not serving v0.0.2 after upgrade"
 
-echo "PASS: test_upgrade.sh (v0.0.1 -> v0.0.2, stack healthy, backup written)"
+# --- upgrade-agent: the host agent must consume a dashboard-written request ---
+# The Upgrade button (endpoint tested in test_node_status.py) drops this marker in
+# the dashboard's state volume; the host agent must see it and run an upgrade. We're
+# already on the latest tag, so the upgrade no-ops — clearing the marker is the proof
+# the agent detected the request and invoked do_upgrade.
+docker exec -u 1000 dashboard sh -c 'echo requested > /state/upgrade.request' ||
+  fail "could not seed the upgrade request marker"
+./stack upgrade-agent >/dev/null 2>&1 &
+agent_pid=$!
+consumed=
+for _ in $(seq 1 12); do
+  docker exec dashboard test -f /state/upgrade.request 2>/dev/null || {
+    consumed=1
+    break
+  }
+  sleep 2
+done
+kill "$agent_pid" 2>/dev/null || true
+[ -n "$consumed" ] || fail "upgrade-agent did not consume the dashboard request marker"
+
+echo "PASS: test_upgrade.sh (upgrade v0.0.1 -> v0.0.2 + agent consumes request)"

@@ -49,6 +49,46 @@ shows recent probe output when diagnosing.
 - Everything is pinned (image digests, pip versions, action SHAs) and
   Dependabot maintains all of it with weekly PRs.
 
+### Upgrade button (opt-in)
+
+The dashboard can show an **Upgrade now** button when a newer release is
+available — one click instead of an SSH session. It's **off by default** and
+runs the dashboard as an unprivileged user with no host or Docker access, so
+the button never touches the host directly. Instead:
+
+1. Set `dashboard.control: true` in `config.json` (set a `dashboard.password`
+   too — the button triggers upgrades). Run `./configure.sh && ./stack apply`.
+2. Run the host-side agent so requests get acted on:
+
+   ```bash
+   ./stack upgrade-agent      # watches for button requests; runs ./stack upgrade
+   ```
+
+   Keep it running with a systemd unit so it survives reboots:
+
+   ```ini
+   # /etc/systemd/system/bitcoin-stack-upgrade-agent.service
+   [Unit]
+   Description=bitcoin-starter-stack dashboard upgrade agent
+   After=docker.service
+   Requires=docker.service
+
+   [Service]
+   WorkingDirectory=/home/YOU/bitcoin-starter-stack
+   ExecStart=/home/YOU/bitcoin-starter-stack/stack upgrade-agent
+   Restart=always
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   `sudo systemctl enable --now bitcoin-stack-upgrade-agent`.
+
+The button appears only when control is on **and** an update is available. It
+writes a request marker to the dashboard's state volume; the agent sees it,
+backs up, and runs the same `./stack upgrade` as above. Without the agent
+running, clicking the button does nothing — the request just waits.
+
 ## Backup
 
 ```bash
