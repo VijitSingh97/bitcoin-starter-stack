@@ -45,8 +45,8 @@ sync progress, peers, mempool fees, and watch-only wallet balances.
   explorer. Add and remove them from the UI; watch-only, so no keys and no spend risk. See
   [Watch-only](docs/watch-only.md).
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
-  applies it — or flip on `dashboard.control` and upgrade with a button from the dashboard
-  when a new release is out.
+  applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
+  with a button from the dashboard; the stack runs the host-side agent for you.
 - 🔭 **Knows when it's stale.** A daily update check (over Tor) surfaces new Bitcoin Core and
   stack releases on the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
   monitoring you already run.

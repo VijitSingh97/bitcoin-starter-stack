@@ -42,11 +42,12 @@ echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded w
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y inbound=n clearnet=n prune=10 start=n
-printf '\n\nhunter2\ny\nn\nn\n10\nn\n' | ./stack init >/dev/null
+# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y control=y inbound=n clearnet=n prune=10 start=n
+printf '\n\nhunter2\ny\ny\nn\nn\n10\nn\n' | ./stack init >/dev/null
 [ -f config.json ] || fail "init did not write config.json"
 [ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
 [ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
+[ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
 [ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "false" ] || fail "init: declining inbound records false (default is on)"
 [ "$(jq -r '.bitcoin.sync_over_clearnet // false' config.json)" = "false" ] || fail "init: clearnet should be off"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
@@ -58,10 +59,12 @@ grep -q '^BITCOIN_RPC_USER=bitcoin$' .env || fail "wizard config: username defau
 grep -q '^DASHBOARD_PASSWORD=hunter2$' .env || fail "wizard config: dashboard password not rendered"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
-# overwrite=y user pass dashpass[Enter=generate] onion=n inbound=n clearnet=n prune start=n
-printf 'y\n\n\n\nn\nn\nn\n\nn\n' | ./stack init >/dev/null
+# overwrite=y user pass dashpass[Enter=generate] onion=n control=n inbound=n clearnet=n prune start=n
+printf 'y\n\n\n\nn\nn\nn\nn\n\nn\n' | ./stack init >/dev/null
 jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
   fail "init: empty dashboard password should generate a 32-hex one"
+[ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
+  fail "init: upgrade button must default to off"
 
 # ./stack upgrade: the decision paths that don't touch docker (the real
 # checkout+apply is covered by tests/test_upgrade.sh).

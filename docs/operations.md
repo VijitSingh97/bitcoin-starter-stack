@@ -54,45 +54,48 @@ shows recent probe output when diagnosing.
 The dashboard can show an **Upgrade now** button when a newer release is
 available — one click instead of an SSH session. It's **off by default** and
 runs the dashboard as an unprivileged user with no host or Docker access, so
-the button never touches the host directly. Instead:
+the button never touches the host directly.
 
-1. Set `dashboard.control: true` in `config.json` (set a `dashboard.password`
-   too — the button triggers upgrades). Run `./configure.sh && ./stack apply`.
-2. Run the host-side agent so requests get acted on:
-
-   ```bash
-   ./stack upgrade-agent      # watches for button requests; runs ./stack upgrade
-   ```
-
-   Keep it running with a systemd unit so it survives reboots. Run it as the
-   user who owns the checkout (and is in the `docker` group) — **not root**, or
-   git refuses the upgrade's `fetch`/`checkout` with "dubious ownership" on a
-   user-owned repo. Replace `YOU` with that username:
-
-   ```ini
-   # /etc/systemd/system/bitcoin-stack-upgrade-agent.service
-   [Unit]
-   Description=bitcoin-starter-stack dashboard upgrade agent
-   After=docker.service
-   Requires=docker.service
-
-   [Service]
-   User=YOU
-   WorkingDirectory=/home/YOU/bitcoin-starter-stack
-   ExecStart=/home/YOU/bitcoin-starter-stack/stack upgrade-agent
-   Restart=always
-   RestartSec=10
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-   `sudo systemctl enable --now bitcoin-stack-upgrade-agent`.
+Enabling it is one setting: answer **y** at the Upgrade-button question in
+`./stack init`, or set `dashboard.control: true` in `config.json` (set a
+`dashboard.password` too — the button triggers upgrades) and run
+`./stack apply`. That's it: `up`/`apply` start the host-side agent for you,
+detached and logging to `~/upgrade-agent.log`, and install a `@reboot` cron
+entry so it survives reboots (no sudo needed). Setting `control` back to
+`false` and re-applying stops the agent and removes the cron entry.
+`./stack doctor` reports whether the agent is running.
 
 The button appears only when control is on **and** an update is available. It
 writes a request marker to the dashboard's state volume; the agent sees it,
 backs up, and runs the same `./stack upgrade` as above. Without the agent
 running, clicking the button does nothing — the request just waits.
+
+**Prefer systemd?** Cron can't restart the agent if it crashes mid-run (only
+on reboot); a systemd unit can. If the unit below is enabled, the stack leaves
+agent management entirely to systemd. Run it as the user who owns the checkout
+(and is in the `docker` group) — **not root**, or git refuses the upgrade's
+`fetch`/`checkout` with "dubious ownership" on a user-owned repo. Replace
+`YOU` with that username:
+
+```ini
+# /etc/systemd/system/bitcoin-stack-upgrade-agent.service
+[Unit]
+Description=bitcoin-starter-stack dashboard upgrade agent
+After=docker.service
+Requires=docker.service
+
+[Service]
+User=YOU
+WorkingDirectory=/home/YOU/bitcoin-starter-stack
+ExecStart=/home/YOU/bitcoin-starter-stack/stack upgrade-agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`sudo systemctl enable --now bitcoin-stack-upgrade-agent`.
 
 ## Backup
 

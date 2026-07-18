@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.30.0] - 2026-07-18
+
+### Added
+
+- **The Upgrade button now sets itself up.** Enabling `dashboard.control` is all
+  it takes: `./stack up`/`apply` start the host-side `upgrade-agent` detached
+  (log: `~/upgrade-agent.log`) and install a `@reboot` cron entry so it survives
+  reboots — no sudo, no unit file. Disabling `control` and re-applying stops the
+  agent and removes the cron entry. If the documented systemd unit is enabled,
+  the stack defers to it. `./stack init` asks one new question ("One-click
+  upgrades from the dashboard?", default no), and `./stack doctor` reports
+  whether the agent is running.
+
+### Changed
+
+- README: the feature list now covers one-command upgrades, the daily update
+  check, and the Prometheus `/metrics` endpoint; the Testing section describes
+  the full suite (including the e2e Tor-only egress audit and the gitleaks /
+  hadolint CI jobs).
+
+### Fixed
+
+- CHANGELOG version headings 1.23.0–1.29.1 had no reference links, so they
+  rendered as literal brackets on GitHub.
+
 ## [1.29.1] - 2026-07-18
 
 ### Fixed
@@ -768,6 +793,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0
 [1.29.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.1
 [1.29.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.0
 [1.28.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.28.0
