@@ -12,8 +12,7 @@ Usage: ./stack <command> [args]
   logs [svc]                 Follow logs (all services, or one)
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
-  upgrade-agent              Watch for dashboard Upgrade-button requests
-                             (auto-managed by up/apply when dashboard.control is on)
+  upgrade-agent              Watch for dashboard Upgrade-button requests (auto-managed)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -124,11 +123,8 @@ doctor() {
     echo "OK    config.json rendered into .env"
   fi
   if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
-    if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
-      echo "OK    upgrade-agent (dashboard Upgrade button)"
-    else
+    pgrep -f "stack upgrade-agent" >/dev/null 2>&1 && echo "OK    upgrade-agent (dashboard Upgrade button)" ||
       echo "WARN  upgrade-agent not running — ./stack up starts it"
-    fi
   fi
 
   echo "== Disk"
@@ -316,10 +312,8 @@ ensure_agent() {
     if crontab -l 2>/dev/null | grep -qF "stack upgrade-agent"; then
       crontab -l 2>/dev/null | grep -vF "stack upgrade-agent" | crontab -
     fi
-    if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
-      pkill -f "stack upgrade-agen[t]" 2>/dev/null || true
-      echo "upgrade-agent: stopped (dashboard.control is off)"
-    fi
+    pkill -f "stack upgrade-agen[t]" 2>/dev/null &&
+      echo "upgrade-agent: stopped (dashboard.control is off)" || true
   fi
 }
 
