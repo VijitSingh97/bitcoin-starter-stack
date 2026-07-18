@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.29.0] - 2026-07-17
+
+### Added
+
+- **Opt-in dashboard Upgrade button.** When `dashboard.control` is enabled and a
+  newer release is available, the dashboard shows a one-click **Upgrade now**
+  button. It preserves the non-root dashboard's security model: the dashboard
+  has no host or Docker access and only writes a request marker to its state
+  volume. A new host-side agent, `./stack upgrade-agent`, watches for the marker
+  and runs `./stack upgrade` with the right privileges (run it under systemd —
+  see [docs/operations.md](docs/operations.md#upgrade-button-opt-in)). Off by
+  default; without the agent running, the button does nothing. This is the
+  dashboard button the 1.28.0 notes deferred — now possible **without** giving
+  the dashboard host/docker control. Covered by unit tests (endpoint gating,
+  CSRF) and an end-to-end CI test (the agent consumes a button-written request
+  and upgrades).
+
 ## [1.28.0] - 2026-07-17
 
 ### Added
