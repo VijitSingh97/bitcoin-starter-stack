@@ -136,7 +136,11 @@ fi
 # rpcauth.py), so the bitcoin container never holds the plaintext password.
 # Salt and hash stay as separate hex values; the container assembles the
 # user:salt$hash string itself (a literal $ in .env is a compose footgun).
-rpcauth_salt=$(openssl rand -hex 16)
+# Reuse the existing salt (like the password above) so an unchanged password
+# re-renders byte-identical — a fresh salt every run would rotate the hash and
+# needlessly recreate the bitcoin container on every apply/upgrade.
+rpcauth_salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' .env 2>/dev/null || true)
+[ -n "$rpcauth_salt" ] || rpcauth_salt=$(openssl rand -hex 16)
 rpcauth_hash=$(printf '%s' "$rpc_password" | openssl dgst -sha256 -hmac "$rpcauth_salt" -r | cut -d' ' -f1)
 
 # Displayed version: the release number when this checkout IS the tagged release
