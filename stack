@@ -12,6 +12,7 @@ Usage: ./stack <command> [args]
   logs [svc]                 Follow logs (all services, or one)
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
+  upgrade-agent              Watch for dashboard Upgrade-button requests (opt-in)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -265,6 +266,24 @@ do_upgrade() {
   echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
 }
 
+# Host-side agent for the opt-in dashboard Upgrade button. The dashboard (which
+# has no host/docker access) only drops a marker file in its state volume; this
+# runs on the host, sees the marker, and performs the upgrade with the right
+# privileges. Run it under systemd so it survives reboots (see docs/operations.md).
+upgrade_agent() {
+  echo "upgrade-agent: watching for dashboard upgrade requests (Ctrl-C to stop)."
+  echo "  The button appears when dashboard.control=true; requests run ./stack upgrade here."
+  while true; do
+    if docker exec dashboard test -f /state/upgrade.request 2>/dev/null; then
+      docker exec -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
+      echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
+      # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
+      (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
+    fi
+    sleep 10
+  done
+}
+
 cmd=${1:-help}
 [ $# -gt 0 ] && shift
 
@@ -282,6 +301,7 @@ case "$cmd" in
     docker compose up -d
     ;;
   upgrade) do_upgrade ;;
+  upgrade-agent) upgrade_agent ;;
   status) status ;;
   doctor) doctor ;;
   backup) do_backup ;;

@@ -25,7 +25,8 @@ shows the overridable settings with their defaults:
     },
     "dashboard": {
         "password": "",
-        "onion": false
+        "onion": false,
+        "control": false
     },
     "notifications": {
         "telegram_bot_token": "",
@@ -50,6 +51,7 @@ shows the overridable settings with their defaults:
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |
 | `dashboard.password` | `""` (no auth) | Non-empty enables basic auth on the dashboard (any username, this password). Letters and numbers only. `./stack init` generates one by default (Enter at its prompt); a bare `./stack up` stays open on the LAN. |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
+| `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. Requires the host-side `./stack upgrade-agent` running; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |

@@ -388,3 +388,15 @@ hr {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* opt-in upgrade button (dashboard.control) */
+.upgrade-btn {
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 8px;
+  border: 1px solid #f2a900;
+  border-radius: 4px;
+  background: transparent;
+  color: #f2a900;
+}
+.upgrade-btn:disabled { opacity: 0.5; cursor: default; }

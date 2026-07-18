@@ -41,6 +41,7 @@ blockfilterindex=$(flag '.bitcoin.blockfilterindex')
 sync_over_clearnet=$(flag '.bitcoin.sync_over_clearnet')
 dashboard_password=$(get '.dashboard.password')
 dashboard_onion=$(flag '.dashboard.onion')
+dashboard_control=$(flag '.dashboard.control')
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
@@ -87,6 +88,11 @@ fi
 if [ "$dashboard_onion" = "1" ] && [ -z "$dashboard_password" ]; then
   echo "WARNING: dashboard.onion is enabled without dashboard.password —"
   echo "         anyone who learns the onion address can view the dashboard."
+fi
+
+if [ "$dashboard_control" = "1" ] && [ -z "$dashboard_password" ]; then
+  echo "WARNING: dashboard.control is enabled without dashboard.password —"
+  echo "         set a password so only you can trigger upgrades from the dashboard."
 fi
 
 if [ "$sync_over_clearnet" = "1" ]; then
@@ -176,6 +182,7 @@ BITCOIN_SYNC_OVER_CLEARNET=$sync_over_clearnet
 BITCOIN_MEM_LIMIT=$bitcoin_mem_limit
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
+DASHBOARD_CONTROL=$dashboard_control
 TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url

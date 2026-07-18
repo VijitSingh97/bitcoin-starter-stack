@@ -10,7 +10,8 @@
     },
     "dashboard": {
         "password": "",
-        "onion": false
+        "onion": false,
+        "control": false
     },
     "notifications": {
         "telegram_bot_token": "",
