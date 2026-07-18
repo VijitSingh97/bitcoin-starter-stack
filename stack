@@ -12,7 +12,7 @@ Usage: ./stack <command> [args]
   logs [svc]                 Follow logs (all services, or one)
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
-  upgrade-agent              Watch for dashboard Upgrade-button requests (opt-in)
+  upgrade-agent              Watch for dashboard Upgrade-button requests (auto-managed)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -54,6 +54,7 @@ init() {
     echo "  generated dashboard password: $w_dashpass  (log in with any username — save it)"
   fi
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
+  read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
   read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
   read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet
   read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
@@ -64,6 +65,7 @@ init() {
   [ -n "$w_pass" ] && cfg=$(jq --arg v "$w_pass" '.bitcoin.node_password=$v' <<<"$cfg")
   [ -n "$w_dashpass" ] && cfg=$(jq --arg v "$w_dashpass" '.dashboard.password=$v' <<<"$cfg")
   yes "$w_dashonion" && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
+  yes "$w_control" && cfg=$(jq '.dashboard.control=true' <<<"$cfg")
   # inbound is default-on; only record a deviation when the user declines
   case "$w_inbound" in n | N | no | NO) cfg=$(jq '.bitcoin.inbound_onion=false' <<<"$cfg") ;; esac
   yes "$w_clearnet" && cfg=$(jq '.bitcoin.sync_over_clearnet=true' <<<"$cfg")
@@ -82,7 +84,7 @@ init() {
   printf "Start the stack now? [Y/n] "
   read -r reply
   case "$reply" in n | N) echo "Later: ./stack up" ;; *)
-    ./configure.sh && docker compose up -d
+    ./configure.sh && docker compose up -d && ensure_agent
     ;;
   esac
 }
@@ -119,6 +121,13 @@ doctor() {
     echo "WARN  config.json is newer than .env — run ./stack apply"
   else
     echo "OK    config.json rendered into .env"
+  fi
+  if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
+    if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
+      echo "OK    upgrade-agent (dashboard Upgrade button)"
+    else
+      echo "WARN  upgrade-agent not running — ./stack up starts it"
+    fi
   fi
 
   echo "== Disk"
@@ -269,7 +278,8 @@ do_upgrade() {
 # Host-side agent for the opt-in dashboard Upgrade button. The dashboard (which
 # has no host/docker access) only drops a marker file in its state volume; this
 # runs on the host, sees the marker, and performs the upgrade with the right
-# privileges. Run it under systemd so it survives reboots (see docs/operations.md).
+# privileges. up/apply manage it automatically via ensure_agent below; running
+# it by hand just watches in the foreground.
 upgrade_agent() {
   echo "upgrade-agent: watching for dashboard upgrade requests (Ctrl-C to stop)."
   echo "  The button appears when dashboard.control=true; requests run ./stack upgrade here."
@@ -284,6 +294,34 @@ upgrade_agent() {
   done
 }
 
+# Keep the agent in sync with dashboard.control: when on, start it detached and
+# install a @reboot cron entry (no sudo needed); when off, remove both. Skips
+# entirely if the operator runs the agent under systemd (docs/operations.md).
+# ponytail: cron can't restart a crashed agent until reboot — use the systemd
+# unit if that matters to you.
+ensure_agent() {
+  if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
+    return 0 # managed by systemd — stay out of its way
+  fi
+  if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
+    line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
+    (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
+      echo "WARN  could not install the upgrade-agent @reboot cron entry"
+    if ! pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
+      (setsid ./stack upgrade-agent >>"$HOME/upgrade-agent.log" 2>&1 </dev/null &)
+      echo "upgrade-agent: started (log: ~/upgrade-agent.log; restarts on reboot via cron)"
+    fi
+  else
+    if crontab -l 2>/dev/null | grep -qF "stack upgrade-agent"; then
+      # grep -v exits 1 when ours is the only line — that's fine, write it empty
+      crontab -l 2>/dev/null | { grep -vF "stack upgrade-agent" || true; } | crontab -
+    fi
+    if pkill -f "stack upgrade-agen[t]" 2>/dev/null; then
+      echo "upgrade-agent: stopped (dashboard.control is off)"
+    fi
+  fi
+}
+
 cmd=${1:-help}
 [ $# -gt 0 ] && shift
 
@@ -291,6 +329,7 @@ case "$cmd" in
   up)
     [ -f .env ] || ./configure.sh   # first run: generate .env (auto-config)
     docker compose up -d "$@"
+    ensure_agent
     ;;
   init) init ;;
   down) docker compose down "$@" ;;
@@ -299,6 +338,7 @@ case "$cmd" in
   apply)
     ./configure.sh
     docker compose up -d
+    ensure_agent
     ;;
   upgrade) do_upgrade ;;
   upgrade-agent) upgrade_agent ;;
