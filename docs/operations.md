@@ -9,6 +9,7 @@ Everything runs through `./stack` (thin, shellcheck-clean wrappers — plain
 |---|---|
 | `./stack up` / `down` / `restart [svc]` | Start / stop / restart. Bitcoin Core gets up to 5 minutes to flush on stop — let it. |
 | `./stack logs [svc]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
+| `./stack events` | Incident history (down/recovered, failed Healthchecks pings, monitor restarts) from `/state/events.log` — survives restarts and reboots. |
 | `./stack apply` | Re-render `.env` from `config.json` and apply the changes. |
 | `./stack status` | Container + health summary; exits non-zero if anything is down. |
 | `./stack doctor` | Read-only health report: deps, config freshness, disk, containers, sync state, tor bootstrap, onion addresses. |

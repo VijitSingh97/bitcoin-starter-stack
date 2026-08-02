@@ -206,13 +206,25 @@ def test_ping_noop_without_config(monkeypatch):
 def test_ping_uses_fail_endpoint_when_unhealthy(monkeypatch):
     seen = {}
     monkeypatch.setattr(monitor, "HEALTHCHECKS_URL", "https://hc-ping.com/uuid")
-    monkeypatch.setattr(
-        monitor.requests, "get",
-        lambda url, proxies, timeout: seen.update(url=url, proxies=proxies),
-    )
-    monitor.ping_healthchecks(False)
+
+    def get(url, proxies, timeout):
+        seen.update(url=url, proxies=proxies)
+        return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(monitor.requests, "get", get)
+    assert monitor.ping_healthchecks(False) is True
     assert seen["url"] == "https://hc-ping.com/uuid/fail"
     assert "socks5h://" in seen["proxies"]["https"]
+
+
+def test_ping_treats_http_error_as_failure(monkeypatch):
+    # a bad Tor exit answering with an error page is NOT a delivered ping
+    monkeypatch.setattr(monitor, "HEALTHCHECKS_URL", "https://hc-ping.com/uuid")
+    monkeypatch.setattr(
+        monitor.requests, "get",
+        lambda url, proxies, timeout: types.SimpleNamespace(status_code=502),
+    )
+    assert monitor.ping_healthchecks(True) is False
 
 
 # --- update checker ---
@@ -296,6 +308,41 @@ def test_ping_healthchecks_returns_false_on_exception(monkeypatch):
     monkeypatch.setattr(monitor.requests, "get", boom)
     # a failed ping returns False so tick() keeps retrying rather than advancing
     assert monitor.ping_healthchecks(True) is False
+
+
+# --- persistent event log ---
+
+def test_events_survive_in_state_file(monkeypatch, tmp_path):
+    log = tmp_path / "events.log"
+    monkeypatch.setattr(monitor, "EVENTS_LOG", str(log))
+    monkeypatch.setattr(monitor, "TELEGRAM_BOT_TOKEN", "")  # no network
+    monitor.send_telegram("🔴 node down")
+    monkeypatch.setattr(monitor, "HEALTHCHECKS_URL", "https://hc-ping.com/uuid")
+    monkeypatch.setattr(
+        monitor.requests, "get",
+        lambda url, proxies, timeout: types.SimpleNamespace(status_code=503),
+    )
+    monitor.ping_healthchecks(True)
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2
+    assert "node down" in lines[0]
+    assert "healthchecks ping failed: HTTP 503" in lines[1]
+    assert lines[0][:4] == "2026" or lines[0][4] == "-"  # timestamped
+
+
+def test_event_log_rotates_at_cap(monkeypatch, tmp_path):
+    log = tmp_path / "events.log"
+    log.write_text("old line\n" * 120000)  # > 1 MB
+    monkeypatch.setattr(monitor, "EVENTS_LOG", str(log))
+    monitor.log_event("new event")
+    lines = log.read_text().splitlines()
+    assert len(lines) == 60001  # newest half kept, plus the new event
+    assert "new event" in lines[-1]
+
+
+def test_event_log_failure_is_harmless(monkeypatch):
+    monkeypatch.setattr(monitor, "EVENTS_LOG", "/nonexistent-dir/events.log")
+    monitor.log_event("still fine")  # no exception = pass
 
 
 def test_send_telegram_swallows_exceptions(monkeypatch):
