@@ -28,6 +28,8 @@ STACK_VERSION = os.environ.get("STACK_VERSION", "")
 STACK_RELEASES_URL = "https://api.github.com/repos/VijitSingh97/bitcoin-starter-stack/releases/latest"
 CORE_RELEASES_URL = "https://api.github.com/repos/bitcoin/bitcoin/releases/latest"
 
+EVENTS_LOG = os.environ.get("EVENTS_LOG", "/state/events.log")
+
 TICK_SECONDS = 60
 PING_EVERY_TICKS = 5             # healthchecks cadence: every 5 minutes
 DOWN_AFTER_TICKS = 3             # debounce: this many consecutive RPC failures = down
@@ -38,7 +40,26 @@ DISK_WARN_FREE_GB = 50
 update_available = ""
 
 
+def log_event(text):
+    """Append a timestamped line to the persistent event log on /state, so
+    incidents (down/recovered, ping failures, monitor restarts) survive
+    container restarts and reboots — docker logs don't."""
+    print(text)  # keep them in docker logs too
+    try:
+        # ponytail: naive rotation — over 1 MB, keep the newest half
+        if os.path.exists(EVENTS_LOG) and os.path.getsize(EVENTS_LOG) > 1_000_000:
+            with open(EVENTS_LOG) as f:
+                lines = f.readlines()
+            with open(EVENTS_LOG, "w") as f:
+                f.writelines(lines[len(lines) // 2:])
+        with open(EVENTS_LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ ", time.gmtime()) + text + "\n")
+    except Exception as e:
+        print(f"Event log write failed: {e}")
+
+
 def send_telegram(text):
+    log_event(text)  # every alert-worthy transition is an event worth keeping
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         return
     try:
@@ -59,10 +80,15 @@ def ping_healthchecks(healthy):
         return True
     url = HEALTHCHECKS_URL if healthy else HEALTHCHECKS_URL + "/fail"
     try:
-        requests.get(url, proxies=PROXIES, timeout=10)
+        r = requests.get(url, proxies=PROXIES, timeout=10)
+        # A bad Tor exit can answer with an error page; without this check that
+        # counted as delivered and Healthchecks silently missed the ping.
+        if r.status_code != 200:
+            log_event(f"healthchecks ping failed: HTTP {r.status_code}")
+            return False
         return True
     except Exception as e:
-        print(f"Healthchecks ping failed: {e}")
+        log_event(f"healthchecks ping failed: {e}")
         return False
 
 

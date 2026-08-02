@@ -10,6 +10,7 @@ Usage: ./stack <command> [args]
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
   init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
+  events                     Incident history (down/recovered, failed pings) — survives restarts
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
   upgrade-agent              Watch for dashboard Upgrade-button requests (auto-managed)
@@ -335,6 +336,7 @@ case "$cmd" in
   down) docker compose down "$@" ;;
   restart) docker compose restart "$@" ;;
   logs) docker compose logs -f --tail=100 "$@" ;;
+  events) docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
     ./configure.sh
     docker compose up -d

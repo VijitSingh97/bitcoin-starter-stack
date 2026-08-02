@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.0] - 2026-08-01
+
+### Added
+
+- **Persistent incident log.** The monitor now appends every alert-worthy
+  event (node down/recovered, failed Healthchecks pings, disk-low, monitor
+  restarts) to `/state/events.log` on the `dashboard_state` volume, so
+  incident history survives container restarts and host reboots — `docker
+  logs` doesn't. `./stack events` prints it. Naive size cap: over 1 MB the
+  newest half is kept.
+
+### Fixed
+
+- **Healthchecks pings no longer fail silently on a bad Tor exit.** The
+  dead-man ping rides Tor; an exit answering with an HTTP error page counted
+  as delivered, so the 5-minute ping clock advanced and Healthchecks.io
+  missed pings with nothing in the logs — showing up as random "down" flaps
+  while the node was healthy. Non-200 responses now count as failures: the
+  monitor retries every minute (on a fresh circuit) until one lands, and
+  logs the failure to the incident log.
+
 ## [1.30.0] - 2026-07-18
 
 ### Added
@@ -798,6 +819,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.31.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.0
 [1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0
 [1.29.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.1
 [1.29.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.0
