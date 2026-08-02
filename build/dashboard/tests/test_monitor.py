@@ -327,7 +327,7 @@ def test_events_survive_in_state_file(monkeypatch, tmp_path):
     assert len(lines) == 2
     assert "node down" in lines[0]
     assert "healthchecks ping failed: HTTP 503" in lines[1]
-    assert lines[0][:4] == "2026" or lines[0][4] == "-"  # timestamped
+    assert lines[0][10] == "T"  # ISO-timestamped
 
 
 def test_event_log_rotates_at_cap(monkeypatch, tmp_path):
