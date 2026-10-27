@@ -6,5 +6,5 @@ COPY entrypoint.sh /entrypoint.sh
 # chown to tor:tor — the GROUP matters: the bitcoin container joins gid 101
 # to read the control-auth cookie for the inbound onion service
 RUN chmod +x /entrypoint.sh && mkdir -p /var/lib/tor && chown -R tor:tor /var/lib/tor
-USER tor
+USER 100:101
 ENTRYPOINT ["/entrypoint.sh"]

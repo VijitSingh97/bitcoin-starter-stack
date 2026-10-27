@@ -11,7 +11,8 @@ All notable changes to this project are documented here. Format follows
 - The dashboard now uses Waitress instead of Flask's development server.
 - Dashboard containers stop cleanly through Waitress's supported SIGINT handler.
 - Refreshed the Alpine 3.24 and Python 3.14 slim image pins and updated
-  `actions/setup-python` to 7.1.0.
+  `actions/setup-python` to 7.1.0 (#121).
+- Updated the digest-pinned Gitleaks, Hadolint, and QEMU CI images.
 
 ## [1.31.0] - 2026-08-01
 
