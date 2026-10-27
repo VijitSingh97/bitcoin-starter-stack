@@ -172,12 +172,15 @@ def main():
     parser.add_argument("--load", type=int, default=30)
     parser.add_argument("--go-image", required=True)
     parser.add_argument("--python-image", required=True)
+    parser.add_argument("--go-url", required=True)
+    parser.add_argument("--python-url", required=True)
+    parser.add_argument("--fixture-url", required=True)
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     apps = {
-        "go": {"container": "bss-go-bench-go", "url": "http://127.0.0.1:18082", "user": "go", "image": args.go_image},
-        "python": {"container": "bss-go-bench-python", "url": "http://127.0.0.1:18083", "user": "py", "image": args.python_image},
+        "go": {"container": "bss-go-bench-go", "url": args.go_url, "user": "go", "image": args.go_image},
+        "python": {"container": "bss-go-bench-python", "url": args.python_url, "user": "py", "image": args.python_image},
     }
     with ThreadPoolExecutor(max_workers=2) as executor:
         warmups = [executor.submit(fixed_load, app["url"], "benchpass", args.warmup) for app in apps.values()]
@@ -186,7 +189,7 @@ def main():
 
     report = {"method": "controlled short benchmark", "cycles": [], "images": {key: image_size(app["image"]) for key, app in apps.items()}}
     raw = []
-    fixture_url = "http://127.0.0.1:18081"
+    fixture_url = args.fixture_url
     for cycle in range(args.cycles):
         idle, _ = sample_phase([app["container"] for app in apps.values()], args.idle)
         cycle_result = {"cycle": cycle + 1, "idle": idle, "load": {}}

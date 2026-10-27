@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -49,8 +50,15 @@ assert fixture.authenticate(f"Basic {auth}") == "go"
 assert fixture.authenticate("Basic broken") is None
 
 runner = (root / "run-benchmark.sh").read_text()
+benchmark_source = (root / "benchmark.py").read_text()
 assert "docker system prune" not in runner and "docker image prune" not in runner
 assert "docker pull" not in runner and "docker network create --internal" in runner
+docker_runs = [line for line in runner.replace("\\\n", " ").splitlines() if line.startswith("docker run ")]
+assert docker_runs and all(re.search(r"(^|\s)(-p|--publish)(\s|=)", line) is None for line in docker_runs)
+assert all(port not in runner for port in ("18081", "18082", "18083"))
+for argument in ("--go-url", "--python-url", "--fixture-url"):
+    assert argument in runner and argument in benchmark_source
+assert 'container["NetworkSettings"]["Networks"]' in runner and 'get("Gateway")' in runner
 assert "docker rm -f \"$name\"" in runner and "[[ $name == bss-go-bench-* ]]" in runner
 assert "GO_BENCH_SOURCE_MANIFEST_SHA256" in runner and "sha256sum -c MANIFEST.sha256" in runner
 assert "GO_BENCH_IMAGE_ID" in runner and "{{.Id}}" in runner

@@ -12,6 +12,9 @@ before=$scratch/production-before.txt
 after=$scratch/production-after.txt
 snapshot_taken=0
 run_id=
+fixture_url=
+go_url=
+python_url=
 
 die() {
   echo "benchmark: $*" >&2
@@ -46,6 +49,33 @@ snapshot_production() {
       docker inspect -f '{{.Name}}|{{.Id}}|{{.Image}}|{{.Config.Image}}|{{.State.StartedAt}}|{{range .Mounts}}{{.Source}}:{{.Destination}}:{{.RW}};{{end}}' "$name"
     done
   } >"$output"
+}
+
+private_url() {
+  local name=$1
+  local port=$2
+  local ip
+  ip=$(docker inspect "$name" | python3 -c '
+import ipaddress
+import json
+import sys
+
+container = json.load(sys.stdin)[0]
+expected = sys.argv[1]
+networks = container["NetworkSettings"]["Networks"]
+if set(networks) != {expected}:
+    raise SystemExit(f"expected only {expected}, found {sorted(networks)}")
+address = networks[expected].get("IPAddress", "")
+try:
+    ipaddress.IPv4Address(address)
+except ipaddress.AddressValueError:
+    raise SystemExit(f"invalid private IPv4 address: {address!r}")
+gateway = networks[expected].get("Gateway")
+if gateway:
+    raise SystemExit(f"unexpected default gateway: {gateway}")
+print(address)
+' "$network") || die "$name failed private-network validation"
+  printf 'http://%s:%s' "$ip" "$port"
 }
 
 cleanup() {
@@ -117,9 +147,6 @@ for name in "${containers[@]}"; do
   ! docker container inspect "$name" >/dev/null 2>&1 || die "container $name already exists"
 done
 ! docker network inspect "$network" >/dev/null 2>&1 || die "network $network already exists"
-for port in 18081 18082 18083; do
-  ! ss -H -ltn "sport = :$port" | grep -q . || die "loopback port $port is already in use"
-done
 for name in bitcoin tor dashboard; do
   [[ $(docker inspect -f '{{.State.Running}}' "$name") == true ]] || die "production $name is not running"
 done
@@ -138,35 +165,53 @@ snapshot_taken=1
 trap finish EXIT
 
 docker network create --internal --label "bss-go-bench.run=$run_id" "$network" >/dev/null
+[[ $(docker network inspect -f '{{.Internal}}' "$network") == true ]] || die "$network is not internal"
 
 common=(--network "$network" --label "bss-go-bench.run=$run_id" --security-opt no-new-privileges --cap-drop ALL --pids-limit 64 --read-only --tmpfs "/tmp:rw,noexec,nosuid,size=16m" --restart no)
 docker run -d --name bss-go-bench-fixture "${common[@]}" --user 1000:1000 --memory 128m --cpus 0.5 \
-  -p 127.0.0.1:18081:8001 -v "$bench_dir:/bench:ro" --entrypoint python "$python_image" /bench/fixture.py >/dev/null
+  -v "$bench_dir:/bench:ro" --entrypoint python "$python_image" /bench/fixture.py >/dev/null
 docker run -d --name bss-go-bench-go "${common[@]}" --user 1000:1000 --memory 256m --cpus 0.5 \
-  -p 127.0.0.1:18082:8000 -v "$scratch/data:/data:ro" -v "$scratch/go-state:/state" \
+  -v "$scratch/data:/data:ro" -v "$scratch/go-state:/state" \
   -e RPC_URL=http://bss-go-bench-fixture:8001 -e RPC_USER=go -e RPC_PASSWORD=fakepw \
   -e DASHBOARD_PASSWORD=benchpass -e DATA_DIR=/data -e STATE_DIR=/state -e STACK_VERSION=1.31.1 \
   -e PORT=8000 "$go_image" >/dev/null
 docker run -d --name bss-go-bench-python "${common[@]}" --user 1000:1000 --memory 256m --cpus 0.5 \
-  -p 127.0.0.1:18083:8000 -v "$scratch/data:/data:ro" -v "$scratch/python-state:/state" -v "$bench_dir:/bench:ro" \
+  -v "$scratch/data:/data:ro" -v "$scratch/python-state:/state" -v "$bench_dir:/bench:ro" \
   -e BENCH_RPC_URL=http://bss-go-bench-fixture:8001 -e DASHBOARD_PASSWORD=benchpass -e STACK_VERSION=1.31.1 \
   --entrypoint python "$python_image" /bench/python_reference.py >/dev/null
 
-for port in 18082 18083; do
+fixture_url=$(private_url bss-go-bench-fixture 8001)
+go_url=$(private_url bss-go-bench-go 8000)
+python_url=$(private_url bss-go-bench-python 8000)
+
+ready=0
+for _ in $(seq 1 60); do
+  if curl -fsS "$fixture_url/counts" >/dev/null; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+[[ $ready == 1 ]] || die "fixture at $fixture_url did not become ready"
+
+for url in "$go_url" "$python_url"; do
   ready=0
   for _ in $(seq 1 60); do
-    if curl -fsS -u bench:benchpass "http://127.0.0.1:$port/" >/dev/null; then
+    if curl -fsS -u bench:benchpass "$url/" >/dev/null; then
       ready=1
       break
     fi
     sleep 1
   done
-  [[ $ready == 1 ]] || die "dashboard on port $port did not become ready"
+  [[ $ready == 1 ]] || die "dashboard at $url did not become ready"
 done
 
 python3 "$bench_dir/benchmark.py" \
   --output "$scratch/results" \
   --go-image "$go_image" \
-  --python-image "$python_image"
+  --python-image "$python_image" \
+  --go-url "$go_url" \
+  --python-url "$python_url" \
+  --fixture-url "$fixture_url"
 
 echo "Results: $scratch/results/report.json"
