@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.1] - 2026-10-27
+
+### Changed
+
+- The dashboard now uses Waitress instead of Flask's development server.
+- Dashboard containers stop cleanly through Waitress's supported SIGINT handler.
+- Refreshed the Alpine 3.24 and Python 3.14 slim image pins and updated
+  `actions/setup-python` to 7.1.0 (#121).
+- Updated the digest-pinned Gitleaks, Hadolint, and QEMU CI images.
+
 ## [1.31.0] - 2026-08-01
 
 ### Added
@@ -819,6 +829,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[1.31.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.1
 [1.31.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.0
 [1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0
 [1.29.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.1

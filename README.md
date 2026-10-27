@@ -139,8 +139,8 @@ flowchart LR
 ```
 
 Three services on an isolated Docker network: `tor` (SOCKS5 proxy), `bitcoin` (Bitcoin Core,
-non-root, RPC reachable only from inside the network), and `dashboard` (Flask app polling
-the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
+non-root, RPC reachable only from inside the network), and `dashboard` (Flask dashboard served
+by Waitress and polling the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 
 ## 📚 Documentation
 

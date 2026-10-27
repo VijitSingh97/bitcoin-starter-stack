@@ -9,7 +9,7 @@ flowchart LR
     Net(["🌐 Tor Network"])
 
     subgraph stack ["🐳 bitcoin-starter-stack · btc_net 172.29.0.0/24"]
-        Dashboard["📊 dashboard<br/>.27 · Flask"]
+        Dashboard["📊 dashboard<br/>.27 · Flask + Waitress"]
         Bitcoin["🟠 bitcoin<br/>.26 · Bitcoin Core"]
         Tor["🧅 tor<br/>.25 · SOCKS5"]
     end
@@ -26,7 +26,7 @@ flowchart LR
 |---|---|---|---|
 | `tor` | `alpine:3.24` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.29.0.25:9050`. Fresh onion identity per volume. |
 | `bitcoin` | [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) (official, digest-pinned) | `1000:1000` | Full or pruned node. `-datadir=/data` bind-mounted from the host. Credentials, `dbcache`, and `prune` injected from `.env` at runtime. |
-| `dashboard` | `python:3.14-slim` + Flask (built locally) | root (container) | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
+| `dashboard` | `python:3.14-slim` + Flask and Waitress (built locally) | `1000:1000` | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
 
 Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 `docker-compose.yml`) and the dashboard's RPC URL simple and deterministic.

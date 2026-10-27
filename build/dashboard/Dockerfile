@@ -1,5 +1,5 @@
 # Use an official lightweight Python image
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
+FROM python:3.14-slim@sha256:82abc9f53600280b0757126f83c5a7d47088592d2acb6b4c0b9e97f76865508c
 
 WORKDIR /app
 
@@ -25,4 +25,5 @@ EXPOSE 8000
 RUN mkdir -p /state && chown 1000:1000 /state
 USER 1000:1000
 
+STOPSIGNAL SIGINT
 CMD ["python", "node_status.py"]
