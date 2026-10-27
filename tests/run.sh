@@ -18,7 +18,7 @@ tests/test_e2e.sh
 tests/test_upgrade.sh
 tests/test_postsync.sh
 
-if python3 -c "import pytest, flask" 2>/dev/null; then
+if python3 -c "import pytest, flask, waitress" 2>/dev/null; then
   python3 -m pytest build/dashboard/tests -q
 else
   echo "SKIP: dashboard unit tests (pip install -r build/dashboard/requirements.txt pytest)"

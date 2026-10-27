@@ -112,7 +112,7 @@ services:
     cap_drop:
       - ALL
     ports:
-      # host port 80 -> container's Flask on 8000
+      # host port 80 -> container's dashboard on 8000
       - "80:8000"
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}

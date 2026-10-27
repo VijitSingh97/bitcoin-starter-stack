@@ -7,6 +7,7 @@ import requests
 import json
 from flask import Flask, render_template_string, request, Response, jsonify
 from datetime import datetime
+from waitress import serve
 
 import monitor
 import fee_history
@@ -443,7 +444,7 @@ def index():
     </html>
     """, stats=stats)
 
-if __name__ == '__main__':
+def main():
     # Always runs: alerts and pings no-op individually when unconfigured,
     # and the update checker works regardless.
     threading.Thread(
@@ -476,4 +477,8 @@ if __name__ == '__main__':
                 time.sleep(10)  # node still starting
 
         threading.Thread(target=_watch_setup, daemon=True).start()
-    app.run(host='0.0.0.0', port=8000)
+    serve(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()

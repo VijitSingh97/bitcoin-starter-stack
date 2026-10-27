@@ -1,6 +1,37 @@
 import node_status
 
 
+def test_main_starts_background_tasks_and_production_server(monkeypatch):
+    threads = []
+    served = {}
+
+    class FakeThread:
+        def __init__(self, target, args=(), daemon=None):
+            threads.append((target, args, daemon))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(node_status.threading, "Thread", FakeThread)
+    monkeypatch.setattr(node_status, "WATCH", [{"name": "Cold"}])
+    monkeypatch.setattr(
+        node_status,
+        "serve",
+        lambda app, **kwargs: served.update(app=app, **kwargs),
+    )
+
+    node_status.main()
+
+    assert [target.__name__ for target, _, _ in threads] == [
+        "monitor_loop",
+        "fee_sampler_loop",
+        "balance_sampler_loop",
+        "_watch_setup",
+    ]
+    assert all(daemon is True for _, _, daemon in threads)
+    assert served == {"app": node_status.app, "host": "0.0.0.0", "port": 8000}
+
+
 # --- format_uptime ---
 
 def test_uptime_none():
