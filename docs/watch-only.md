@@ -31,6 +31,11 @@ saved list contains exact duplicate keys, only its first entry is used, keeping
 the balance from being counted twice; the original file is preserved until the
 next wallet change.
 
+Wallet changes are confirmed only after the roster is saved. If the state volume
+cannot be written or the roster cannot be read, the manager reports an error and
+preserves the existing file. A damaged roster is never reset to an empty list.
+Restart the dashboard after correcting the file or state-volume problem.
+
 Set `dashboard.password` in `config.json` to view personal wallets and add or remove
 entries. Without a password, only the public Genesis example is visible and the
 wallet controls are disabled. See [Configuration](configuration.md).

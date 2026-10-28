@@ -221,6 +221,7 @@ if (typeof document !== "undefined") {
     }
   }
   let last = { wallets: [] };
+  let loadFailed = false;
   const render = (view) => { last = view; renderManager(view); renderStats(view); };
   // re-render on resize so the block re-centres and the sparklines redraw at the
   // width for the new breakpoint
@@ -229,7 +230,14 @@ if (typeof document !== "undefined") {
   async function refresh() {
     try {
       const res = await fetch("/api/watch", { headers: CSRF });
-      if (res.ok) render(await res.json());
+      if (res.ok) {
+        render(await res.json());
+        if (loadFailed) setMsg("");
+        loadFailed = false;
+      } else {
+        loadFailed = true;
+        setMsg(await res.text(), true);
+      }
     } catch { /* blip — next poll */ }
   }
 

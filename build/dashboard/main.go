@@ -384,6 +384,10 @@ func rejectCSRF(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
+	if a.watch.Err() != nil {
+		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	entries := a.watch.Entries()
 	if a.cfg.dashboardPassword == "" && len(entries) > 0 && !publicGenesisRoster(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
@@ -409,6 +413,10 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rejectCSRF(w, r) {
+		return
+	}
+	if a.watch.Err() != nil {
+		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var chain blockchainInfo
@@ -437,6 +445,10 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, err := a.watch.Add(entry.Name, entry.Key, entry.Birthday)
 	if err != nil {
+		if errors.Is(err, ErrWatchUnavailable) {
+			http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -453,6 +465,10 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 	if rejectCSRF(w, r) {
 		return
 	}
+	if a.watch.Err() != nil {
+		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	name := r.PathValue("name")
 	var entry WatchEntry
 	for _, candidate := range a.watch.Entries() {
@@ -466,7 +482,12 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	coreName, _ := a.watch.resolveWallet(a.walletRPC, entry)
-	if !a.watch.RemoveExact(entry) {
+	removed, err := a.watch.RemoveExact(entry)
+	if errors.Is(err, ErrWatchUnavailable) {
+		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !removed {
 		http.Error(w, "no such wallet", 404)
 		return
 	}

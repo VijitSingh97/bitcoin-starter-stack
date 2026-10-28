@@ -27,6 +27,8 @@ All notable changes to this project are documented here. Format follows
   Core wallet's balance. Existing matching imports and history are preserved.
 - Private keys are rejected before wallet persistence; legacy files containing
   private material are secured and preserved for operator recovery.
+- Failed roster writes are reported instead of confirming an unsaved wallet
+  change; unreadable or malformed roster files are preserved.
 
 ## [1.31.1] - 2026-10-27
 

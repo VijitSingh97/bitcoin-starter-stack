@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -161,7 +162,7 @@ func TestPrivateEntriesFilteredWithoutRewritingExistingRoster(t *testing.T) {
 	if _, err := store.Add("Another", parityZpub, ""); err == nil || !strings.Contains(err.Error(), "remove it manually") {
 		t.Fatalf("public add with unsafe legacy roster error = %v", err)
 	}
-	if store.Remove("Public") {
+	if removed, err := store.Remove("Public"); removed || !errors.Is(err, ErrWatchUnavailable) {
 		t.Fatal("remove modified an unsafe legacy roster")
 	}
 	unchanged, err := os.ReadFile(path)
@@ -228,8 +229,11 @@ func TestWatchStoreFailsClosedWhenExistingFileCannotBeSecured(t *testing.T) {
 	if got := store.Entries(); len(got) != 0 {
 		t.Fatalf("entries loaded after chmod failure: %#v", got)
 	}
-	if _, err := store.Add("Another", parityZpub, ""); err == nil || !strings.Contains(err.Error(), "remove it manually") {
+	if _, err := store.Add("Another", parityZpub, ""); !errors.Is(err, ErrWatchUnavailable) {
 		t.Fatalf("add after chmod failure error = %v", err)
+	}
+	if !errors.Is(store.Err(), ErrWatchUnavailable) {
+		t.Fatalf("store error = %v", store.Err())
 	}
 	unchanged, err := os.ReadFile(path)
 	if err != nil {
@@ -237,6 +241,122 @@ func TestWatchStoreFailsClosedWhenExistingFileCannotBeSecured(t *testing.T) {
 	}
 	if !reflect.DeepEqual(unchanged, original) {
 		t.Fatal("chmod failure rewrote the existing roster")
+	}
+}
+
+func TestWatchMutationWriteFailuresRollbackMemoryAndFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalWriter := writeWatchFile
+	writeWatchFile = func(string, []byte) error { return ErrWatchUnavailable }
+	t.Cleanup(func() { writeWatchFile = originalWriter })
+	if _, err := store.Add("Cold", genesisAddress, ""); !errors.Is(err, ErrWatchUnavailable) {
+		t.Fatalf("failed add error = %v", err)
+	}
+	if len(store.Entries()) != 0 {
+		t.Fatal("failed add changed memory")
+	}
+	unchanged, _ := os.ReadFile(path)
+	if !reflect.DeepEqual(unchanged, original) {
+		t.Fatal("failed add changed roster file")
+	}
+
+	writeWatchFile = originalWriter
+	store = NewWatchStore(dir)
+	entry, err := store.Add("Cold", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ = os.ReadFile(path)
+	store.SetPending(entry.Key, true)
+	store.SetCoreWallet(entry.Key, coreWalletName(entry))
+	writeWatchFile = func(string, []byte) error { return ErrWatchUnavailable }
+	if removed, err := store.RemoveExact(entry); removed || !errors.Is(err, ErrWatchUnavailable) {
+		t.Fatalf("failed remove = %v, %v", removed, err)
+	}
+	if !reflect.DeepEqual(store.Entries(), []WatchEntry{entry}) {
+		t.Fatal("failed remove changed memory")
+	}
+	unchanged, _ = os.ReadFile(path)
+	if !reflect.DeepEqual(unchanged, original) {
+		t.Fatal("failed remove changed roster file")
+	}
+}
+
+func TestMalformedRosterRemainsUnavailableAndBytePreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	original := []byte(`{"broken"`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if !errors.Is(store.Err(), ErrWatchUnavailable) || len(store.Entries()) != 0 {
+		t.Fatalf("malformed store state = %v, %#v", store.Err(), store.Entries())
+	}
+	if _, err := store.Add("Cold", genesisAddress, ""); !errors.Is(err, ErrWatchUnavailable) {
+		t.Fatalf("malformed add error = %v", err)
+	}
+	unchanged, _ := os.ReadFile(path)
+	if !reflect.DeepEqual(unchanged, original) {
+		t.Fatal("malformed roster was overwritten")
+	}
+}
+
+func TestNullRosterRemainsUnavailableAndBytePreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	original := []byte("null")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if !errors.Is(store.Err(), ErrWatchUnavailable) || len(store.Entries()) != 0 {
+		t.Fatalf("null store state = %v, %#v", store.Err(), store.Entries())
+	}
+	if _, err := store.Add("Cold", genesisAddress, ""); !errors.Is(err, ErrWatchUnavailable) {
+		t.Fatalf("null roster add error = %v", err)
+	}
+	unchanged, _ := os.ReadFile(path)
+	if !reflect.DeepEqual(unchanged, original) {
+		t.Fatal("null roster was overwritten")
+	}
+}
+
+func TestInitialSeedWriteFailureMarksStoreUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	originalWriter := writeWatchFile
+	writeWatchFile = func(string, []byte) error { return ErrWatchUnavailable }
+	t.Cleanup(func() { writeWatchFile = originalWriter })
+	store := NewWatchStore(dir)
+	if !errors.Is(store.Err(), ErrWatchUnavailable) {
+		t.Fatalf("seed write store error = %v", store.Err())
+	}
+}
+
+func TestSanitizedLegacyWalletNameCollisionRejected(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if _, err := store.Add("A/B", genesisAddress, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Add("A?B", parityZpub, ""); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("sanitized name collision error = %v", err)
 	}
 }
 
@@ -261,7 +381,9 @@ func TestWatchStoreCRUDAndStaleBalance(t *testing.T) {
 	if rows[0]["state"] != "stale" || rows[0]["btc"] != "1.25" {
 		t.Fatalf("stale row = %#v", rows[0])
 	}
-	if !store.Remove("Cold") || store.Remove("Cold") {
+	removed, err := store.Remove("Cold")
+	removedAgain, errAgain := store.Remove("Cold")
+	if !removed || err != nil || removedAgain || errAgain != nil {
 		t.Fatal("remove result mismatch")
 	}
 	if got := store.history.series(key); !reflect.DeepEqual(got, []float64{1.25}) {
@@ -306,7 +428,7 @@ func TestLegacyDuplicateKeysAreDeduplicatedUntilNextMutation(t *testing.T) {
 	if rows := view["wallets"].([]map[string]any); len(rows) != 1 || view["total"] != "1" {
 		t.Fatalf("duplicate roster view = %#v", view)
 	}
-	if !store.Remove("First") {
+	if removed, err := store.Remove("First"); !removed || err != nil {
 		t.Fatal("deduplicated entry was not removed")
 	}
 	persisted, _ := os.ReadFile(path)
@@ -478,7 +600,7 @@ func TestPendingIdentityDoesNotFollowReusedLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.SetPending(genesisAddress, true)
-	if !store.Remove("Ledger") {
+	if removed, err := store.Remove("Ledger"); !removed || err != nil {
 		t.Fatal("old Ledger was not removed")
 	}
 	if _, err := store.Add("Ledger", parityZpub, ""); err != nil {
@@ -499,7 +621,7 @@ func TestRemoveExactDoesNotDeleteSameLabelReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !store.RemoveExact(old) {
+	if removed, err := store.RemoveExact(old); !removed || err != nil {
 		t.Fatal("old entry was not removed")
 	}
 	replacement, err := store.Add("Ledger", parityZpub, "2021-01-01")
@@ -508,7 +630,7 @@ func TestRemoveExactDoesNotDeleteSameLabelReplacement(t *testing.T) {
 	}
 	store.SetPending(replacement.Key, true)
 	store.SetCoreWallet(replacement.Key, coreWalletName(replacement))
-	if store.RemoveExact(old) {
+	if removed, err := store.RemoveExact(old); removed || err != nil {
 		t.Fatal("stale exact removal deleted a replacement")
 	}
 	if got := store.Entries(); !reflect.DeepEqual(got, []WatchEntry{replacement}) {

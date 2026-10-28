@@ -22,6 +22,8 @@ const maxWatchWallets = 20
 
 const genesisAddress = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 
+var ErrWatchUnavailable = errors.New("watch wallet storage unavailable")
+
 var (
 	base58Alphabet  = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 	addressPattern  = regexp.MustCompile(`^(?:(?:bc1|tb1|bcrt1)[0-9a-z]{20,}|[13][1-9A-HJ-NP-Za-km-z]{25,34})$`)
@@ -40,6 +42,7 @@ var (
 		"02575048": true,
 	}
 	chmodExistingFile = os.Chmod
+	writeWatchFile    = writePrivateFileAtomic
 	extendedVersions  = map[string]struct {
 		version []byte
 		wrapper string
@@ -72,6 +75,7 @@ type WatchStore struct {
 	pending      map[string]bool
 	coreNames    map[string]string
 	unsafeRoster bool
+	storeErr     error
 }
 
 func mustHex(s string) []byte {
@@ -265,24 +269,29 @@ func (s *WatchStore) load() {
 	if err := chmodExistingFile(s.path, 0o600); err != nil && !os.IsNotExist(err) {
 		s.entries = nil
 		s.unsafeRoster = true
+		s.storeErr = ErrWatchUnavailable
 		return
 	}
 	b, err := os.ReadFile(s.path)
 	if err == nil {
 		var items []map[string]any
-		if json.Unmarshal(b, &items) != nil {
-			s.entries = []WatchEntry{}
+		if json.Unmarshal(b, &items) != nil || items == nil {
+			s.entries = nil
+			s.storeErr = ErrWatchUnavailable
 			return
 		}
 		s.entries, s.unsafeRoster = normalizeEntries(items)
 		return
 	}
 	if !os.IsNotExist(err) {
-		s.entries = []WatchEntry{}
+		s.entries = nil
+		s.storeErr = ErrWatchUnavailable
 		return
 	}
 	s.entries = loadWatchConfig()
-	s.saveLocked()
+	if s.saveLocked() != nil {
+		s.storeErr = ErrWatchUnavailable
+	}
 }
 
 func loadWatchConfig() []WatchEntry {
@@ -332,12 +341,15 @@ func stringValue(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (s *WatchStore) saveLocked() {
+func (s *WatchStore) saveLocked() error {
 	b, err := json.Marshal(s.entries)
 	if err != nil {
-		return
+		return ErrWatchUnavailable
 	}
-	writePrivateFileAtomic(s.path, b)
+	if writeWatchFile(s.path, b) != nil {
+		return ErrWatchUnavailable
+	}
+	return nil
 }
 
 func secureParent(path string) bool {
@@ -351,34 +363,40 @@ func secureParent(path string) bool {
 	return os.Chmod(dir, 0o700) == nil
 }
 
-func writePrivateFileAtomic(path string, data []byte) {
+func writePrivateFileAtomic(path string, data []byte) error {
 	if !secureParent(path) {
-		return
+		return ErrWatchUnavailable
 	}
 	tmp := path + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return
+		return ErrWatchUnavailable
 	}
 	if file.Chmod(0o600) != nil {
 		_ = file.Close()
 		_ = os.Remove(tmp)
-		return
+		return ErrWatchUnavailable
 	}
 	if _, err = file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(tmp)
-		return
+		return ErrWatchUnavailable
 	}
 	if file.Close() != nil {
 		_ = os.Remove(tmp)
-		return
+		return ErrWatchUnavailable
 	}
 	if os.Rename(tmp, path) != nil {
 		_ = os.Remove(tmp)
-		return
+		return ErrWatchUnavailable
 	}
-	_ = os.Chmod(path, 0o600)
+	return nil
+}
+
+func (s *WatchStore) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storeErr
 }
 
 func (s *WatchStore) Entries() []WatchEntry {
@@ -503,6 +521,9 @@ func (s *WatchStore) Add(name, key, birthday string) (WatchEntry, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storeErr != nil {
+		return WatchEntry{}, ErrWatchUnavailable
+	}
 	if s.unsafeRoster {
 		return WatchEntry{}, errors.New("wallet roster contains private key material; remove it manually before making changes")
 	}
@@ -516,48 +537,70 @@ func (s *WatchStore) Add(name, key, birthday string) (WatchEntry, error) {
 		if watchKeyID(entry.Key) == watchKeyID(key) {
 			return WatchEntry{}, errors.New("That watch key is already configured.")
 		}
+		if walletName(entry.Name) == walletName(name) {
+			return WatchEntry{}, errors.New("That wallet name conflicts with an existing wallet.")
+		}
 	}
 	entry := WatchEntry{Name: name, Key: key, Birthday: birthday}
+	previous := s.entries
 	s.entries = append(s.entries, entry)
-	s.saveLocked()
+	if s.saveLocked() != nil {
+		s.entries = previous
+		s.storeErr = ErrWatchUnavailable
+		return WatchEntry{}, ErrWatchUnavailable
+	}
 	return entry, nil
 }
 
-func (s *WatchStore) Remove(name string) bool {
+func (s *WatchStore) Remove(name string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storeErr != nil {
+		return false, ErrWatchUnavailable
+	}
 	if s.unsafeRoster {
-		return false
+		return false, ErrWatchUnavailable
 	}
 	for index, entry := range s.entries {
 		if entry.Name == name {
 			return s.removeIndexLocked(index, entry)
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (s *WatchStore) RemoveExact(entry WatchEntry) bool {
+func (s *WatchStore) RemoveExact(entry WatchEntry) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storeErr != nil {
+		return false, ErrWatchUnavailable
+	}
 	if s.unsafeRoster {
-		return false
+		return false, ErrWatchUnavailable
 	}
 	for index, current := range s.entries {
 		if current == entry {
 			return s.removeIndexLocked(index, current)
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (s *WatchStore) removeIndexLocked(index int, entry WatchEntry) bool {
-	s.entries = append(s.entries[:index], s.entries[index+1:]...)
+func (s *WatchStore) removeIndexLocked(index int, entry WatchEntry) (bool, error) {
+	previous := s.entries
+	next := make([]WatchEntry, 0, len(s.entries)-1)
+	next = append(next, s.entries[:index]...)
+	next = append(next, s.entries[index+1:]...)
+	s.entries = next
+	if s.saveLocked() != nil {
+		s.entries = previous
+		s.storeErr = ErrWatchUnavailable
+		return false, ErrWatchUnavailable
+	}
 	identity := watchKeyID(entry.Key)
 	delete(s.pending, identity)
 	delete(s.coreNames, identity)
-	s.saveLocked()
-	return true
+	return true, nil
 }
 
 func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) map[string]any {
@@ -815,28 +858,6 @@ func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned
 		}
 	}
 	return name, true
-}
-
-func EnsureWallets(rpc RPCFunc, walletRPC WalletRPCFunc, entries []WatchEntry, pruned bool) {
-	for _, entry := range entries {
-		ProvisionOne(rpc, walletRPC, entry, pruned)
-	}
-}
-
-func Deprovision(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry) {
-	if name, _ := resolveWallet(walletRPC, entry); name != "" {
-		rpc("unloadwallet", []any{name, false})
-	}
-}
-
-func DeprovisionNameIfMatches(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, name string) {
-	if name != walletName(entry.Name) && name != coreWalletName(entry) {
-		return
-	}
-	info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))
-	if safeWatchWallet(info) && walletMatches(walletRPC, name, entry) {
-		rpc("unloadwallet", []any{name, false})
-	}
 }
 
 func (s *WatchStore) DeprovisionNameIfUnused(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, name string) {

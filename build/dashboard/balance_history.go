@@ -60,7 +60,7 @@ func (h *balanceHistory) saveLocked() {
 	if err != nil {
 		return
 	}
-	writePrivateFileAtomic(h.path, b)
+	_ = writePrivateFileAtomic(h.path, b)
 }
 
 func (h *balanceHistory) record(key string, btc float64, now time.Time) {

@@ -26,6 +26,7 @@ type lifecycleRPC struct {
 	mu            sync.Mutex
 	wallets       map[string][]map[string]any
 	unloaded      []string
+	calls         []string
 	blockWallet   string
 	importStarted chan struct{}
 	releaseImport chan struct{}
@@ -45,6 +46,9 @@ func (f *lifecycleRPC) handler(w http.ResponseWriter, r *http.Request) {
 		Params []any  `json:"params"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&request)
+	f.mu.Lock()
+	f.calls = append(f.calls, request.Method)
+	f.mu.Unlock()
 	wallet := strings.TrimPrefix(r.URL.Path, "/wallet/")
 	var result any
 	switch request.Method {
@@ -120,6 +124,18 @@ func (f *lifecycleRPC) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"result": result, "error": nil})
+}
+
+func (f *lifecycleRPC) countMethod(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, call := range f.calls {
+		if call == method {
+			count++
+		}
+	}
+	return count
 }
 
 func (f *rpcFixture) handler(w http.ResponseWriter, r *http.Request) {
@@ -378,7 +394,7 @@ func TestSensitiveRoutesRequirePassword(t *testing.T) {
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"display_name":"Genesis"`) || !strings.Contains(response.Body.String(), genesisAddress) {
 		t.Fatalf("public Genesis response = %d %q", response.Code, response.Body.String())
 	}
-	if !a.watch.Remove("Satoshi") {
+	if removed, err := a.watch.Remove("Satoshi"); !removed || err != nil {
 		t.Fatal("could not replace public Genesis entry")
 	}
 	if _, err := a.watch.Add("Cold", genesisAddress, ""); err != nil {
@@ -415,6 +431,112 @@ func TestGenesisWatchUsesActualIBDState(t *testing.T) {
 	response := request(t, handler, http.MethodGet, "/api/watch", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"pending"`) || strings.Contains(response.Body.String(), `"btc":"0"`) {
 		t.Fatalf("IBD watch response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestWatchListRejectsMalformedRosterWithoutChangingIt(t *testing.T) {
+	stateDir := t.TempDir()
+	rosterPath := filepath.Join(stateDir, "wallets.json")
+	original := []byte(`[{"name":"Cold","key":"secret-material"}`)
+	if err := os.WriteFile(rosterPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", rosterPath)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(stateDir, "history.json"))
+	fixture := &rpcFixture{}
+	a, handler := testApp(t, fixture, "dashboard-secret")
+	if a.watch.Err() == nil {
+		t.Fatal("malformed roster was treated as available")
+	}
+	response := request(t, handler, http.MethodGet, "/api/watch", "dashboard-secret")
+	if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != "watch wallet storage unavailable" {
+		t.Fatalf("malformed roster response = %d %q", response.Code, response.Body.String())
+	}
+	if fixture.count() != 0 {
+		t.Fatal("unavailable roster reached node RPC")
+	}
+	after, err := os.ReadFile(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("malformed roster changed from %q to %q", original, after)
+	}
+	if strings.Contains(response.Body.String(), rosterPath) || strings.Contains(response.Body.String(), "secret-material") {
+		t.Fatal("unavailable response exposed roster details")
+	}
+}
+
+func TestWatchAddWriteFailureDoesNotProvisionOrClaimSuccess(t *testing.T) {
+	fixture := newLifecycleRPC()
+	server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer server.Close()
+	stateDir := t.TempDir()
+	cfg := config{dashboardPassword: "dashboard-secret", stateDir: stateDir, dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalWriter := writeWatchFile
+	writeWatchFile = func(string, []byte) error { return ErrWatchUnavailable }
+	t.Cleanup(func() { writeWatchFile = originalWriter })
+	req := httptest.NewRequest(http.MethodPost, "/api/watch", strings.NewReader(`{"name":"Cold","key":"`+genesisAddress+`"}`))
+	req.SetBasicAuth("x", "dashboard-secret")
+	req.Header.Set("X-Requested-With", "fetch")
+	response := httptest.NewRecorder()
+	a.routes().ServeHTTP(response, req)
+	if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != "watch wallet storage unavailable" {
+		t.Fatalf("failed add response = %d %q", response.Code, response.Body.String())
+	}
+	if len(a.watch.Entries()) != 0 {
+		t.Fatal("failed add changed the in-memory roster")
+	}
+	if fixture.countMethod("createwallet") != 0 || fixture.countMethod("loadwallet") != 0 || fixture.countMethod("importdescriptors") != 0 {
+		t.Fatal("failed add launched provisioning")
+	}
+	if strings.Contains(response.Body.String(), stateDir) || strings.Contains(response.Body.String(), genesisAddress) {
+		t.Fatal("failed add response exposed roster details")
+	}
+}
+
+func TestWatchRemoveWriteFailureDoesNotUnloadOrClaimSuccess(t *testing.T) {
+	fixture := newLifecycleRPC()
+	server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer server.Close()
+	stateDir := t.TempDir()
+	cfg := config{dashboardPassword: "dashboard-secret", stateDir: stateDir, dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := a.watch.Add("Cold", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.watch.SetPending(entry.Key, true)
+	a.provision(entry, false)
+	originalWriter := writeWatchFile
+	writeWatchFile = func(string, []byte) error { return ErrWatchUnavailable }
+	t.Cleanup(func() { writeWatchFile = originalWriter })
+	req := httptest.NewRequest(http.MethodDelete, "/api/watch/Cold", nil)
+	req.SetBasicAuth("x", "dashboard-secret")
+	req.Header.Set("X-Requested-With", "fetch")
+	response := httptest.NewRecorder()
+	a.routes().ServeHTTP(response, req)
+	if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != "watch wallet storage unavailable" {
+		t.Fatalf("failed remove response = %d %q", response.Code, response.Body.String())
+	}
+	if !a.watch.Contains(entry) {
+		t.Fatal("failed remove changed the in-memory roster")
+	}
+	fixture.mu.Lock()
+	unloaded := append([]string(nil), fixture.unloaded...)
+	fixture.mu.Unlock()
+	if len(unloaded) != 0 {
+		t.Fatalf("failed remove unloaded wallets: %v", unloaded)
+	}
+	if strings.Contains(response.Body.String(), stateDir) || strings.Contains(response.Body.String(), genesisAddress) {
+		t.Fatal("failed remove response exposed roster details")
 	}
 }
 
@@ -507,7 +629,7 @@ func TestProvisionCompletionDoesNotAttachOrUnloadReplacement(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("provisioning did not reach blocked import")
 			}
-			if !a.watch.Remove(original.Name) {
+			if removed, err := a.watch.Remove(original.Name); !removed || err != nil {
 				t.Fatal("original entry was not removed")
 			}
 			replacement, err := a.watch.Add(tt.replacement.Name, tt.replacement.Key, tt.replacement.Birthday)
@@ -562,7 +684,7 @@ func TestDeleteCleanupPreservesSameKeyReadd(t *testing.T) {
 	if name != coreWalletName(entry) {
 		t.Fatalf("resolved wallet = %q", name)
 	}
-	if !a.watch.RemoveExact(entry) {
+	if removed, err := a.watch.RemoveExact(entry); !removed || err != nil {
 		t.Fatal("exact entry was not removed")
 	}
 	replacement, err := a.watch.Add("Cold", genesisAddress, "2021-01-01")
@@ -620,7 +742,7 @@ func TestStartupProvisionsCurrentRosterAfterRPCBecomesAvailable(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("startup did not wait for blockchain RPC")
 	}
-	if !a.watch.Remove(old.Name) {
+	if removed, err := a.watch.Remove(old.Name); !removed || err != nil {
 		t.Fatal("old startup entry was not removed")
 	}
 	replacement, err := a.watch.Add("Cold", parityZpub, "")
