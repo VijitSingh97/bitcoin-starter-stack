@@ -139,8 +139,8 @@ flowchart LR
 ```
 
 Three services on an isolated Docker network: `tor` (SOCKS5 proxy), `bitcoin` (Bitcoin Core,
-non-root, RPC reachable only from inside the network), and `dashboard` (Flask dashboard served
-by Waitress and polling the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
+non-root, RPC reachable only from inside the network), and `dashboard` (a small Go server
+polling the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
 
 ## 📚 Documentation
 
@@ -162,11 +162,12 @@ tests/run.sh
 ```
 
 Runs shellcheck, `configure.sh` and CLI tests, a docker-compose contract test, a
-release-consistency check, an upgrade-path test, the dashboard's Python and frontend unit
-tests, and a real end-to-end boot whose **egress audit asserts every established connection
-from the containers is Tor-only** — the same suite [CI](.github/workflows/ci.yml) runs on
-every push, plus a full image build, secret scanning (gitleaks), and Dockerfile lint
-(hadolint). See [CONTRIBUTING.md](CONTRIBUTING.md).
+release-consistency check, an upgrade-path test, Go race/vet/unit checks, the retained Python
+reference suite, cross-runtime HTTP parity tests, frontend tests, and a real end-to-end boot
+whose **egress audit asserts every established connection from the containers is Tor-only** —
+the same suite [CI](.github/workflows/ci.yml) runs on every push, plus a full image build,
+secret scanning (gitleaks), and Dockerfile lint (hadolint). See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## ⚠️ Disclaimer
 
@@ -174,3 +175,5 @@ every push, plus a full image build, secret scanning (gitleaks), and Dockerfile 
 a full node is resource-intensive (bandwidth, disk, memory). Understand your firewall setup
 before exposing anything beyond your LAN. Security posture and reporting:
 [SECURITY.md](SECURITY.md). Licensed [MIT](LICENSE).
+
+The dashboard runtime is Go; Python remains in the development test harness only. A dashboard password is required to manage or view saved watch-only wallets and request upgrades. The optional-password status page remains LAN-only; do not forward its port to the Internet. Only public keys, public descriptors, and addresses are accepted for watch-only imports.

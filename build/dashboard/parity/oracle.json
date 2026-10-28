@@ -1,0 +1,699 @@
+{
+  "balances": {
+    "samples": [
+      [
+        "ready-key",
+        1.25
+      ],
+      [
+        "empty-key",
+        0
+      ]
+    ],
+    "stale_api_row": {
+      "btc": "1.25",
+      "history": [
+        0.75,
+        1.25
+      ],
+      "key": "offline-key",
+      "name": "Offline",
+      "state": "stale"
+    },
+    "view": {
+      "show_total": true,
+      "total": "1.25",
+      "wallets": [
+        {
+          "btc": "1.25",
+          "key": "ready-key",
+          "name": "Ready",
+          "state": "ok"
+        },
+        {
+          "btc": null,
+          "key": "scanning-key",
+          "name": "Scanning",
+          "state": "scanning"
+        },
+        {
+          "btc": null,
+          "key": "offline-key",
+          "name": "Offline",
+          "state": "error"
+        },
+        {
+          "btc": "0",
+          "key": "empty-key",
+          "name": "Empty",
+          "state": "ok"
+        }
+      ]
+    }
+  },
+  "config": {
+    "encoded": "W3sibmFtZSI6ICIg5Ya36JS15bqrICIsICJrZXkiOiAiIHpwdWI2ckZSN3k0UTJBaWpCRXFUVXF1aFZ6Mzk4aHRERnJ0eW1EOXhZWWZHMW00d0FjdlBoWE5mRTNFZkgxcjFBRHF0ZlNkVkNUb1VHODY4UnZVVWtnREtmMzFtR0R0S3NBWXoyb3oyQUd1dFpZcyAiLCAiYmlydGhkYXkiOiAiMjAyMS0wMS0wMSJ9LCB7Im5hbWUiOiAiIiwgImtleSI6ICJ4In0sIHsibmFtZSI6ICJtaXNzaW5nLWtleSIsICJrZXkiOiAiIn1d",
+    "malformed": [
+      {
+        "input": "not base64 json!!",
+        "output": []
+      },
+      {
+        "input": "e30=",
+        "output": []
+      },
+      {
+        "input": null,
+        "output": []
+      }
+    ],
+    "output": [
+      {
+        "birthday": "2021-01-01",
+        "key": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+        "name": "冷蔵庫"
+      }
+    ]
+  },
+  "descriptors": [
+    {
+      "descriptors": [
+        {
+          "desc": "addr(1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)",
+          "internal": false
+        }
+      ],
+      "input": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "addr(3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy)",
+          "internal": false
+        }
+      ],
+      "input": "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "addr(bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4)",
+          "internal": false
+        }
+      ],
+      "input": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "addr(tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx)",
+          "internal": false
+        }
+      ],
+      "input": "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "addr(bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080)",
+          "internal": false
+        }
+      ],
+      "input": "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "wpkh([abcd1234/84h/0h/0h]xpub6C.../0/*)",
+          "internal": false
+        }
+      ],
+      "input": "wpkh([abcd1234/84h/0h/0h]xpub6C.../0/*)#aaaaaaaa"
+    },
+    {
+      "descriptors": [
+        {
+          "desc": "wpkh([abcd1234/84h/0h/0h]xpub6C.../0/*)",
+          "internal": false
+        },
+        {
+          "desc": "wpkh([abcd1234/84h/0h/0h]xpub6C.../1/*)",
+          "internal": true
+        }
+      ],
+      "input": "wpkh([abcd1234/84h/0h/0h]xpub6C.../<0;1>/*)#aaaaaaaa"
+    }
+  ],
+  "helpers": {
+    "birthdays": [
+      {
+        "input": "2021-01-01",
+        "timestamp": 1609459200
+      },
+      {
+        "input": "2009-01-03",
+        "timestamp": 1230940800
+      },
+      {
+        "input": "",
+        "timestamp": 0
+      },
+      {
+        "input": "garbage",
+        "timestamp": 0
+      },
+      {
+        "input": "2021-02-29",
+        "timestamp": 0
+      }
+    ],
+    "btc_format": [
+      {
+        "input": 0,
+        "output": "0"
+      },
+      {
+        "input": 1,
+        "output": "1"
+      },
+      {
+        "input": 0.5,
+        "output": "0.5"
+      },
+      {
+        "input": 1.23456789,
+        "output": "1.23456789"
+      },
+      {
+        "input": 1.234567895,
+        "output": "1.2345679"
+      },
+      {
+        "input": -1e-08,
+        "output": "-0.00000001"
+      }
+    ],
+    "wallet_names": [
+      {
+        "input": "Cold Storage!",
+        "output": "watch_Cold_Storage_"
+      },
+      {
+        "input": "a/b\\c",
+        "output": "watch_a_b_c"
+      },
+      {
+        "input": "München 冷蔵庫 🔐",
+        "output": "watch_München_冷蔵庫__"
+      },
+      {
+        "input": "四十字を超える名前四十字を超える名前四十字を超える名前四十字を超える名前四十字を超える名前四十字を超える名前",
+        "output": "watch_四十字を超える名前四十字を超える名前四十字を超える名前四十字を超える名前四十字を"
+      }
+    ]
+  },
+  "history": {
+    "cap_used": 3,
+    "key_ids": [
+      {
+        "input": "xpub-AAA",
+        "output": "c10385f90e2190f9"
+      },
+      {
+        "input": " xpub-AAA ",
+        "output": "c10385f90e2190f9"
+      },
+      {
+        "input": "xpub-BBB",
+        "output": "42ab7c833082a3f9"
+      },
+      {
+        "input": "",
+        "output": "e3b0c44298fc1c14"
+      }
+    ],
+    "min_interval": 3600,
+    "other_series": [
+      9.0
+    ],
+    "persisted": {
+      "42ab7c833082a3f9": [
+        [
+          0,
+          9.0
+        ]
+      ],
+      "c10385f90e2190f9": [
+        [
+          3600,
+          2.0
+        ],
+        [
+          7200,
+          3.0
+        ],
+        [
+          10800,
+          4.0
+        ]
+      ]
+    },
+    "series_after_restart": [
+      2.0,
+      3.0,
+      4.0
+    ],
+    "series_before_restart": [
+      2.0,
+      3.0,
+      4.0
+    ]
+  },
+  "provisioning": {
+    "bad_key_then_good": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Bad"
+          ]
+        },
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Good"
+          ]
+        },
+        {
+          "method": "createwallet",
+          "params": [
+            "watch_Good",
+            true,
+            true,
+            "",
+            false,
+            true,
+            true
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)"
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)"
+          ]
+        }
+      ],
+      "stdout": [
+        "watch-only: skipping 'Bad': not an xpub/ypub/zpub, an output descriptor, or an address"
+      ],
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Bad"
+        },
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Good"
+        },
+        {
+          "method": "importdescriptors",
+          "params": [
+            [
+              {
+                "active": false,
+                "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)#oracle",
+                "internal": false,
+                "range": 1000,
+                "timestamp": 0
+              },
+              {
+                "active": false,
+                "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)#oracle",
+                "internal": true,
+                "range": 1000,
+                "timestamp": 0
+              }
+            ]
+          ],
+          "wallet": "watch_Good"
+        }
+      ]
+    },
+    "create_failure": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Cold"
+          ]
+        },
+        {
+          "method": "createwallet",
+          "params": [
+            "watch_Cold",
+            true,
+            true,
+            "",
+            false,
+            true,
+            true
+          ]
+        }
+      ],
+      "stdout": [
+        "watch-only: could not create wallet for 'Cold'"
+      ],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        }
+      ]
+    },
+    "fresh_watch_only": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Cold"
+          ]
+        },
+        {
+          "method": "createwallet",
+          "params": [
+            "watch_Cold",
+            true,
+            true,
+            "",
+            false,
+            true,
+            true
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)"
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)"
+          ]
+        }
+      ],
+      "stdout": [],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        },
+        {
+          "method": "importdescriptors",
+          "params": [
+            [
+              {
+                "active": false,
+                "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)#oracle",
+                "internal": false,
+                "range": 1000,
+                "timestamp": 1609459200
+              },
+              {
+                "active": false,
+                "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)#oracle",
+                "internal": true,
+                "range": 1000,
+                "timestamp": 1609459200
+              }
+            ]
+          ],
+          "wallet": "watch_Cold"
+        }
+      ]
+    },
+    "invalid_descriptors": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Cold"
+          ]
+        },
+        {
+          "method": "createwallet",
+          "params": [
+            "watch_Cold",
+            true,
+            true,
+            "",
+            false,
+            true,
+            true
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)"
+          ]
+        },
+        {
+          "method": "getdescriptorinfo",
+          "params": [
+            "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)"
+          ]
+        }
+      ],
+      "stdout": [
+        "watch-only: invalid descriptor for 'Cold': wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)",
+        "watch-only: invalid descriptor for 'Cold': wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)"
+      ],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        }
+      ]
+    },
+    "loaded": {
+      "node_calls": [],
+      "stdout": [],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        }
+      ]
+    },
+    "pruned": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Cold"
+          ]
+        }
+      ],
+      "stdout": [
+        "watch-only: node is pruned — can't rescan history; not importing 'Cold'"
+      ],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        }
+      ]
+    },
+    "readd": {
+      "node_calls": [
+        {
+          "method": "loadwallet",
+          "params": [
+            "watch_Cold"
+          ]
+        }
+      ],
+      "stdout": [],
+      "value": null,
+      "wallet_calls": [
+        {
+          "method": "getwalletinfo",
+          "params": [],
+          "wallet": "watch_Cold"
+        }
+      ]
+    }
+  },
+  "python_sources": {
+    "balance_history.py": "f4ac693436b27a51a4db4989ad3c50f0ee27e03b213f71d9e5c70524594f7922",
+    "watch.py": "053bf3a260e2ca369bcdebce985b8eae4b4d7f2a55c2841597c766fa92826f46"
+  },
+  "schema": 1,
+  "slip132": {
+    "bad_checksum": {
+      "error": "bad base58 checksum",
+      "input": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZY1"
+    },
+    "unknown_version": {
+      "error": "not an extended key",
+      "input": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
+    },
+    "versions": [
+      {
+        "descriptors": [
+          {
+            "desc": "pkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)",
+            "internal": false
+          },
+          {
+            "desc": "pkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)",
+            "internal": true
+          }
+        ],
+        "input": "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V",
+        "normalized": "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V",
+        "prefix": "xpub",
+        "wrapper": "pkh({})"
+      },
+      {
+        "descriptors": [
+          {
+            "desc": "sh(wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*))",
+            "internal": false
+          },
+          {
+            "desc": "sh(wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*))",
+            "internal": true
+          }
+        ],
+        "input": "ypub6XR9pJPUsVBFKweLeV85HtwdxjjmKEuUr6djm9mNdkh47X7ASsD6byaXFotRAKByFoWgSzCuoTjaYdrv2yoJroLAPtBuHFjVm5vNmhyNehE",
+        "normalized": "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V",
+        "prefix": "ypub",
+        "wrapper": "sh(wpkh({}))"
+      },
+      {
+        "descriptors": [
+          {
+            "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/0/*)",
+            "internal": false
+          },
+          {
+            "desc": "wpkh(xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/1/*)",
+            "internal": true
+          }
+        ],
+        "input": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+        "normalized": "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V",
+        "prefix": "zpub",
+        "wrapper": "wpkh({})"
+      },
+      {
+        "descriptors": [
+          {
+            "desc": "pkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/0/*)",
+            "internal": false
+          },
+          {
+            "desc": "pkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/1/*)",
+            "internal": true
+          }
+        ],
+        "input": "tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz",
+        "normalized": "tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz",
+        "prefix": "tpub",
+        "wrapper": "pkh({})"
+      },
+      {
+        "descriptors": [
+          {
+            "desc": "sh(wpkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/0/*))",
+            "internal": false
+          },
+          {
+            "desc": "sh(wpkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/1/*))",
+            "internal": true
+          }
+        ],
+        "input": "upub5E66bdhpGm1KvkssK3yaTYZdGs9yYkwVBeYrdaBq7jBXu7rFSEYr7iwyAz45AgaHdF3TT5pfxpKP1VQfAC9FfrbkvXQCwcTYgBfoDTNH1hz",
+        "normalized": "tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz",
+        "prefix": "upub",
+        "wrapper": "sh(wpkh({}))"
+      },
+      {
+        "descriptors": [
+          {
+            "desc": "wpkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/0/*)",
+            "internal": false
+          },
+          {
+            "desc": "wpkh(tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz/1/*)",
+            "internal": true
+          }
+        ],
+        "input": "vpub5YvMuJNjRSYon44z9QmCfdf8SqJRVNvz6m55Qy5iVjZQxDfUgtiQjnc7CC1fAbED2tAGCZRERUfvtn2DstZGU6HMns6dXXH2wujSc2wfi2x",
+        "normalized": "tpubDCxX2sYFS5bDkSe5GKKYHjBW7tgyN1R3UchpLJvdbf54ohxeGRtd8MbDUe1cguVHe4vnK68DsuD5MXjxi9EXx16rb9EnNsaF5KT99CinaJz",
+        "prefix": "vpub",
+        "wrapper": "wpkh({})"
+      }
+    ]
+  },
+  "store": {
+    "added": {
+      "birthday": "2021-01-01",
+      "key": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+      "name": "Cold"
+    },
+    "authoritative": [
+      {
+        "birthday": "",
+        "key": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+        "name": "Seed"
+      }
+    ],
+    "capped": {
+      "error": "At most 2 wallets."
+    },
+    "duplicate": {
+      "error": "A wallet with that name already exists."
+    },
+    "invalid_date": {
+      "error": "Birthday must be a date like 2021-03-15."
+    },
+    "missing": false,
+    "reloaded": [
+      {
+        "birthday": "",
+        "key": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+        "name": "Seed"
+      }
+    ],
+    "removed": true,
+    "seeded": [
+      {
+        "birthday": null,
+        "key": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
+        "name": "Seed"
+      }
+    ]
+  }
+}

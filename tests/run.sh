@@ -18,10 +18,34 @@ tests/test_e2e.sh
 tests/test_upgrade.sh
 tests/test_postsync.sh
 
+if command -v go >/dev/null; then
+  (
+    dashboard_check=$(mktemp)
+    trap 'rm -f "$dashboard_check"' EXIT
+    cd build/dashboard
+    go test -race ./...
+    go vet ./...
+    go build -o "$dashboard_check" .
+  )
+  echo "PASS: dashboard Go tests, race detector, vet, and build"
+else
+  echo "SKIP: dashboard Go checks (Go not installed)"
+fi
+
 if python3 -c "import pytest, flask, waitress" 2>/dev/null; then
   python3 -m pytest build/dashboard/tests -q
+  python3 build/dashboard/parity/generate.py --check
+  python3 build/dashboard/parity/test_http.py
+  if command -v go >/dev/null; then
+    (
+      dashboard_bin=$(mktemp)
+      trap 'rm -f "$dashboard_bin"' EXIT
+      (cd build/dashboard && go build -o "$dashboard_bin" .)
+      DASHBOARD_COMMAND="[\"$dashboard_bin\"]" python3 build/dashboard/parity/test_http.py
+    )
+  fi
 else
-  echo "SKIP: dashboard unit tests (pip install -r build/dashboard/requirements.txt pytest)"
+  echo "SKIP: dashboard Python reference tests (pip install -r build/dashboard/parity/reference/requirements.txt pytest)"
 fi
 
 if command -v node >/dev/null; then

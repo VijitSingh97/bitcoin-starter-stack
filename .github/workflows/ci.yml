@@ -39,11 +39,26 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Dashboard unit tests + coverage
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: build/dashboard/go.mod
+          cache: false
+
+      - name: Dashboard Go checks
         run: |
-          pip install -r build/dashboard/requirements.txt pytest pytest-cov
           cd build/dashboard
-          python -m pytest tests -q --cov=. --cov-report=term-missing --cov-fail-under=85
+          go test -race ./...
+          go vet ./...
+          go build -o /tmp/dashboard .
+
+      - name: Python reference + HTTP parity
+        run: |
+          pip install -r build/dashboard/parity/reference/requirements.txt pytest pytest-cov
+          cd build/dashboard
+          python -m pytest tests -q --cov=parity/reference --cov-report=term-missing --cov-fail-under=85
+          python parity/generate.py --check
+          python parity/test_http.py
+          DASHBOARD_COMMAND='["/tmp/dashboard"]' python parity/test_http.py
 
       - name: Frontend unit tests
         run: node --test build/dashboard/static/*.test.mjs

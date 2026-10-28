@@ -14,7 +14,7 @@ import fee_history
 import watch
 import balance_history
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "..", "..", "static"))
 # Revalidate static assets every load (cheap 304s) so a deploy's new CSS/JS is
 # picked up immediately — otherwise browsers heuristically cache the old files
 # and show a stale dashboard until a hard refresh.

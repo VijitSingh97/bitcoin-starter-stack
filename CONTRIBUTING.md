@@ -7,10 +7,10 @@ Small stack, small rules. PRs welcome.
 ```bash
 git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
 cd bitcoin-starter-stack
-pip install -r build/dashboard/requirements.txt pytest
+pip install -r build/dashboard/parity/reference/requirements.txt pytest
 ```
 
-`shellcheck` and Docker are needed for the full test suite
+Go 1.27, `shellcheck`, and Docker are needed for the full test suite
 (`sudo apt install shellcheck` / `brew install shellcheck`).
 
 ## Running tests
@@ -20,8 +20,9 @@ tests/run.sh
 ```
 
 That runs shellcheck, the `configure.sh` end-to-end test, the
-docker-compose contract test, and the dashboard unit tests. Anything the
-machine can't run is skipped with a `SKIP:` line. CI
+docker-compose contract test, Go race/vet/unit checks, the frozen Python
+reference suite, and the same HTTP contract tests against both runtimes.
+Anything the machine can't run is skipped with a `SKIP:` line. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same suite
 plus a full image build on every push and PR.
 

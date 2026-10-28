@@ -40,14 +40,17 @@ fail() {
 }
 
 BITCOIN_DATA_DIR=$(mktemp -d)
-chmod 777 "$BITCOIN_DATA_DIR" # bitcoind runs as uid 1000; CI runners often aren't
+WALLET_DATA_DIR=$(mktemp -d)
+chmod 777 "$BITCOIN_DATA_DIR" "$WALLET_DATA_DIR" # bitcoind runs as uid 1000; CI runners often aren't
 
 # bitcoind writes as uid 1000, which the invoking user may not be able to
 # delete — clean the datadir through a root container instead of rm -rf
 cleanup() {
   docker compose down -v --remove-orphans >/dev/null 2>&1 || true
   docker run --rm -v "$BITCOIN_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
+  docker run --rm -v "$WALLET_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
   rmdir "$BITCOIN_DATA_DIR" 2>/dev/null || true
+  rmdir "$WALLET_DATA_DIR" 2>/dev/null || true
   rm -f config.json .env # created by this test (guarded above)
 }
 trap cleanup EXIT
@@ -127,13 +130,6 @@ for c in bitcoin dashboard; do
   [ -z "$bad6" ] || fail "unexpected IPv6 egress from $c: $bad6"
 done
 
-# Watch-only: provision a wallet of each supported key type against the real
-# node — an xpub, a zpub, Satoshi's genesis address, and his genesis pubkey —
-# exercising watch.descriptors_for + provision_one (incl. the range fix) and
-# confirming a real Core accepts every descriptor form the dashboard builds.
-docker cp build/dashboard/tests/e2e_watch.py dashboard:/app/e2e_watch.py >/dev/null
-docker exec dashboard python /app/e2e_watch.py || fail "watch-only provisioning failed"
-
 # Sync-start check (opt-in: real Tor traffic, takes many minutes). Proves the
 # node finds peers, that every peer is an onion peer, and that header sync
 # begins — not the whole sync, just that it starts. Cold-cache onion peer
@@ -210,5 +206,25 @@ if [ -n "${E2E_SYNC:-}" ]; then
 else
   echo "  (sync-start checks skipped — set E2E_SYNC=1 to include them)"
 fi
+
+# Wallet provisioning needs a full node because the API correctly refuses new
+# rescans on pruned nodes. Keep the pruned wizard checks above, then recreate
+# only bitcoin and dashboard against a separate fresh full-node datadir.
+docker compose stop dashboard bitcoin >/dev/null
+sed -i.bak \
+  -e "s|^BITCOIN_DATA_DIR=.*|BITCOIN_DATA_DIR=$WALLET_DATA_DIR|" \
+  -e 's|^BITCOIN_PRUNE=.*|BITCOIN_PRUNE=0|' \
+  -e 's|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=e2edash|' \
+  .env && rm -f .env.bak
+docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 bitcoin dashboard ||
+  fail "full-node wallet stage did not reach healthy"
+
+body=$(curl -sf -u x:e2edash localhost:80 || true)
+echo "$body" | grep -q "Full" || fail "dashboard missing full-node badge in wallet stage"
+rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
+rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
+BITCOIN_RPC_USER="$rpc_user" BITCOIN_RPC_PASSWORD="$rpc_pass" \
+  E2E_DASHBOARD_PASSWORD=e2edash python3 build/dashboard/tests/e2e_watch.py ||
+  fail "Go watch-only provisioning failed"
 
 echo "PASS: test_e2e.sh"

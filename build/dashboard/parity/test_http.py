@@ -1,0 +1,293 @@
+"""Run the same public dashboard contracts against the Python reference or Go."""
+import base64
+import hashlib
+import http.server
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[1]
+ADDRESS = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'
+
+
+class Fixture(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        value = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        method, params = value['method'], value['params']
+        state = self.server.state
+        wallet = urllib.parse.unquote(self.path.removeprefix('/wallet/')) if self.path.startswith('/wallet/') else ''
+        with self.server.lock:
+            state['calls'].append((wallet, method, params, self.headers.get('Authorization')))
+            result = None
+            if method == 'getblockchaininfo' and not state['down']:
+                result = {'blocks': 123, 'headers': 123, 'verificationprogress': 1,
+                          'initialblockdownload': state['ibd'], 'pruned': state['pruned'],
+                          'prune_target_size': 2**30, 'size_on_disk': 10**9}
+            elif method == 'getnetworkinfo':
+                result = {'subversion': state['version'], 'connections': 3}
+            elif method == 'getpeerinfo':
+                result = [{'inbound': True}, {'inbound': False}, {'inbound': False}]
+            elif method == 'uptime':
+                result = 90061
+            elif method == 'getmempoolinfo':
+                result = {'size': 42, 'bytes': 2**20}
+            elif method == 'estimatesmartfee':
+                result = {'feerate': 0.000004 if params == [1] else 0.00002}
+            elif method == 'loadwallet' and params[0] in state['wallets']:
+                state['wallets'][params[0]]['loaded'] = True
+                result = {'name': params[0]}
+            elif method == 'createwallet':
+                state['wallets'][params[0]] = {'loaded': True, 'mode': 'ok'}
+                result = {'name': params[0]}
+            elif method == 'unloadwallet' and params[0] in state['wallets']:
+                state['wallets'][params[0]]['loaded'] = False
+                result = {}
+            elif method == 'getdescriptorinfo':
+                result = {'descriptor': params[0] + '#fixture', 'isrange': '/*' in params[0], 'hasprivatekeys': False}
+            elif method == 'getwalletinfo' and wallet in state['wallets']:
+                info = state['wallets'][wallet]
+                if info['loaded'] and info['mode'] != 'error':
+                    result = {'scanning': {'progress': 0.5} if info['mode'] == 'scanning' else False}
+            elif method == 'getbalances':
+                result = {'mine': {'trusted': 1.23456789}}
+            elif method == 'importdescriptors':
+                result = [{'success': True} for _ in params[0]]
+        if method in state.get('failed_methods', []):
+            result = None
+        body = json.dumps({'result': result, 'error': None if result is not None else {'code': -18}, 'id': value.get('id')}).encode()
+        self.send_response(200 if result is not None else 500)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class DashboardContracts(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.state_dir = Path(self.temp.name)
+        self.fixture = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        self.fixture.lock = threading.Lock()
+        self.fixture.state = {'calls': [], 'wallets': {}, 'down': False, 'ibd': False, 'pruned': False, 'version': '/Satoshi:31.1.0/'}
+        self.thread = threading.Thread(target=self.fixture.serve_forever, daemon=True)
+        self.thread.start()
+        self.log = (self.state_dir / 'server.log').open('w+')
+        self.start()
+
+    def start(self, password='paritypass', control='1'):
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            self.port = listener.getsockname()[1]
+        self.url = f'http://127.0.0.1:{self.port}'
+        env = dict(os.environ, RPC_URL=f'http://127.0.0.1:{self.fixture.server_port}',
+                   RPC_USER='parityuser', RPC_PASSWORD='parityrpc', DASHBOARD_PASSWORD=password,
+                   DASHBOARD_CONTROL=control, PORT=str(self.port), DATA_DIR=str(self.state_dir),
+                   STATE_DIR=str(self.state_dir), WATCH_STORE=str(self.state_dir/'wallets.json'),
+                   BALANCE_HISTORY=str(self.state_dir/'balance_history.json'), EVENTS_LOG=str(self.state_dir/'events.log'),
+                   WATCH_WALLETS_B64='', TELEGRAM_BOT_TOKEN='', TELEGRAM_CHAT_ID='', HEALTHCHECKS_URL='', STACK_VERSION='1.31.1')
+        self.password = password
+        command = json.loads(os.environ.get('DASHBOARD_COMMAND', json.dumps([sys.executable, str(ROOT/'parity/python_server.py')])))
+        self.process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=self.log, stderr=self.log)
+        for _ in range(100):
+            if self.process.poll() is not None:
+                self.log.seek(0)
+                self.fail(f'dashboard exited: {self.log.read()}')
+            try:
+                if self.call('/api/fees')[0] == 200:
+                    return
+            except OSError:
+                pass
+            time.sleep(0.05)
+        self.fail('dashboard did not become ready')
+
+    def stop(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+            self.fail('dashboard failed graceful shutdown')
+
+    def tearDown(self):
+        self.stop()
+        self.fixture.shutdown()
+        self.fixture.server_close()
+        self.thread.join()
+        self.log.close()
+        self.temp.cleanup()
+
+    def call(self, path, method='GET', data=None, csrf=True, auth=True):
+        headers = {}
+        if auth and self.password:
+            headers['Authorization'] = 'Basic ' + base64.b64encode(f'anything:{self.password}'.encode()).decode()
+        if csrf:
+            headers['X-Requested-With'] = 'fetch'
+        payload = None if data is None else json.dumps(data).encode()
+        if payload is not None:
+            headers['Content-Type'] = 'application/json'
+        req = urllib.request.Request(self.url+path, data=payload, headers=headers, method=method)
+        try:
+            response = urllib.request.urlopen(req, timeout=10)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            return response.status, response.read().decode(), response.headers
+
+    def body(self, path='/api/watch'):
+        status, body, _ = self.call(path)
+        self.assertEqual(status, 200)
+        return json.loads(body)
+
+    def add(self, name='Cold', key=ADDRESS, birthday='2021-03-15'):
+        status, body, _ = self.call('/api/watch', 'POST', {'name': name, 'key': key, 'birthday': birthday})
+        self.assertEqual((status, json.loads(body)), (200, {'ok': True}))
+        for _ in range(100):
+            with self.fixture.lock:
+                ready = any(method == 'importdescriptors' for _, method, _, _ in self.fixture.state['calls'])
+            if ready:
+                return
+            time.sleep(0.01)
+        self.fail('descriptor import did not complete')
+
+    def test_auth_covers_routes_and_static(self):
+        for path in ['/', '/metrics', '/api/watch', '/api/fees', '/api/upgrade', '/static/dashboard.css']:
+            status, _, headers = self.call(path, auth=False)
+            self.assertEqual(status, 401, path)
+            self.assertIn('Basic', headers['WWW-Authenticate'])
+
+    def test_optional_password_compatibility(self):
+        self.stop()
+        self.start(password='')
+        self.assertEqual(self.call('/', auth=False)[0], 200)
+        self.assertFalse(self.body()['has_password'])
+
+    def test_synced_ui_and_rpc_auth(self):
+        status, body, _ = self.call('/')
+        self.assertEqual(status, 200)
+        for value in ['Bitcoin Node Status', '/Satoshi:31.1.0/', '1d 1h 1m', '123 / 123', 'Sync Progress', 'Mempool:', '42 tx', '0.4', 'v1.31.1', '/static/watch.js', '/static/upgrade.js', 'id="watch"', 'data-blocks="123"']:
+            self.assertIn(value, body)
+        expected = 'Basic '+base64.b64encode(b'parityuser:parityrpc').decode()
+        self.assertTrue(all(call[3] == expected for call in self.fixture.state['calls']))
+
+    def test_loading_and_down_metrics(self):
+        self.fixture.state['down'] = True
+        self.assertIn('Bitcoin Node Initializing', self.call('/')[1])
+        self.assertIn('bitcoin_node_up 0', self.call('/metrics')[1])
+
+    def test_ibd_avoids_fee_and_mempool_reads(self):
+        self.fixture.state['ibd'] = True
+        with self.fixture.lock:
+            self.fixture.state['calls'].clear()
+        body = self.call('/')[1]
+        self.assertNotIn('Mempool:', body)
+        methods = [row[1] for row in self.fixture.state['calls']]
+        self.assertNotIn('getmempoolinfo', methods)
+        self.assertNotIn('estimatesmartfee', methods)
+
+    def test_metrics(self):
+        status, body, headers = self.call('/metrics')
+        self.assertEqual(status, 200)
+        self.assertIn('text/plain', headers['Content-Type'])
+        for value in ['bitcoin_node_up 1', 'bitcoin_blocks 123', 'bitcoin_headers 123', 'bitcoin_connections 3', 'bitcoin_peers{direction="in"} 1', 'bitcoin_peers{direction="out"} 2', 'bitcoin_fee_sat_vb{blocks="1"} 0.4', 'bitcoin_mempool_txs 42']:
+            self.assertIn(value, body)
+
+    def test_pruned_rejects_wallet_without_mutation(self):
+        self.fixture.state['pruned'] = True
+        self.assertIn('Pruned', self.call('/')[1])
+        status, body, _ = self.call('/api/watch', 'POST', {'name':'Cold','key':ADDRESS})
+        self.assertEqual(status, 400)
+        self.assertIn('full node', body)
+        self.assertEqual(self.body()['wallets'], [])
+
+    def test_wallet_crud_and_restart(self):
+        self.add()
+        view = self.body()
+        self.assertEqual(view['wallets'][0], {'name':'Cold','key':ADDRESS,'state':'ok','btc':'1.23456789','history':[]})
+        self.assertEqual(view['total'], '1.23456789')
+        self.assertFalse(view['show_total'])
+        stored = json.loads((self.state_dir/'wallets.json').read_text())
+        self.assertEqual(stored, [{'name':'Cold','key':ADDRESS,'birthday':'2021-03-15'}])
+        create = next(row[2] for row in self.fixture.state['calls'] if row[1]=='createwallet')
+        self.assertEqual(create, ['watch_Cold',True,True,'',False,True,True])
+        imported = next(row[2][0][0] for row in self.fixture.state['calls'] if row[1]=='importdescriptors')
+        self.assertEqual(imported, {'desc':f'addr({ADDRESS})#fixture','timestamp':1615766400,'active':False,'internal':False})
+        self.stop()
+        self.start()
+        self.assertEqual(self.body()['wallets'][0]['name'], 'Cold')
+        self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 200)
+        self.assertEqual(self.body()['wallets'], [])
+        self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 404)
+        self.assertIn(('', 'unloadwallet', ['watch_Cold',False]), [row[:3] for row in self.fixture.state['calls']])
+
+    def test_wallet_validation_and_csrf(self):
+        for data in [{}, {'name':'Cold','key':'bad'}, {'name':'Cold','key':ADDRESS,'birthday':'tomorrow'}]:
+            self.assertEqual(self.call('/api/watch', 'POST', data)[0], 400)
+        self.assertEqual(self.call('/api/watch', 'POST', {'name':'Cold','key':ADDRESS}, csrf=False)[0], 403)
+        self.assertEqual(self.call('/api/watch/Cold', 'DELETE', csrf=False)[0], 403)
+        self.add()
+        self.assertEqual(self.call('/api/watch', 'POST', {'name':'cold','key':ADDRESS})[0], 400)
+        self.assertEqual(len(self.body()['wallets']), 1)
+
+    def test_wallet_scanning_and_stale_history(self):
+        self.add()
+        self.fixture.state['wallets']['watch_Cold']['mode']='scanning'
+        self.assertEqual(self.body()['wallets'][0]['state'], 'scanning')
+        self.stop()
+        kid=hashlib.sha256(ADDRESS.encode()).hexdigest()[:16]
+        (self.state_dir/'balance_history.json').write_text(json.dumps({kid:[[100,0.5],[3700,0.75]]}))
+        self.fixture.state['wallets']['watch_Cold']['mode']='error'
+        self.start()
+        row=self.body()['wallets'][0]
+        self.assertEqual((row['state'],row['btc'],row['history']), ('stale','0.75',[0.5,0.75]))
+
+    def test_upgrade_marker_and_csrf(self):
+        self.assertEqual(self.body('/api/upgrade'), {'enabled':True,'update':'','pending':False})
+        self.assertEqual(self.call('/api/upgrade','POST',csrf=False)[0], 403)
+        self.assertEqual(self.call('/api/upgrade','POST')[0], 200)
+        self.assertEqual((self.state_dir/'upgrade.request').read_text(), 'requested\n')
+        self.assertTrue(self.body('/api/upgrade')['pending'])
+        self.stop()
+        self.start(control='0')
+        self.assertFalse(self.body('/api/upgrade')['enabled'])
+        self.assertEqual(self.call('/api/upgrade','POST')[0], 403)
+
+    def test_static_and_fee_contract(self):
+        status, body, headers=self.call('/static/dashboard.css')
+        self.assertEqual(status,200)
+        self.assertIn('text/css',headers['Content-Type'])
+        self.assertIn('max-age=0',headers.get('Cache-Control',''))
+        self.assertIn('--',body)
+        self.assertIsInstance(self.body('/api/fees')['fee'],list)
+        self.assertEqual(self.call('/metrics','POST')[0],405)
+
+    def test_partial_rpc_failure(self):
+        self.fixture.state['failed_methods']=['getnetworkinfo','uptime','getmempoolinfo','estimatesmartfee']
+        status, body, _=self.call('/')
+        self.assertEqual(status,200)
+        self.assertIn('Unknown',body)
+        self.assertIn('N/A',body)
+        self.assertNotIn('Mempool:',body)
+
+    def test_node_version_escaped(self):
+        self.fixture.state['version']='<script>alert(1)</script>'
+        body=self.call('/')[1]
+        self.assertNotIn('<script>alert(1)</script>',body)
+        self.assertIn('&lt;script&gt;',body)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,29 +1,18 @@
-# Use an official lightweight Python image
-FROM python:3.14-slim@sha256:82abc9f53600280b0757126f83c5a7d47088592d2acb6b4c0b9e97f76865508c
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
+WORKDIR /src
+COPY build/dashboard/go.mod build/dashboard/*.go ./
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /dashboard .
 
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 WORKDIR /app
-
-# Build context is the repo root (see docker-compose.yml) so the top-level
-# VERSION file can be baked in — the dashboard reads it, so the shown version
-# always matches the running code regardless of how it was deployed.
-
-# Copy only the requirements first to leverage Docker cache
-COPY build/dashboard/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# All dashboard modules (tests/ is a subdir, not matched by the flat glob), so a
-# new module is picked up automatically — no need to list each one.
-COPY build/dashboard/*.py ./
+COPY --from=build /dashboard ./dashboard
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY build/dashboard/index.html ./index.html
 COPY build/dashboard/static ./static
 COPY VERSION ./VERSION
-
-EXPOSE 8000
-
-# Run non-root (uid 1000, matching the bitcoin service). Pre-create the state
-# mountpoint owned by 1000 so a fresh `dashboard_state` named volume inherits
-# that ownership on first mount and the non-root process can write it.
 RUN mkdir -p /state && chown 1000:1000 /state
 USER 1000:1000
-
-STOPSIGNAL SIGINT
-CMD ["python", "node_status.py"]
+EXPOSE 8000
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/app/dashboard"]
