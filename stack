@@ -258,13 +258,13 @@ do_restore() {
     fi
   fi
   if [ -d "$tmp/dashboard_state" ]; then
-    # Restore state into the volume; chown to the dashboard's uid (1000) in
-    # case the backup came from an older root-owned /state
-    if docker compose cp "$tmp/dashboard_state/." dashboard:/state >/dev/null 2>&1; then
-      docker compose exec -u root dashboard chown -R 1000:1000 /state >/dev/null 2>&1 || true
+    # Extract as the dashboard user so private files keep the correct owner.
+    if tar -cf - -C "$tmp/dashboard_state" . |
+      docker compose exec -T -u 1000 dashboard tar -xof - -C /state; then
       echo "Restored dashboard state"
     else
-      echo "WARN: could not restore dashboard state (is the dashboard container up?)"
+      echo "ERROR: could not restore dashboard state (is the dashboard container up and writable by uid 1000?)"
+      exit 1
     fi
   fi
   echo "Done. Apply with: ./stack apply"

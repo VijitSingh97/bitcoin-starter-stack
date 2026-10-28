@@ -118,6 +118,8 @@ docker exec dashboard grep -q '"alert_new_block":true' /state/notification_setti
 docker exec -u 1000 dashboard sed -i 's/"alert_new_block":true/"alert_new_block":false/' /state/notification_settings.json ||
   fail "could not alter notification settings before restore"
 ./stack restore -y "$archive" >/dev/null || fail "could not restore pre-upgrade backup"
+docker exec dashboard sh -c 'test "$(stat -c %u:%a /state/notification_settings.json)" = 1000:600' ||
+  fail "restore did not preserve private settings ownership and permissions"
 docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
   fail "restore did not recover notification settings"
 ./stack apply >/dev/null || fail "could not apply configuration after restore"
