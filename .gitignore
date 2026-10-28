@@ -9,3 +9,5 @@ backups/
 # coverage data
 .coverage
 graphify-out/
+dist/
+public/

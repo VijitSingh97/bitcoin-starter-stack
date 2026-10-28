@@ -64,6 +64,10 @@ wallet addresses stay on your node.
 
 ## 🚀 Quick Start
 
+An Ubuntu 24.04 APT package is prepared for the next release. The public feed
+will not be enabled until that release publishes matching Go dashboard images.
+Until then, use the source or release-tarball installation below.
+
 **Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
 `jq` and `curl`, an SSD with ~1 TB free (the chain is ~800 GB and grows — or ~30 GB
 [pruned](docs/configuration.md#pruned-node)), and 8 GB+ RAM.

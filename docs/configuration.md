@@ -7,6 +7,12 @@ only to override something. `configure.sh` renders it into a gitignored `.env`,
 which docker compose reads. Tracked files are never modified, so your settings
 can't end up in a commit.
 
+APT installations use `bitcoin-stack` in place of `./stack`. Their config is
+`~/.config/bitcoin-starter-stack/config.json`; generated credentials live under
+`~/.local/state/bitcoin-starter-stack`. `dashboard.control` is unavailable for
+APT installations because package upgrades require an explicit administrator
+command.
+
 ## config.json reference
 
 Every key is optional. The template ([config.example.json](../config.example.json))

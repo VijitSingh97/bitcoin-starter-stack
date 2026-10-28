@@ -68,3 +68,34 @@ jobs:
       # provisions watch-only wallets, and runs the egress audit).
       - name: Stack tests
         run: tests/run.sh
+
+  package:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install package test tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends apt-utils ca-certificates git gnupg jq openssl shellcheck
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the container checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build and test the package
+        run: |
+          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh tests/test_package.sh tests/test_apt.sh
+          tests/test_package.sh
+          tests/test_apt.sh
+      - name: Verify inert install, upgrade, and removal
+        run: |
+          printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
+          chmod 755 /usr/sbin/policy-rc.d
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          test ! -e /root/.config/bitcoin-starter-stack
+          test ! -e /root/.local/state/bitcoin-starter-stack
+          state=$(mktemp -d)
+          mkdir -p "$state/bitcoin-starter-stack"
+          touch "$state/bitcoin-starter-stack/keep"
+          XDG_STATE_HOME="$state" apt-get install -y --reinstall ./dist/*.deb
+          XDG_STATE_HOME="$state" apt-get purge -y bitcoin-starter-stack
+          test -f "$state/bitcoin-starter-stack/keep"

@@ -26,6 +26,9 @@ All notable changes to this project are documented here. Format follows
 
 - A password-protected notification settings menu with persistent JSON overrides,
   live updates, masked secrets, and an encrypted onion/localhost management path.
+- Prepared an Ubuntu 24.04 APT package with a global `bitcoin-stack` command,
+  per-user XDG configuration and state, and signed-feed release automation for
+  the next release.
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.

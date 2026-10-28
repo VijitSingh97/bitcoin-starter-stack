@@ -33,6 +33,29 @@ shows recent probe output when diagnosing.
 
 ## Upgrading
 
+APT installations are upgraded explicitly so package installation never
+restarts containers or changes node data. Configure the host APT proxy as
+described in [Bootstrap and APT](privacy.md#bootstrap-and-apt), then run:
+
+```bash
+bitcoin-stack backup
+sudo apt update
+sudo apt install --only-upgrade bitcoin-starter-stack
+bitcoin-stack apply
+```
+
+The dashboard upgrade button is unavailable for APT installations. Source and
+release-tarball installations continue to use the flows below.
+
+The first package release is for fresh installations. Do not run
+`bitcoin-stack up` beside an existing source checkout: the package refuses to
+replace containers whose Compose labels point at another installation. Keep an
+existing production node source-managed until a manual migration is planned.
+That transition must stop and back up the old deployment, set
+`bitcoin.data_dir` to the existing absolute chain path, and preserve the Compose
+project's dashboard and Tor volumes. Package installation, upgrade, removal,
+and purge never perform that migration or change those data paths.
+
 - **One command: `./stack upgrade`.** Fetches the latest release tag through Tor, **backs up
   first**, checks it out, and re-applies — pulling the new prebuilt images and
   recreating the changed containers. Downloads fail closed without the

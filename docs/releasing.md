@@ -77,6 +77,25 @@ Nothing is published until the gate is green. A red gate leaves the tag
 without a release — fix on `main`, bump the patch version, tag again
 (release tags are protected from deletion and rewrite by a repo ruleset).
 
+## APT feed
+
+The first APT feed must wait for a new release containing the Go dashboard so
+the package version and published amd64/arm64 images match. Before that release:
+
+1. Create a dedicated signing key for this project. Do not reuse another
+   project's private key.
+2. Commit its full primary fingerprint in the user onboarding command in
+   `docs/privacy.md`, replacing `UNPUBLISHED`, and review that change before
+   enabling the feed.
+3. Store the armored private key as the `APT_SIGNING_KEY` repository secret and
+   its full fingerprint as the `APT_SIGNING_FINGERPRINT` repository variable.
+4. Configure GitHub Pages to deploy through GitHub Actions.
+
+After the normal source release and multi-architecture images succeed, the
+release workflow builds the architecture-independent package, verifies its
+signed feed locally with APT, uploads the package and checksum to the GitHub
+Release, and deploys the feed to Pages.
+
 ## How users get a release
 
 - **Tarball:** obtain `bitcoin-starter-stack.tar.gz` through Tor, unpack,
