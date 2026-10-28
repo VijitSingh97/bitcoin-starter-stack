@@ -36,19 +36,19 @@ cannot be written or the roster cannot be read, the manager reports an error and
 preserves the existing file. A damaged roster is never reset to an empty list.
 Restart the dashboard after correcting the file or state-volume problem.
 
-Set `dashboard.password` in `config.json` to view personal wallets and add or remove
-entries. Without a password, only the public Genesis example is visible and the
-wallet controls are disabled. See [Configuration](configuration.md).
+Set `dashboard.password` in `config.json` to view saved wallets and add or remove
+entries. Fresh installs start with an empty wallet list. See [Configuration](configuration.md).
 
-## Genesis example
+## The Genesis address is a special case
 
-Fresh full-node installs watch `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` as **Genesis**
-from the beginning of the chain. The original 50 BTC genesis coinbase is unspendable
-and is excluded from Bitcoin Core's wallet balance; explorers may include it in
-their address total. The dashboard displays the balance reported by your node.
+The Genesis address `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` is not added automatically.
+It can be watched manually, but it is a poor reference for comparing balances:
+the original 50 BTC genesis coinbase is unspendable and is excluded from Bitcoin
+Core's wallet balance. Explorers may attribute it to this address. That explains
+a 50 BTC difference, but does not establish that every other difference is correct.
 
-Set `"wallets": []` before first start to skip this example, or remove it from the
-dashboard afterward. A saved wallet list is never overwritten by the default.
+The dashboard displays the balance reported by your node without adding 50 BTC.
+Existing saved entries are preserved.
 Existing entries named Satoshi for this exact address display as Genesis without
 renaming their Core wallet or losing their balance history.
 

@@ -92,12 +92,14 @@ def wait_for_wallet(key):
 
 
 failures = []
+status, body = dashboard("GET", "/api/watch")
+if status != 200 or json.loads(body)["wallets"] != []:
+    failures.append("fresh install must start without watch-only wallets")
 for label, key in CASES:
-    if label != "Genesis":
-        status, body = dashboard("POST", "/api/watch", {"name": label, "key": key, "birthday": ""})
-        if status != 200:
-            failures.append(f"{label}: dashboard returned HTTP {status}: {body}")
-            continue
+    status, body = dashboard("POST", "/api/watch", {"name": label, "key": key, "birthday": ""})
+    if status != 200:
+        failures.append(f"{label}: dashboard returned HTTP {status}: {body}")
+        continue
     try:
         wallet, info = wait_for_wallet(key)
     except RuntimeError as error:

@@ -66,8 +66,8 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 - The dashboard has **no authentication by default** (`dashboard.password`
   adds basic auth). LAN exposure is the feature; internet exposure is on you
   not to configure. See [SECURITY.md](../SECURITY.md).
-  Personal wallet views and all wallet/upgrade mutations require a configured
-  password. The known public Genesis example can be viewed without one.
+  Saved wallet views and all wallet/upgrade mutations require a configured
+  password.
 - The opt-in Upgrade button keeps the container↔host boundary intact: the
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls

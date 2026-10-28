@@ -13,7 +13,7 @@ Docker Compose stack for a [Bitcoin Core](https://bitcoincore.org/) full node wi
 traffic routed through a built-in Tor daemon, plus a lightweight web dashboard for
 sync progress, peers, mempool fees, and watch-only wallet balances.
 
-<img src="./images/dashboard.png" width="80%" alt="Bitcoin node dashboard: live node status card, watch-only wallet balances in gold with sparklines above a 3D block tower" />
+<img src="https://raw.githubusercontent.com/VijitSingh97/bitcoin-starter-stack/main/images/dashboard.png" width="80%" alt="Bitcoin node dashboard: live node status card, watch-only wallet balances in gold with sparklines above a 3D block tower" />
 
 </div>
 
@@ -106,8 +106,8 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
   blocks (once synced), with a 24-hour fee sparkline.
 - **Watch-only balances** — add `xpub`s/descriptors from the UI; per-key balances and a total
-  (shown once you have more than one), read off your own node. Fresh full-node installs
-  include the public **Genesis** address; imports show pending history until ready
+  (shown once you have more than one), read off your own node. Fresh installs start
+  with an empty wallet list; imports show pending history until ready
   ([Watch-only](docs/watch-only.md)).
 - **BTC price** — CoinGecko quotes in USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, or CNY, fetched through
   Tor every five minutes. The selector remembers your currency; stale quotes are labeled.
@@ -158,9 +158,13 @@ polling the node over RPC). Full breakdown in [Architecture](docs/architecture.m
 | [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 | [Notifications & Remote Access](docs/notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |
-| [Releasing](docs/releasing.md) | How versions are cut: VERSION file, changelog discipline, the tag-triggered gate, and tarballs. |
+| [Releasing](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/main/docs/releasing.md) | Maintainer guide to versions, release gates, and tarballs. |
 
 ## 🧪 Testing
+
+Tests and development tools are kept in the Git checkout. Release downloads contain
+the runtime source, configuration, license, security policy, changelog, and user guides;
+they omit tests, parity fixtures, benchmarks, screenshots, and maintainer tools.
 
 ```bash
 tests/run.sh
@@ -172,7 +176,7 @@ reference suite, cross-runtime HTTP parity tests, frontend tests, and a real end
 whose **egress audit asserts every established connection from the containers is Tor-only** —
 the same suite [CI](.github/workflows/ci.yml) runs on every push, plus a full image build,
 secret scanning (gitleaks), and Dockerfile lint (hadolint). See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/main/CONTRIBUTING.md).
 
 ## ⚠️ Disclaimer
 

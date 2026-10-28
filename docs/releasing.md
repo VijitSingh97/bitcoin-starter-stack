@@ -10,7 +10,7 @@ with `scripts/release.sh --dry-run`.
 The stack is released as a single product. The components are upstream
 projects pinned by digest — Bitcoin Core (`bitcoin/bitcoin` in
 `docker-compose.yml`), the tor and dashboard base images (Dockerfiles),
-and the pinned pip packages. The first-party code is the dashboard, the
+  and the Go build toolchain. The first-party code is the dashboard, the
 orchestration (`docker-compose.yml`, `configure.sh`, `./stack`), and the
 configs. A release is one tag with one changelog and one upgrade path.
 
@@ -65,7 +65,13 @@ Versioning rules:
    boot with the egress audit) runs against the tagged commit, and only
    then is the GitHub Release published — title, notes extracted from the
    changelog section, and a `bitcoin-starter-stack.tar.gz` source tarball
-   (`git archive`, so `.github` is excluded per `.gitattributes`).
+   (`git archive`, filtered by `.gitattributes`).
+
+The tarball contains runtime source and Docker inputs, configuration, the license,
+security policy, changelog, and user guides. Tests, Python parity references,
+benchmark experiments, screenshots, maintainer scripts, and development metadata
+stay in Git. The production dashboard image contains the compiled Go binary and
+runtime web assets; test modules are excluded from the Docker build context.
 
 Nothing is published until the gate is green. A red gate leaves the tag
 without a release — fix on `main`, bump the patch version, tag again

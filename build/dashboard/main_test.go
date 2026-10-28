@@ -387,48 +387,27 @@ func TestSensitiveRoutesRequirePassword(t *testing.T) {
 	if response := request(t, handler, "GET", "/api/watch", ""); response.Code != 200 {
 		t.Fatal("empty view compatibility lost")
 	}
-	if _, err := a.watch.Add("Satoshi", genesisAddress, ""); err != nil {
-		t.Fatal(err)
-	}
-	response := request(t, handler, "GET", "/api/watch", "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), `"display_name":"Genesis"`) || !strings.Contains(response.Body.String(), genesisAddress) {
-		t.Fatalf("public Genesis response = %d %q", response.Code, response.Body.String())
-	}
-	if removed, err := a.watch.Remove("Satoshi"); !removed || err != nil {
-		t.Fatal("could not replace public Genesis entry")
-	}
-	if _, err := a.watch.Add("Cold", genesisAddress, ""); err != nil {
-		t.Fatal(err)
-	}
-	response = request(t, handler, "GET", "/api/watch", "")
-	if response.Code != 403 || strings.Contains(response.Body.String(), genesisAddress) {
-		t.Fatal("unauthenticated roster exposed")
-	}
-}
-
-func TestPublicGenesisRosterRequiresExactIdentity(t *testing.T) {
-	valid := []WatchEntry{{Name: "Satoshi", Key: genesisAddress}}
-	if !publicGenesisRoster(valid) || !publicGenesisRoster([]WatchEntry{{Name: "Genesis", Key: genesisAddress}}) {
-		t.Fatal("approved Genesis identities were not public")
-	}
-	for _, entries := range [][]WatchEntry{
-		{{Name: "satoshi", Key: genesisAddress}},
-		{{Name: "Satoshi", Key: genesisAddress + "x"}},
-		{{Name: "Satoshi", Key: genesisAddress}, {Name: "Genesis", Key: genesisAddress}},
-	} {
-		if publicGenesisRoster(entries) {
-			t.Fatalf("non-exact roster was public: %#v", entries)
+	for _, name := range []string{"Satoshi", "Genesis", "Cold"} {
+		if _, err := a.watch.Add(name, genesisAddress, ""); err != nil {
+			t.Fatal(err)
+		}
+		response := request(t, handler, "GET", "/api/watch", "")
+		if response.Code != 403 || strings.Contains(response.Body.String(), genesisAddress) {
+			t.Fatalf("unauthenticated %s roster exposed", name)
+		}
+		if removed, err := a.watch.Remove(name); !removed || err != nil {
+			t.Fatal("could not remove test entry")
 		}
 	}
 }
 
 func TestGenesisWatchUsesActualIBDState(t *testing.T) {
 	fixture := &rpcFixture{initialBlockDownload: true}
-	a, handler := testApp(t, fixture, "")
+	a, handler := testApp(t, fixture, "dashboard-secret")
 	if _, err := a.watch.Add("Satoshi", genesisAddress, ""); err != nil {
 		t.Fatal(err)
 	}
-	response := request(t, handler, http.MethodGet, "/api/watch", "")
+	response := request(t, handler, http.MethodGet, "/api/watch", "dashboard-secret")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"pending"`) || strings.Contains(response.Body.String(), `"btc":"0"`) {
 		t.Fatalf("IBD watch response = %d %q", response.Code, response.Body.String())
 	}

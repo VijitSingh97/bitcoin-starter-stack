@@ -76,6 +76,8 @@ fi
 docker compose up -d --build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"
 # --wait passing also proves the cookie-based bitcoin healthcheck works
+docker exec dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*_test.go" -o -name tests -o -name parity)"' ||
+  fail "dashboard image includes development-only files"
 
 # rpcauth accepts the generated plaintext password end to end
 docker exec bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" getblockchaininfo |

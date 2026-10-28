@@ -1,3 +1,15 @@
 # Kept out of release tarballs (git archive)
 .github export-ignore
 .gitattributes export-ignore
+.gitleaks.toml export-ignore
+CONTRIBUTING.md export-ignore
+scripts export-ignore
+tests export-ignore
+experiments export-ignore
+images export-ignore
+docs/releasing.md export-ignore
+build/dashboard/tests export-ignore
+build/dashboard/parity export-ignore
+build/dashboard/*_test.go export-ignore
+build/dashboard/static/*.test.mjs export-ignore
+build/dashboard/package.json export-ignore

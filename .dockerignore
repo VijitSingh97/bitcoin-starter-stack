@@ -8,3 +8,10 @@ backups/
 .pytest_cache/
 .venv/
 node_modules/
+tests/
+experiments/
+build/dashboard/tests/
+build/dashboard/parity/
+build/dashboard/*_test.go
+build/dashboard/static/*.test.mjs
+build/dashboard/package.json

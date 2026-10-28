@@ -10,10 +10,12 @@ All notable changes to this project are documented here. Format follows
 
 - Replaced the Python dashboard runtime with a standard-library Go server while
   retaining the Python reference tests and shared HTTP parity checks.
-- Fresh full-node installs include the public Genesis watch-only address, and
-  incomplete imports display pending history above the block tower.
-- Personal wallet views and wallet/upgrade changes require a dashboard password;
-  public status and the Genesis example remain available on the trusted LAN.
+- Incomplete wallet imports display pending history above the block tower.
+- Saved wallet views and wallet/upgrade changes require a dashboard password;
+  public node status remains available on the trusted LAN.
+- Release downloads contain runtime source and user documentation only. Tests,
+  parity references, benchmark experiments, screenshots, and maintainer tools
+  remain in Git and are excluded from release archives and image build inputs.
 
 ### Added
 
