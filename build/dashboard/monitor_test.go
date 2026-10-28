@@ -249,6 +249,40 @@ func TestTorTransportNeverFallsBackToDirect(t *testing.T) {
 	}
 }
 
+func TestHealthchecksRejectsUnencryptedOrCredentialedURLs(t *testing.T) {
+	for _, endpoint := range []string{"http://hc-ping.com/secret", "https://user:secret@hc-ping.com/id", "https:///id"} {
+		t.Run(endpoint, func(t *testing.T) {
+			m := configuredMonitor(t, func(*http.Request) (*http.Response, error) {
+				t.Fatal("invalid URL reached the network")
+				return nil, nil
+			})
+			m.healthchecks = endpoint
+			if m.pingHealthchecks(true) {
+				t.Fatal("invalid Healthchecks URL was accepted")
+			}
+		})
+	}
+}
+
+func TestTorClientDoesNotFollowRedirects(t *testing.T) {
+	client := newTorHTTPClient("127.0.0.1:1")
+	var requests int
+	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		resp := response(http.StatusFound, "")
+		resp.Header.Set("Location", "http://other.example/leaked-secret")
+		return resp, nil
+	})
+	resp, err := client.Get("https://original.example/secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if requests != 1 || resp.StatusCode != http.StatusFound {
+		t.Fatalf("redirect followed: requests=%d status=%d", requests, resp.StatusCode)
+	}
+}
+
 func TestSOCKSHandshakeCancellationClosesStalledConnection(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

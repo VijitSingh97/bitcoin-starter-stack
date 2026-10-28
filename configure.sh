@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 
 for tool in jq openssl; do
   command -v "$tool" >/dev/null || {
-    echo "$tool is required: sudo apt install $tool"
+    echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
     exit 1
   }
 done
@@ -38,17 +38,17 @@ mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
 # default ON (encouraged): accept inbound over Tor unless explicitly disabled
 inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == false then 0 else 1 end' <<<"$config")
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
-sync_over_clearnet=$(flag '.bitcoin.sync_over_clearnet')
 dashboard_password=$(get '.dashboard.password')
 dashboard_onion=$(flag '.dashboard.onion')
 dashboard_control=$(flag '.dashboard.control')
+dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
 alert_new_block=$(flag '.notifications.alert_new_block')
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
-watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
+watch_wallets_b64=$(jq -cej 'if has("wallets") then if (.wallets | type) == "array" then .wallets else error("wallets must be an array") end else [{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}] end' <<<"$config" | base64 | tr -d '\n')
 
 check_alnum() {
   case "$2" in
@@ -61,6 +61,31 @@ check_alnum() {
 check_alnum "node_username" "$rpc_user"
 check_alnum "node_password" "$rpc_password"
 check_alnum "dashboard password" "$dashboard_password"
+
+check_bind_ip() {
+  local ip=$1 a b c d octet
+  if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+    exit 1
+  fi
+  IFS=. read -r a b c d <<<"$ip"
+  for octet in "$a" "$b" "$c" "$d"; do
+    if { ((${#octet} > 1)) && [[ "$octet" == 0* ]]; } || ((10#$octet > 255)); then
+      echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+      exit 1
+    fi
+  done
+  if ! ((10#$a == 127 || 10#$a == 10 || (10#$a == 172 && 10#$b >= 16 && 10#$b <= 31) || (10#$a == 192 && 10#$b == 168))); then
+    echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+    exit 1
+  fi
+}
+check_bind_ip "$dashboard_bind_ip"
+
+if jq -e '.bitcoin.sync_over_clearnet == true' >/dev/null <<<"$config"; then
+  echo "bitcoin.sync_over_clearnet is no longer supported; all public internet traffic must use Tor."
+  exit 1
+fi
 
 # Notification values pass through .env — reject anything env-file-unsafe
 check_envsafe() {
@@ -77,9 +102,9 @@ check_envsafe "healthchecks_url" "$healthchecks_url"
 
 if [ -n "$healthchecks_url" ]; then
   case "$healthchecks_url" in
-  http://* | https://*) ;;
+  https://*) ;;
   *)
-    echo "healthchecks_url must be a full URL (paste it from healthchecks.io)."
+    echo "healthchecks_url must be a full HTTPS URL (paste it from healthchecks.io)."
     exit 1
     ;;
   esac
@@ -93,13 +118,6 @@ fi
 if [ "$dashboard_control" = "1" ] && [ -z "$dashboard_password" ]; then
   echo "WARNING: dashboard.control is enabled without dashboard.password —"
   echo "         set a password so only you can trigger upgrades from the dashboard."
-fi
-
-if [ "$sync_over_clearnet" = "1" ]; then
-  echo "WARNING: sync_over_clearnet is ON — the initial sync connects to clearnet"
-  echo "         peers directly, which EXPOSES YOUR HOME IP (the opposite of the"
-  echo "         Tor-only default). Set it back to false and run ./stack apply once"
-  echo "         synced to return to Tor-only."
 fi
 
 # bitcoind rejects prune targets between 1 and 549 MB
@@ -182,11 +200,11 @@ BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
 BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
-BITCOIN_SYNC_OVER_CLEARNET=$sync_over_clearnet
 BITCOIN_MEM_LIMIT=$bitcoin_mem_limit
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 DASHBOARD_CONTROL=$dashboard_control
+DASHBOARD_BIND_IP=$dashboard_bind_ip
 TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
@@ -201,4 +219,4 @@ chmod 600 .env
 # and bitcoind (uid 1000) can't write to it
 mkdir -p "$data_dir"
 
-echo "Done. Start the stack with: ./stack up   (or: docker compose up -d)"
+echo "Done. Start preloaded images with: ./stack up (downloads: ./stack pull; see docs/privacy.md)."

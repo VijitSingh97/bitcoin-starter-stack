@@ -46,5 +46,6 @@ idles.
 ## Network
 
 Initial sync pulls ~800 GB through Tor. Steady state is a few GB per day.
-No inbound host ports are needed — inbound arrives over the Tor onion service
-(`inbound_onion`, on by default), never a forwarded port.
+Bitcoin P2P needs no inbound host port — inbound arrives over the Tor onion
+service (`inbound_onion`, on by default). The dashboard binds port 80 to
+loopback by default, or to an explicit private address for LAN access.

@@ -57,14 +57,25 @@ trap cleanup EXIT
 
 # Setup exactly as a user does it. Wizard answers: RPC user/pass Enter
 # (auto-generate), dashboard password e2edash, dashboard onion y, upgrade
-# button n (agent covered by test_upgrade.sh), inbound onion y, clearnet n,
-# prune 1 GB, don't start yet.
-printf '\n\ne2edash\ny\nn\ny\nn\n1\nn\n' | ./stack init >/dev/null
+# button n (agent covered by test_upgrade.sh), inbound onion y, prune 1 GB,
+# don't start yet.
+printf '\n\ne2edash\ny\nn\ny\n1\nn\n' | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
-# datadir at the temp dir and shrink dbcache for CI-sized runners.
-jq --arg d "$BITCOIN_DATA_DIR" '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300' \
+# datadir at the temp dir, bind the dashboard to this host's LAN address, and
+# shrink dbcache for CI-sized runners.
+lan_ip=$(python3 - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.connect(("192.0.2.1", 9))
+print(s.getsockname()[0])
+s.close()
+PY
+)
+jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$lan_ip" \
+  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .dashboard.bind_ip = $ip' \
   config.json >config.json.tmp && mv config.json.tmp config.json
 ./configure.sh >/dev/null
+dashboard_url="http://$lan_ip:80"
 
 # The credentials the setup generated — every later assertion uses these.
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
@@ -87,13 +98,13 @@ docker exec bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" ge
 docker inspect bitcoin | grep -q "$rpc_pass" && fail "plaintext RPC password leaked into the bitcoin container"
 
 # Dashboard enforces basic auth when a password is set
-code=$(curl -s -o /dev/null -w '%{http_code}' localhost:80)
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
 [ "$code" = "401" ] || fail "dashboard served without auth (HTTP $code, expected 401)"
 
 # With the password, it authenticates to the node and renders live stats
 body=""
 for _ in 1 2 3 4 5 6; do
-  body=$(curl -sf -u x:e2edash localhost:80 || true)
+  body=$(curl --noproxy '*' -sf -u x:e2edash "$dashboard_url" || true)
   echo "$body" | grep -q "Sync Progress" && break
   sleep 5
 done
@@ -118,8 +129,89 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' |
   fail "dashboard onion hostname was not provisioned"
 
 # Prometheus metrics behind the same auth
-curl -sf -u x:e2edash localhost:80/metrics | grep -q "bitcoin_node_up 1" ||
+curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1" ||
   fail "metrics endpoint missing bitcoin_node_up"
+
+restarts=$(docker inspect tor --format '{{.RestartCount}}')
+docker exec tor sh -c 'kill "$(pidof socat)"'
+forwarder_recovered=""
+for _ in $(seq 1 30); do
+  current=$(docker inspect tor --format '{{.RestartCount}}')
+  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
+    forwarder_recovered=1
+    break
+  fi
+  sleep 2
+done
+[ -n "$forwarder_recovered" ] || fail "Tor/dashboard forwarder did not restart cleanly"
+
+restarts=$(docker inspect tor --format '{{.RestartCount}}')
+docker exec tor sh -c 'kill "$(pidof tor)"'
+tor_recovered=""
+for _ in $(seq 1 30); do
+  current=$(docker inspect tor --format '{{.RestartCount}}')
+  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
+    tor_recovered=1
+    break
+  fi
+  sleep 2
+done
+[ -n "$tor_recovered" ] || fail "Tor child failure did not restart the supervised container"
+
+# Tor must be the only service with an external route. Prove Tor reaches the
+# network, then stop it and make real direct TCP and DNS attempts from both
+# application network namespaces; every attempt must fail closed.
+tor_bootstrapped=""
+for _ in $(seq 1 30); do
+  if docker logs tor 2>&1 | grep -q "Bootstrapped 100"; then
+    tor_bootstrapped=1
+    break
+  fi
+  sleep 10
+done
+[ -n "$tor_bootstrapped" ] || fail "Tor never reached the public network"
+helper_image=$(docker inspect dashboard --format '{{.Config.Image}}')
+docker exec dashboard sh -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.26 8332' ||
+  fail "dashboard network probes are unavailable or cannot reach local RPC"
+docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" \
+  -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.25 9050' ||
+  fail "bitcoin network probes are unavailable or cannot reach local Tor"
+docker compose stop tor >/dev/null
+[ "$(docker inspect bitcoin --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+  fail "bitcoin does not have loopback-only DNS configured"
+[ "$(docker inspect dashboard --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+  fail "dashboard does not have loopback-only DNS configured"
+if docker exec dashboard nc -z -w 3 1.1.1.1 443; then
+  fail "dashboard reached a public IP directly with Tor offline"
+fi
+if docker exec dashboard nc -z -w 3 2606:4700:4700::1111 443; then
+  fail "dashboard reached a public IPv6 address directly with Tor offline"
+fi
+if docker exec dashboard nslookup example.com >/dev/null 2>&1; then
+  fail "dashboard resolved public DNS with Tor offline"
+fi
+if docker exec dashboard nslookup example.com 8.8.8.8 >/dev/null 2>&1; then
+  fail "dashboard reached a public DNS server directly with Tor offline"
+fi
+if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
+  fail "bitcoin reached a public IP directly with Tor offline"
+fi
+if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
+  fail "bitcoin reached a public IPv6 address directly with Tor offline"
+fi
+if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
+  fail "bitcoin resolved public DNS with Tor offline"
+fi
+if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
+  fail "bitcoin reached a public DNS server directly with Tor offline"
+fi
+docker compose start tor >/dev/null
+for _ in $(seq 1 30); do
+  [ "$(docker inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] && break
+  sleep 2
+done
+[ "$(docker inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] ||
+  fail "Tor did not recover after fail-closed egress test"
 
 # Egress audit: every ESTABLISHED connection from the bitcoin and dashboard
 # containers must terminate inside the stack subnet (172.29.0.x renders as
@@ -202,7 +294,8 @@ if [ -n "${E2E_SYNC:-}" ]; then
   sed -i.bak "s|^BITCOIN_DATA_DIR=.*|BITCOIN_DATA_DIR=$BITCOIN_DATA_DIR|" .env && rm -f .env.bak
   docker compose up -d --wait --wait-timeout 300 ||
     fail "zero-config: stack did not reach healthy"
-  code=$(curl -s -o /dev/null -w '%{http_code}' localhost:80)
+  dashboard_url=http://127.0.0.1:80
+  code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
   [ "$code" = "200" ] || fail "zero-config: dashboard not open without a password (HTTP $code)"
   sync_starts "zero-config setup"
 else
@@ -221,12 +314,13 @@ sed -i.bak \
 docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 bitcoin dashboard ||
   fail "full-node wallet stage did not reach healthy"
 
-body=$(curl -sf -u x:e2edash localhost:80 || true)
+dashboard_url="http://$(sed -n 's/^DASHBOARD_BIND_IP=//p' .env):80"
+body=$(curl --noproxy '*' -sf -u x:e2edash "$dashboard_url" || true)
 echo "$body" | grep -q "Full" || fail "dashboard missing full-node badge in wallet stage"
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
 BITCOIN_RPC_USER="$rpc_user" BITCOIN_RPC_PASSWORD="$rpc_pass" \
-  E2E_DASHBOARD_PASSWORD=e2edash python3 build/dashboard/tests/e2e_watch.py ||
+  E2E_DASHBOARD_URL="$dashboard_url" E2E_DASHBOARD_PASSWORD=e2edash python3 build/dashboard/tests/e2e_watch.py ||
   fail "Go watch-only provisioning failed"
 
 echo "PASS: test_e2e.sh"

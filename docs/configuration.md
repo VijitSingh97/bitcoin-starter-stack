@@ -20,13 +20,13 @@ shows the overridable settings with their defaults:
         "prune_mb": 0,
         "inbound_onion": true,
         "blockfilterindex": false,
-        "sync_over_clearnet": false,
         "mem_limit_mb": 0
     },
     "dashboard": {
         "password": "",
         "onion": false,
-        "control": false
+        "control": false,
+        "bind_ip": "127.0.0.1"
     },
     "notifications": {
         "telegram_bot_token": "",
@@ -34,7 +34,13 @@ shows the overridable settings with their defaults:
         "healthchecks_url": "",
         "alert_new_block": false
     },
-    "wallets": []
+    "wallets": [
+        {
+            "name": "Binance (public)",
+            "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo",
+            "birthday": ""
+        }
+    ]
 }
 ```
 
@@ -47,19 +53,21 @@ shows the overridable settings with their defaults:
 | `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `true` | Publishes a Tor onion service so your node accepts inbound connections and serves blocks to the network — **on by default**: it strengthens the network with **no IP exposure** (it's over Tor), the only cost being some extra upload bandwidth. Set `false` to run outbound-only. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
-| `bitcoin.sync_over_clearnet` | `false` | `true` runs the initial block download over **clearnet** (hours, vs. days over Tor) — but this **exposes your home IP** to peers during the sync. Onion peers still go through Tor. Set it back to `false` and `./stack apply` once synced to return to Tor-only. Opt-in; leave `false` for a fully private node. |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |
-| `dashboard.password` | `""` (no auth) | Non-empty enables basic auth on the dashboard (any username, this password). Letters and numbers only. `./stack init` generates one by default (Enter at its prompt); a bare `./stack up` stays open on the LAN. |
+| `dashboard.password` | `""` (no auth) | Non-empty enables basic auth on the dashboard (any username, this password). Letters and numbers only. `./stack init` generates one by default (Enter at its prompt); a bare `./stack up` is open only on loopback. |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
 | `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. `./stack up`/`apply` start and manage the host-side agent for you; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
+| `dashboard.bind_ip` | `127.0.0.1` | Host address for dashboard port 80. Use loopback for access from this machine only, or an RFC1918 address (`10/8`, `172.16/12`, or `192.168/16`) assigned to this host for LAN access. Public, wildcard, and IPv6 binds are rejected. |
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
-| `wallets` | `[]` | Optional first-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. Fresh installs start empty. After first start the saved dashboard list is authoritative. Full node only. Saved wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
+| `wallets` | Binance public example | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. The example is clearly marked and excluded from personal totals. Set `[]` to opt out. After first start the saved dashboard list is authoritative. Full node only. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
 
 `configure.sh` applies the defaults above for any omitted key, and generates
 strong random RPC credentials on first run (reused on later runs).
+Starting and applying use local images only. See [Tor-only networking](privacy.md)
+for the Tor-verified image download and first-install bootstrap process.
 
 ## Applying changes
 
@@ -92,7 +100,7 @@ Know the trade-offs before enabling:
 - The dashboard's "Node Data Size" will show the pruned footprint.
 
 Apply like any other change: edit `config.json`, `./configure.sh`,
-`docker compose up -d`.
+`./stack apply`.
 
 ## Inbound onion service
 
@@ -142,8 +150,5 @@ stats.
 
 Static node settings apply to every deployment. RPC bind/allow ranges live in
 [build/bitcoin/bitcoin.conf](../build/bitcoin/bitcoin.conf). Tor-only
-networking is set in the `docker-compose.yml` bitcoin entrypoint (and
-toggled by `bitcoin.sync_over_clearnet` — see the config table above). If you
-need to diverge from the routing defaults, edit the entrypoint — but you're
-forking the privacy model at that point; read
-[Architecture](architecture.md) first.
+networking is enforced by an internal application network with only the Tor
+container attached to an external bridge. There is no clearnet bypass.

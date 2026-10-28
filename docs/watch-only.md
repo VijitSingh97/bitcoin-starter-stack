@@ -36,8 +36,9 @@ cannot be written or the roster cannot be read, the manager reports an error and
 preserves the existing file. A damaged roster is never reset to an empty list.
 Restart the dashboard after correcting the file or state-volume problem.
 
-Set `dashboard.password` in `config.json` to view saved wallets and add or remove
-entries. Fresh installs start with an empty wallet list. See [Configuration](configuration.md).
+Set `dashboard.password` in `config.json` to view personal wallets and add or remove
+entries. Fresh installs include one clearly marked public example; see
+[Public example](#public-example-and-seeding-from-configjson).
 
 ## The Genesis address is a special case
 
@@ -117,12 +118,20 @@ xpub.
   skip blocks that can't match, turning a multi-hour scan into minutes. It's a
   shared, one-time-built cache: ~a few GB of extra disk and a one-time
   background build (the node keeps serving meanwhile). After `configure.sh`,
-  restart the node (`docker compose up -d bitcoin`).
+  apply the change with `./stack apply`.
 
-## Seeding from config.json (optional)
+## Public example and seeding from config.json
 
-You can also predeclare wallets in `config.json`, which seeds the list on first
-start (handy for a fresh deploy):
+Fresh installs start with one public example address disclosed by Binance in
+2022. It is labeled **Public example** and excluded from personal totals, so its
+balance cannot be mistaken for yours or for Binance's total reserves. It is one
+address, not proof of the exchange's solvency. The first scan starts at Bitcoin's
+genesis block and can take time. You can remove it after setting a dashboard
+password, or opt out before first start with `"wallets": []`. See Binance's
+[original address disclosure](https://www.binance.com/en-IN/blog/community/2895840147147652626).
+
+You can instead predeclare your own wallets in `config.json`, which seeds the
+list on first start:
 
 ```json
 "wallets": [

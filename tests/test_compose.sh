@@ -22,6 +22,7 @@ export BITCOIN_DATA_DIR=./data/bitcoin
 export BITCOIN_DBCACHE=1234
 export BITCOIN_PRUNE=555
 export WATCH_WALLETS_B64=watchblob
+export DASHBOARD_BIND_IP=127.0.0.1
 
 rendered=$(docker compose --env-file /dev/null config)
 
@@ -50,16 +51,10 @@ count=$(echo "$rendered" | grep -c 'testpass' || true)
 echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS' ||
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked into rendered command line"
-# default outbound routing is Tor-only (clearnet sync is opt-in)
+# Outbound routing is always Tor-only.
 echo "$rendered" | grep -qF 'NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"' ||
-  fail "default (Tor-only) routing missing from the entrypoint"
-
-# the full branch line, pinned verbatim: clearnet-sync (the IP-exposing opt-in)
-# must sit in the then-branch and Tor-only in the else — a value typo OR a
-# then/else swap both fail this (same whole-line style as the exec check above)
-# shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
-echo "$rendered" | grep -qF -- 'if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"; fi' ||
-  fail "SYNC_OVER_CLEARNET branch line changed — check both routing branches in the entrypoint"
+  fail "Tor-only routing missing from the entrypoint"
+echo "$rendered" | grep -q 'SYNC_OVER_CLEARNET' && fail "clearnet sync bypass remains in compose"
 
 # inbound-onion branch, pinned verbatim: regressing this once silently killed
 # outbound onion sync (commit 0654ac0). Only appears when INBOUND_ONION=1.
@@ -67,11 +62,31 @@ echo "$rendered" | grep -qF -- 'if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_AR
 echo "$rendered" | grep -qF -- 'if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi' ||
   fail "INBOUND_ONION branch line changed — check the inbound onion-service flags in the entrypoint"
 
-# The only published port is the dashboard on host port 80
+# Bitcoin and dashboard cannot use Docker's external DNS forwarding, and only
+# Tor has a deterministic external default gateway.
+[ "$(echo "$rendered" | grep -c '^    dns:$')" = "2" ] || fail "bitcoin/dashboard DNS lock missing"
+[ "$(echo "$rendered" | awk '$1 == "dns:" { getline; if ($1 == "-" && $2 == "127.0.0.1") count++ } END { print count + 0 }')" = "2" ] ||
+  fail "bitcoin/dashboard DNS is not loopback-only"
+echo "$rendered" | grep -A6 '^  btc_net:' | grep -q 'internal: true' || fail "btc_net is not internal"
+echo "$rendered" | grep -A5 '^      tor_egress:' | grep -q 'gw_priority: 1' || fail "Tor egress gateway priority missing"
+
+# The only published port is the dashboard on host port 80, loopback by default.
 ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
 published=$(echo "$rendered" | grep -c 'published:' || true)
 [ "$ports" = "1" ] || fail "expected dashboard published on 80, got $ports"
 [ "$published" = "1" ] || fail "expected exactly 1 published port, got $published"
+echo "$rendered" | grep -q 'host_ip: 127.0.0.1' || fail "dashboard does not bind loopback by default"
+tor_port=$(echo "$rendered" | sed -n '/^  tor:$/,/^networks:$/p' | awk '$1 == "host_ip:" { print $2 }')
+[ "$tor_port" = "127.0.0.1" ] || fail "dashboard forwarder port is not owned by Tor"
+echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'host_ip:' &&
+  fail "internal dashboard container still publishes a host port"
+echo "$rendered" | sed -n '/^  tor:$/,/^networks:$/p' | grep -q 'nc -z 127.0.0.1 8000' ||
+  fail "Tor healthcheck does not cover the dashboard forwarder"
+grep -qF 'socat TCP4-LISTEN:8000,reuseaddr,fork TCP4:172.29.0.27:8000' build/tor/entrypoint.sh ||
+  fail "Tor entrypoint does not forward the published port to the fixed dashboard address"
+
+lan_rendered=$(DASHBOARD_BIND_IP=192.168.1.117 docker compose --env-file /dev/null config)
+echo "$lan_rendered" | grep -q 'host_ip: 192.168.1.117' || fail "private-LAN dashboard bind was not rendered"
 
 # Without credentials the stack refuses to start
 if env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD docker compose --env-file /dev/null config >/dev/null 2>&1; then

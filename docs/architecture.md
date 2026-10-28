@@ -1,20 +1,23 @@
 # Architecture
 
-Three containers on one isolated bridge network (`btc_net`,
-`172.29.0.0/24`), orchestrated by a single compose file.
+Three containers share the internal `btc_net` bridge (`172.29.0.0/24`). Only
+Tor also joins the external `tor_egress` bridge.
 
 ```mermaid
 flowchart LR
     You(["👤 You · Browser"])
     Net(["🌐 Tor Network"])
 
-    subgraph stack ["🐳 bitcoin-starter-stack · btc_net 172.29.0.0/24"]
+    subgraph stack ["🐳 bitcoin-starter-stack"]
+      subgraph internal ["btc_net · internal · 172.29.0.0/24"]
         Dashboard["📊 dashboard<br/>.27 · Go"]
         Bitcoin["🟠 bitcoin<br/>.26 · Bitcoin Core"]
         Tor["🧅 tor<br/>.25 · SOCKS5"]
+      end
     end
 
-    You ==>|"HTTP :80 (published)"| Dashboard
+    You ==>|"HTTP :80 · loopback or private LAN"| Tor
+    Tor ==>|"fixed TCP forward · :8000"| Dashboard
     Dashboard -.->|"RPC :8332 (internal)"| Bitcoin
     Bitcoin ==>|"SOCKS5 :9050 (internal)"| Tor
     Tor <==> Net
@@ -30,14 +33,21 @@ flowchart LR
 
 Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 `docker-compose.yml`) and the dashboard's RPC URL simple and deterministic.
+Docker Compose 2.33.1 or newer is required for the gateway-priority setting
+that makes `tor_egress` Tor's deterministic default route.
 
 ## Privacy model
 
 - **`-onlynet=onion` + `-proxy=…`**, set by the bitcoin entrypoint in
   [docker-compose.yml](../docker-compose.yml), plus **`listen=0`** in
   [bitcoin.conf](../build/bitcoin/bitcoin.conf): every P2P connection is
-  outbound, to an onion peer, through the tor container. The node never
-  dials clearnet and, by default, never accepts inbound.
+  routed to onion peers through the Tor container. The node never dials
+  clearnet; inbound peers use the optional onion service, enabled by default.
+- **The application network is internal.** Bitcoin and dashboard have no
+  external route and use loopback-only DNS, so a proxy bug fails closed.
+  Tor alone joins `tor_egress`; its gateway has explicit priority. The host
+  dashboard port terminates in Tor's container and forwards only to the fixed
+  internal dashboard address.
 - **Inbound onion service** (`inbound_onion` in `config.json`, on by default):
   bitcoind registers an onion address over tor's cookie-authed control
   port and serves blocks to the network — still no clearnet, no host port,
@@ -47,11 +57,13 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 - **RPC auth is a salted hash.** bitcoind is started with `rpcauth=`; the
   plaintext password exists only in the dashboard container and `.env`.
   The bitcoin health check authenticates with Core's `.cookie` file.
-- **The only published port is the dashboard's `80`.** RPC (`8332`),
-  SOCKS (`9050`), and the tor control port (`9051`) exist only on the
-  internal network; `rpcallowip` restricts RPC to Docker's address space
+- **The only published port is the dashboard's `80`.** It binds to
+  `127.0.0.1` by default; `dashboard.bind_ip` accepts only loopback or RFC1918
+  host addresses for intentional LAN access. RPC (`8332`),
+  SOCKS (`9050`), and the Tor control port (`9051`) are not published to the
+  host; `rpcallowip` restricts RPC to Docker's address space
   as a second layer. The optional dashboard onion service adds reachability
-  through Tor only — still no host port.
+  through Tor without another host port.
 - **Notification egress rides Tor too.** Telegram messages and
   Healthchecks.io pings (both opt-in) go through the tor container's SOCKS
   proxy (`socks5h`, so even DNS resolves through Tor) — enabling alerts
@@ -64,10 +76,11 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
 ## Trust boundaries — and non-boundaries
 
 - The dashboard has **no authentication by default** (`dashboard.password`
-  adds basic auth). LAN exposure is the feature; internet exposure is on you
-  not to configure. See [SECURITY.md](../SECURITY.md).
-  Saved wallet views and all wallet/upgrade mutations require a configured
-  password.
+  adds basic auth). Its default host bind is loopback; set a private
+  `dashboard.bind_ip` to make LAN exposure intentional. See
+  [SECURITY.md](../SECURITY.md).
+  Personal wallet views and all wallet/upgrade mutations require a configured
+  password; the exact public example is readable without one.
 - The opt-in Upgrade button keeps the container↔host boundary intact: the
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls

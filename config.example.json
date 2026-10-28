@@ -5,13 +5,13 @@
         "prune_mb": 0,
         "inbound_onion": true,
         "blockfilterindex": false,
-        "sync_over_clearnet": false,
         "mem_limit_mb": 0
     },
     "dashboard": {
         "password": "",
         "onion": false,
-        "control": false
+        "control": false,
+        "bind_ip": "127.0.0.1"
     },
     "notifications": {
         "telegram_bot_token": "",
@@ -19,5 +19,11 @@
         "healthchecks_url": "",
         "alert_new_block": false
     },
-    "wallets": []
+    "wallets": [
+        {
+            "name": "Binance (public)",
+            "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo",
+            "birthday": ""
+        }
+    ]
 }

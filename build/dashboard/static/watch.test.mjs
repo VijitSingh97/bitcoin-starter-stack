@@ -5,6 +5,7 @@ import {
   editAccess,
   genesisNote,
   isBareExtendedPublicKey,
+  publicExampleNote,
   shortKey,
   totalLabel,
   walletKeyForPost,
@@ -49,6 +50,16 @@ test("walletView displays an alias but preserves the delete identifier", () => {
     label: "Cold storage",
     deleteName: "Cold storage",
   });
+  assert.deepEqual(walletView({ name: "Binance (public)", display_name: "Binance", example: true }), {
+    label: "Binance (public)",
+    deleteName: "Binance (public)",
+  });
+});
+
+test("public example is explicitly separated from personal assets and reserves", () => {
+  assert.match(publicExampleNote({ example: true }), /excluded from your totals/);
+  assert.match(publicExampleNote({ example: true }), /not Binance's total reserves/);
+  assert.equal(publicExampleNote({}), "");
 });
 
 test("genesisNote applies only to the genesis public address", () => {

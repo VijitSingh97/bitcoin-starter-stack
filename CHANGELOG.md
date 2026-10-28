@@ -16,12 +16,19 @@ All notable changes to this project are documented here. Format follows
 - Release downloads contain runtime source and user documentation only. Tests,
   parity references, benchmark experiments, screenshots, and maintainer tools
   remain in Git and are excluded from release archives and image build inputs.
+- Bitcoin and dashboard networking is externally isolated, with local DNS
+  forwarding disabled. Only Tor has an internet route; the optional clearnet
+  sync setting is removed. Dashboard access binds to loopback or a private IPv4.
+- Starts use preloaded images. Downloads and upgrades require Tor-routed Git
+  and Docker; an unavailable or unverified proxy blocks image downloads.
 
 ### Added
 
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.
+- A public Binance address example for fresh installs, excluded from personal
+  totals, with persistent removal and an explicit empty-list opt-out.
 
 ### Fixed
 
@@ -31,6 +38,9 @@ All notable changes to this project are documented here. Format follows
   private material are secured and preserved for operator recovery.
 - Failed roster writes are reported instead of confirming an unsaved wallet
   change; unreadable or malformed roster files are preserved.
+- Core 31 inactive descriptors can omit optional `internal` metadata without
+  preventing safe reuse of an exact matching watch-only wallet.
+- Healthchecks pings require HTTPS, and external API redirects are not followed.
 
 ## [1.31.1] - 2026-10-27
 

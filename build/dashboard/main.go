@@ -389,7 +389,7 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entries := a.watch.Entries()
-	if a.cfg.dashboardPassword == "" && len(entries) > 0 {
+	if a.cfg.dashboardPassword == "" && !publicExampleOnly(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
 		return
 	}
@@ -398,6 +398,10 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 	view := a.watch.List(a.walletRPC, chain.InitialBlockDownload)
 	view["has_password"] = a.cfg.dashboardPassword != ""
 	writeJSON(w, view)
+}
+
+func publicExampleOnly(entries []WatchEntry) bool {
+	return len(entries) == 0 || len(entries) == 1 && isPublicExample(entries[0])
 }
 
 func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {

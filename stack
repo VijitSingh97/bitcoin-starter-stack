@@ -8,6 +8,7 @@ usage() {
 Usage: ./stack <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
+  pull                       Download images through the configured host Tor proxy
   init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
   events                     Incident history (down/recovered, failed pings) — survives restarts
@@ -30,7 +31,7 @@ env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
 init() {
   for tool in jq openssl; do
     command -v "$tool" >/dev/null || {
-      echo "$tool is required: sudo apt install $tool"
+      echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
       exit 1
     }
   done
@@ -57,7 +58,6 @@ init() {
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
   read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
   read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
-  read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet
   read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
 
   yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
@@ -69,7 +69,6 @@ init() {
   yes "$w_control" && cfg=$(jq '.dashboard.control=true' <<<"$cfg")
   # inbound is default-on; only record a deviation when the user declines
   case "$w_inbound" in n | N | no | NO) cfg=$(jq '.bitcoin.inbound_onion=false' <<<"$cfg") ;; esac
-  yes "$w_clearnet" && cfg=$(jq '.bitcoin.sync_over_clearnet=true' <<<"$cfg")
   if [ -n "$w_prune_gb" ]; then
     case "$w_prune_gb" in
       *[!0-9]*) echo "  (prune must be a whole number of GB — ignoring)" ;;
@@ -85,9 +84,49 @@ init() {
   printf "Start the stack now? [Y/n] "
   read -r reply
   case "$reply" in n | N) echo "Later: ./stack up" ;; *)
-    ./configure.sh && docker compose up -d && ensure_agent
+    ./configure.sh && offline_up && ensure_agent
     ;;
   esac
+}
+
+offline_up() {
+  for arg in "$@"; do
+    case "$arg" in
+      tor | bitcoin | dashboard) ;;
+      *) echo "up accepts service names only; image downloads are separate: ./stack pull (see docs/privacy.md)."; return 1 ;;
+    esac
+  done
+  docker compose up -d --pull never --no-build "$@" || {
+    echo "Start failed. Missing images? Configure host Tor, then run ./stack pull. See docs/privacy.md."
+    return 1
+  }
+}
+
+pull_images() {
+  local proxy='socks5h://172.29.0.25:9050'
+  if ! docker info --format '{{json .}}' | jq -e '
+    (.HttpProxy == "socks5h://172.29.0.25:9050" or .HttpProxy == "socks5://172.29.0.25:9050") and
+    (.HttpsProxy == "socks5h://172.29.0.25:9050" or .HttpsProxy == "socks5://172.29.0.25:9050") and
+    ((.NoProxy // "") == "") and
+    ((.RegistryConfig.Mirrors // []) | length == 0)' >/dev/null; then
+    echo "Image download blocked: Docker must use the stack's Tor SOCKS proxy, with no bypasses or mirrors."
+    echo "See docs/privacy.md; preloaded images can start with ./stack up."
+    return 1
+  fi
+  if ! command -v curl >/dev/null || ! curl --fail --silent --show-error --max-time 60 \
+    --proxy "$proxy" --noproxy '' https://check.torproject.org/api/ip | jq -e '.IsTor == true' >/dev/null; then
+    echo "Image download blocked: the Tor proxy could not be verified."
+    return 1
+  fi
+  docker compose pull
+}
+
+images_available() {
+  local images image
+  images=$(docker compose config --images) || return 1
+  while IFS= read -r image; do
+    [ -z "$image" ] || docker image inspect "$image" >/dev/null 2>&1 || return 1
+  done <<<"$images"
 }
 
 status() {
@@ -242,10 +281,30 @@ do_upgrade() {
   fi
   current=$(cat VERSION 2>/dev/null || echo 0)
   echo "Current: v$current — fetching release tags..."
-  git fetch --tags --quiet 2>/dev/null || {
-    echo "git fetch failed — check your network, then retry."
-    exit 1
-  }
+  origin=$(git remote get-url origin 2>/dev/null || true)
+  case "$origin" in
+    https://*)
+      NO_PROXY='' no_proxy='' GIT_SSL_NO_VERIFY=false git \
+        -c http.proxy=socks5h://172.29.0.25:9050 -c "http.$origin.proxy=socks5h://172.29.0.25:9050" \
+        -c http.sslVerify=true -c "http.$origin.sslVerify=true" \
+        -c http.followRedirects=false -c "http.$origin.followRedirects=false" \
+        -c protocol.allow=never -c protocol.https.allow=always \
+        fetch --tags --quiet "$origin" 2>/dev/null || {
+        echo "git fetch through Tor failed — check Tor, then retry."
+        exit 1
+      }
+      ;;
+    /* | file:///*)
+      git -c protocol.allow=never -c protocol.file.allow=always fetch --tags --quiet "$origin" 2>/dev/null || {
+        echo "Local git fetch failed."
+        exit 1
+      }
+      ;;
+    *)
+      echo "Upgrade requires an HTTPS origin (fetched through Tor) or an absolute local repository path."
+      exit 1
+      ;;
+  esac
   latest=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
   latest=${latest#v}
   [ -n "$latest" ] || {
@@ -270,7 +329,8 @@ do_upgrade() {
   }
   echo "== Applying (pull new images, recreate changed containers)"
   ./configure.sh
-  docker compose up -d
+  images_available || pull_images
+  offline_up
   echo
   echo "Upgraded to v$latest. Verify with: ./stack status"
   echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
@@ -329,7 +389,7 @@ cmd=${1:-help}
 case "$cmd" in
   up)
     [ -f .env ] || ./configure.sh   # first run: generate .env (auto-config)
-    docker compose up -d "$@"
+    offline_up "$@"
     ensure_agent
     ;;
   init) init ;;
@@ -339,10 +399,14 @@ case "$cmd" in
   events) docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
     ./configure.sh
-    docker compose up -d
+    offline_up
     ensure_agent
     ;;
   upgrade) do_upgrade ;;
+  pull)
+    [ -f .env ] || ./configure.sh
+    pull_images
+    ;;
   upgrade-agent) upgrade_agent ;;
   status) status ;;
   doctor) doctor ;;

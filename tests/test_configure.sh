@@ -17,7 +17,10 @@ fail() {
 grep -q '^BITCOIN_RPC_USER=bitcoin$' "$tmp/.env" || fail "RPC user default is not 'bitcoin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
-grep -q '^WATCH_WALLETS_B64=W10=$' "$tmp/.env" || fail "zero-config install must start without watch wallets"
+watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
+watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
+printf '%s' "$watch_json" | jq -e 'length == 1 and .[0].name == "Binance (public)" and .[0].key == "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo" and .[0].birthday == ""' >/dev/null ||
+  fail "zero-config install did not seed the public Binance example"
 
 # 2. Re-running keeps the same auto-generated credentials AND the rpcauth
 #    salt/hash (idempotent). A rotating salt re-derives the hash every run, which
@@ -76,12 +79,28 @@ grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
+grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
 grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
-grep -q '^WATCH_WALLETS_B64=W10=$' "$tmp/.env" || fail "missing wallets must render as base64 []"
+watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
+printf '%s' "$watch_b64" | openssl base64 -d -A | jq -e '.[0].name == "Binance (public)"' >/dev/null ||
+  fail "missing wallets must seed the public Binance example"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
+
+# An explicit empty roster opts out of the public example.
+echo '{"wallets": []}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
+[ "$(printf '%s' "$watch_b64" | openssl base64 -d -A)" = "[]" ] ||
+  fail "explicit empty wallets did not opt out"
+
+# A malformed roster fails before replacing a valid rendered environment.
+cp "$tmp/.env" "$tmp/env.before"
+echo '{"wallets": {"name": "not-an-array"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-array wallets were accepted"
+cmp -s "$tmp/.env" "$tmp/env.before" || fail "invalid wallets changed .env"
 
 # 8. rpcauth is a real salted HMAC of the password (re-derive to check)
 salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
@@ -98,7 +117,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 # 10. Custom values are honored
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true},
- "dashboard": {"password": "dashpass1", "onion": true},
+ "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
  "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
  "wallets": [{"name": "Cold storage", "key": "zpub6rFR7", "birthday": "2021-01-01"}]}
 EOF
@@ -109,6 +128,7 @@ grep -q '^BITCOIN_PRUNE=550$' "$tmp/.env" || fail "custom prune not rendered"
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion=true not rendered as 1"
 grep -q '^DASHBOARD_PASSWORD=dashpass1$' "$tmp/.env" || fail "dashboard password not rendered"
 grep -q '^DASHBOARD_ONION=1$' "$tmp/.env" || fail "dashboard onion not rendered"
+grep -q '^DASHBOARD_BIND_IP=192.168.1.117$' "$tmp/.env" || fail "dashboard LAN bind not rendered"
 grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token not rendered"
 grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
@@ -130,6 +150,10 @@ cat >"$tmp/config.json" <<'EOF'
  "notifications": {"healthchecks_url": "hc-ping.com/uuid"}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-URL healthchecks_url was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"notifications": {"healthchecks_url": "http://hc-ping.com/uuid"}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "HTTP healthchecks_url was accepted"
 
 # blockfilterindex: honored on a full node, rejected on a pruned one
 cat >"$tmp/config.json" <<'EOF'
@@ -142,13 +166,28 @@ cat >"$tmp/config.json" <<'EOF'
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "blockfilterindex was accepted on a pruned node"
 
-# sync_over_clearnet: renders the flag and warns loudly about IP exposure
+# Legacy false is harmless, but true is rejected before the existing .env changes.
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"sync_over_clearnet": true}}
 EOF
-out=$(cd "$tmp" && ./configure.sh)
-grep -q '^BITCOIN_SYNC_OVER_CLEARNET=1$' "$tmp/.env" || fail "sync_over_clearnet not rendered as 1"
-echo "$out" | grep -qi "EXPOSES YOUR HOME IP" || fail "no IP-exposure warning for sync_over_clearnet"
+cp "$tmp/.env" "$tmp/env.before"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "sync_over_clearnet=true was accepted"
+cmp -s "$tmp/.env" "$tmp/env.before" || fail "rejected clearnet setting changed .env"
+echo '{"bitcoin": {"sync_over_clearnet": false}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_SYNC_OVER_CLEARNET=' "$tmp/.env" && fail "legacy clearnet variable remains in .env"
+
+# Dashboard publication is limited to loopback and RFC1918 IPv4 addresses.
+for bind_ip in 127.0.0.2 10.1.2.3 172.16.0.1 172.31.255.254 192.168.50.4; do
+  jq -n --arg ip "$bind_ip" '{dashboard:{bind_ip:$ip}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null || fail "private dashboard bind $bind_ip was rejected"
+done
+for bind_ip in 0.0.0.0 8.8.8.8 172.15.0.1 172.32.0.1 192.169.1.1 ::1 127.0.0.1/24 999.1.1.1 010.0.0.1 192.168.001.1; do
+  jq -n --arg ip "$bind_ip" '{dashboard:{bind_ip:$ip}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unsafe dashboard bind $bind_ip was accepted"
+done
+printf '{"dashboard":{"bind_ip":"127.0.0.1\\nDASHBOARD_PASSWORD=x"}}\n' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "newline dashboard bind was accepted"
 
 # inbound_onion defaults ON (encouraged); explicit false opts out
 echo '{"bitcoin": {"inbound_onion": false}}' >"$tmp/config.json"

@@ -25,7 +25,13 @@ export function totalLabel(view) {
 }
 
 export function walletView(w) {
-  return { label: w.display_name || w.name, deleteName: w.name };
+  return { label: w.example ? w.name : w.display_name || w.name, deleteName: w.name };
+}
+
+export function publicExampleNote(w) {
+  return w.example
+    ? "Public example: one disclosed Binance address, excluded from your totals; it is not Binance's total reserves."
+    : "";
 }
 
 export function genesisNote(w) {
@@ -120,7 +126,13 @@ if (typeof document !== "undefined") {
       const identity = walletView(w);
       const row = el("div", "row");
       const left = el("div", "wk-cell");
-      left.append(el("span", "label", identity.label));
+      const walletLabel = el("span", "label", identity.label);
+      const note = publicExampleNote(w);
+      if (note) {
+        walletLabel.title = note;
+        walletLabel.setAttribute("aria-label", `${identity.label}. ${note}`);
+      }
+      left.append(walletLabel);
       // truncated key, click to expand/collapse
       const k = el("span", "wk", shortKey(w.key));
       k.title = "click to expand";
@@ -152,7 +164,7 @@ if (typeof document !== "undefined") {
       const row = el("div", "ws-row");
       const identity = walletView(w);
       const walletName = el("span", "ws-name", identity.label);
-      const note = genesisNote(w);
+      const note = publicExampleNote(w) || genesisNote(w);
       if (note) {
         walletName.textContent += " ⓘ";
         walletName.title = note;

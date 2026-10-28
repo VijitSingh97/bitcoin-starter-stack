@@ -208,6 +208,44 @@ func TestPrivateConfigSeedDroppedBeforePersistence(t *testing.T) {
 	assertMode(t, path, 0o600)
 }
 
+func TestInvalidConfigSeedFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "balance_history.json"))
+	t.Setenv("WATCH_WALLETS_B64", "not base64")
+	store := NewWatchStore(dir)
+	if !errors.Is(store.Err(), ErrWatchUnavailable) || len(store.Entries()) != 0 {
+		t.Fatalf("invalid seed state = %v, %#v", store.Err(), store.Entries())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("invalid seed created roster: %v", err)
+	}
+}
+
+func TestPersistedRosterOverridesPublicExampleSeed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	seed, err := json.Marshal([]WatchEntry{{Name: publicExampleName, Key: publicExampleAddress}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "balance_history.json"))
+	t.Setenv("WATCH_WALLETS_B64", base64.StdEncoding.EncodeToString(seed))
+	store := NewWatchStore(dir)
+	if got := store.Entries(); len(got) != 1 || !isPublicExample(got[0]) {
+		t.Fatalf("initial public example = %#v", got)
+	}
+	if removed, err := store.Remove(publicExampleName); !removed || err != nil {
+		t.Fatalf("remove public example = %v, %v", removed, err)
+	}
+	store = NewWatchStore(dir)
+	if got := store.Entries(); len(got) != 0 {
+		t.Fatalf("removed public example was reseeded: %#v", got)
+	}
+}
+
 func TestWatchStoreFailsClosedWhenExistingFileCannotBeSecured(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wallets.json")
@@ -490,6 +528,59 @@ func TestPendingWalletAvoidsFalseZeroAndKeepsGenesisIdentity(t *testing.T) {
 	rows = store.List(walletRPC, false)["wallets"].([]map[string]any)
 	if rows[0]["state"] != "ok" || rows[0]["btc"] != "0" || balanceCalls != 1 || listCalls != 1 {
 		t.Fatalf("completed Genesis row = %#v, balance calls = %d, descriptor checks = %d", rows[0], balanceCalls, listCalls)
+	}
+}
+
+func TestPublicExampleIsExcludedFromPersonalTotals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	entries := []WatchEntry{
+		{Name: publicExampleName, Key: publicExampleAddress},
+		{Name: "First", Key: genesisAddress},
+		{Name: "Second", Key: parityZpub},
+	}
+	b, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	store.SetPending(publicExampleAddress, true)
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		var entry WatchEntry
+		for _, candidate := range entries {
+			if wallet == coreWalletName(candidate) {
+				entry = candidate
+				break
+			}
+		}
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "listdescriptors":
+			return listedDescriptors(entry)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "getbalances":
+			balance := 1.0
+			if entry.Name == "Second" {
+				balance = 2.0
+			}
+			return map[string]any{"mine": map[string]any{"trusted": balance}}
+		}
+		return nil
+	}
+	view := store.List(walletRPC, false)
+	rows := view["wallets"].([]map[string]any)
+	if rows[0]["example"] != true || rows[0]["display_name"] != "Binance" || rows[0]["state"] != "pending" {
+		t.Fatalf("public example row = %#v", rows[0])
+	}
+	if view["total"] != "3" || view["total_state"] != "ok" || view["show_total"] != true {
+		t.Fatalf("personal total includes public example or its pending state: %#v", view)
 	}
 }
 

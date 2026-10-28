@@ -401,6 +401,40 @@ func TestSensitiveRoutesRequirePassword(t *testing.T) {
 	}
 }
 
+func TestPasswordlessPublicExampleReadIsStrict(t *testing.T) {
+	fixture := &rpcFixture{}
+	a, handler := testApp(t, fixture, "")
+	entry, err := a.watch.Add(publicExampleName, publicExampleAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, handler, http.MethodGet, "/api/watch", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"example":true`) || !strings.Contains(response.Body.String(), `"display_name":"Binance"`) {
+		t.Fatalf("public example read = %d %q", response.Code, response.Body.String())
+	}
+	if removed, err := a.watch.RemoveExact(entry); !removed || err != nil {
+		t.Fatal("could not remove public example")
+	}
+	variants := []WatchEntry{
+		{Name: "Binance", Key: publicExampleAddress},
+		{Name: publicExampleName, Key: genesisAddress},
+		{Name: publicExampleName, Key: publicExampleAddress, Birthday: "2022-01-01"},
+	}
+	for _, variant := range variants {
+		added, err := a.watch.Add(variant.Name, variant.Key, variant.Birthday)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response = request(t, handler, http.MethodGet, "/api/watch", "")
+		if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), variant.Key) {
+			t.Fatalf("altered public identity exposed: %#v => %d %q", variant, response.Code, response.Body.String())
+		}
+		if removed, err := a.watch.RemoveExact(added); !removed || err != nil {
+			t.Fatal("could not remove altered example")
+		}
+	}
+}
+
 func TestGenesisWatchUsesActualIBDState(t *testing.T) {
 	fixture := &rpcFixture{initialBlockDownload: true}
 	a, handler := testApp(t, fixture, "dashboard-secret")

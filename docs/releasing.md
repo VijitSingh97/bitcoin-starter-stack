@@ -22,10 +22,10 @@ Multi-arch images (amd64 and arm64/Raspberry Pi) for the two first-party
 components — `tor` and `dashboard` — are built and published to GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) per release by the `images`
 job in the [Release workflow](../.github/workflows/release.yml).
-`docker compose up` pulls these prebuilt tags; it only builds locally as a
-fallback (e.g. on an unreleased commit with no matching published tag). The
-release artifact is also a source tarball, and the digest-pinned bases make
-the build reproducible if you do build.
+`./stack pull` downloads these tags through a verified host Tor proxy;
+`./stack up` starts only locally available images and never builds implicitly.
+The release artifact is also a source tarball. Source builds need a controlled
+build environment with its own Tor egress; see [Privacy](privacy.md).
 
 ## Single source of truth
 
@@ -79,11 +79,10 @@ without a release — fix on `main`, bump the patch version, tag again
 
 ## How users get a release
 
-- **Tarball:** download `bitcoin-starter-stack.tar.gz` from the release,
-  unpack, `cp config.example.json config.json`, `./configure.sh`,
-  `docker compose up -d`.
-- **Git:** `git pull` (or `git checkout vX.Y.Z`), then `./stack apply` —
-  add `docker compose build` when `build/` changed.
+- **Tarball:** obtain `bitcoin-starter-stack.tar.gz` through Tor, unpack,
+  configure [Tor image downloads](privacy.md), then `./stack pull` and `./stack up`.
+- **Git:** `./stack upgrade` fetches and applies a release through the guarded
+  Tor download path. Source builds stay in a separately controlled environment.
 - Running stacks learn about new releases from the dashboard's daily
   update check (badge + optional Telegram 🆕 alert) — see
   [Notifications](notifications.md).

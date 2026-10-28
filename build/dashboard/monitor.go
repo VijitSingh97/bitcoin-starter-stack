@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -219,6 +220,11 @@ func (m *Monitor) pingHealthchecks(healthy bool) bool {
 	if m.healthchecks == "" {
 		return true
 	}
+	endpoint, err := url.Parse(m.healthchecks)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil {
+		m.logEvent("healthchecks ping failed: HTTPS URL required")
+		return false
+	}
 	url := m.healthchecks
 	if !healthy {
 		url += "/fail"
@@ -387,7 +393,13 @@ func newTorHTTPClient(proxy string) *http.Client {
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 	}
-	return &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func socks5DialContext(proxy string) func(context.Context, string, string) (net.Conn, error) {

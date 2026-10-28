@@ -14,6 +14,7 @@ DASHBOARD = os.environ.get("E2E_DASHBOARD_URL", "http://localhost:80")
 DASHBOARD_PASSWORD = os.environ["E2E_DASHBOARD_PASSWORD"]
 RPC_USER = os.environ["BITCOIN_RPC_USER"]
 RPC_PASSWORD = os.environ["BITCOIN_RPC_PASSWORD"]
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 GENESIS_ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 GENESIS_PUBKEY = (
@@ -48,7 +49,7 @@ def dashboard(method, path, body=None):
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(DASHBOARD + path, data=data, headers=headers, method=method)
     try:
-        response = urllib.request.urlopen(request, timeout=30)
+        response = OPENER.open(request, timeout=30)
     except urllib.error.HTTPError as error:
         response = error
     with response:
@@ -93,8 +94,13 @@ def wait_for_wallet(key):
 
 failures = []
 status, body = dashboard("GET", "/api/watch")
-if status != 200 or json.loads(body)["wallets"] != []:
-    failures.append("fresh install must start without watch-only wallets")
+wallets = json.loads(body).get("wallets", []) if status == 200 else []
+if (len(wallets) != 1 or wallets[0].get("name") != "Binance (public)"
+        or wallets[0].get("key") != "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo"
+        or wallets[0].get("example") is not True):
+    failures.append("fresh install is missing the marked Binance public example")
+elif dashboard("DELETE", "/api/watch/Binance%20%28public%29")[0] != 200:
+    failures.append("public example could not be removed")
 for label, key in CASES:
     status, body = dashboard("POST", "/api/watch", {"name": label, "key": key, "birthday": ""})
     if status != 200:

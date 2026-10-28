@@ -21,6 +21,8 @@ import (
 const maxWatchWallets = 20
 
 const genesisAddress = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+const publicExampleName = "Binance (public)"
+const publicExampleAddress = "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo"
 
 var ErrWatchUnavailable = errors.New("watch wallet storage unavailable")
 
@@ -288,27 +290,37 @@ func (s *WatchStore) load() {
 		s.storeErr = ErrWatchUnavailable
 		return
 	}
-	s.entries = loadWatchConfig()
+	entries, err := loadWatchConfig()
+	if err != nil {
+		s.entries = nil
+		s.storeErr = ErrWatchUnavailable
+		return
+	}
+	s.entries = entries
 	if s.saveLocked() != nil {
 		s.storeErr = ErrWatchUnavailable
 	}
 }
 
-func loadWatchConfig() []WatchEntry {
+func loadWatchConfig() ([]WatchEntry, error) {
 	raw := os.Getenv("WATCH_WALLETS_B64")
 	if raw == "" {
-		return []WatchEntry{}
+		return []WatchEntry{}, nil
 	}
 	b, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
-		return []WatchEntry{}
+		return nil, ErrWatchUnavailable
 	}
 	var items []map[string]any
-	if json.Unmarshal(b, &items) != nil {
-		return []WatchEntry{}
+	if json.Unmarshal(b, &items) != nil || items == nil {
+		return nil, ErrWatchUnavailable
 	}
 	entries, _ := normalizeEntries(items)
-	return entries
+	return entries, nil
+}
+
+func isPublicExample(entry WatchEntry) bool {
+	return entry.Name == publicExampleName && entry.Key == publicExampleAddress && entry.Birthday == ""
 }
 
 func normalizeEntries(items []map[string]any) ([]WatchEntry, bool) {
@@ -607,6 +619,7 @@ func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) ma
 	entries, pending := s.snapshot()
 	rows, total := s.walletBalances(walletRPC, entries, pending, initialBlockDownload, nil)
 	totalState := "ok"
+	personalCount := 0
 	for _, row := range rows {
 		history := s.history.series(row["key"].(string))
 		row["history"] = history
@@ -614,13 +627,17 @@ func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) ma
 			row["state"] = "stale"
 			row["btc"] = formatBTC(history[len(history)-1])
 		}
+		if row["example"] == true {
+			continue
+		}
+		personalCount++
 		if row["state"] == "pending" || row["state"] == "scanning" {
 			totalState = "pending"
 		} else if totalState == "ok" && (row["state"] == "error" || row["state"] == "stale") {
 			totalState = "unavailable"
 		}
 	}
-	return map[string]any{"wallets": rows, "total": formatBTC(total), "total_state": totalState, "show_total": len(rows) > 1}
+	return map[string]any{"wallets": rows, "total": formatBTC(total), "total_state": totalState, "show_total": personalCount > 1}
 }
 
 func (s *WatchStore) Sample(walletRPC WalletRPCFunc) {
@@ -653,7 +670,12 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 	total := 0.0
 	for _, entry := range entries {
 		name, info := s.resolveWallet(walletRPC, entry)
+		example := isPublicExample(entry)
 		row := map[string]any{"name": entry.Name, "key": entry.Key, "btc": nil}
+		if example {
+			row["example"] = true
+			row["display_name"] = "Binance"
+		}
 		isPending := pending[watchKeyID(entry.Key)] || initialBlockDownload
 		if entry.Name == "Satoshi" && entry.Key == genesisAddress {
 			row["display_name"] = "Genesis"
@@ -683,7 +705,9 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 				rows = append(rows, row)
 				continue
 			}
-			total += btc
+			if !example {
+				total += btc
+			}
 			row["state"] = "ok"
 			row["btc"] = formatBTC(btc)
 			if sample != nil {

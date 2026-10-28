@@ -44,7 +44,9 @@ cd "$work"
 git init -q
 git config user.email t@t
 git config user.name t
+sed -i.bak 's/^    internal: true$/    internal: false/' docker-compose.yml && rm docker-compose.yml.bak
 printf '0.0.1\n' >VERSION && git add -A && git commit -qm r1 && git tag v0.0.1
+sed -i.bak 's/^    internal: false$/    internal: true/' docker-compose.yml && rm docker-compose.yml.bak
 printf '0.0.2\n' >VERSION && git add -A && git commit -qm r2 && git tag v0.0.2
 git remote add origin "$bare"
 git push -q origin HEAD --tags
@@ -65,6 +67,7 @@ done
 
 # Boot the OLD release (uses the local ghcr…:0.0.1 images just built).
 docker compose up -d --wait --wait-timeout 300 || fail "v0.0.1 did not come up healthy"
+[ "$(docker network inspect btc_net --format '{{.Internal}}')" = false ] || fail "old release did not start with the legacy external network"
 
 # The upgrade: fetch tags, see v0.0.2 is newer, back up, check out, re-apply.
 out=$(./stack upgrade 2>&1) || fail "upgrade exited non-zero:
@@ -72,6 +75,7 @@ $out"
 echo "$out" | grep -q "Upgrading v0.0.1 -> v0.0.2" || fail "upgrade did not move 0.0.1 -> 0.0.2:
 $out"
 [ "$(cat VERSION)" = "0.0.2" ] || fail "checkout did not land on v0.0.2 (VERSION=$(cat VERSION))"
+[ "$(docker network inspect btc_net --format '{{.Internal}}')" = true ] || fail "upgrade retained the legacy external network"
 ls backups/stack-backup-*.tar.gz >/dev/null 2>&1 || fail "no pre-upgrade backup was written"
 
 # The stack must be healthy on the new release. `up -d` recreated the dashboard

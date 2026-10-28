@@ -2,18 +2,19 @@
 
 # Bitcoin Starter Stack
 
-### Private Bitcoin full node, routed over Tor
+### Your node. Your balances. Tor for every internet connection.
 
 [![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
 ![Tor](https://img.shields.io/badge/Networking-Tor--only-7D4698?logo=torproject&logoColor=white)
 
-Docker Compose stack for a [Bitcoin Core](https://bitcoincore.org/) full node with all P2P
-traffic routed through a built-in Tor daemon, plus a lightweight web dashboard for
-sync progress, peers, mempool fees, and watch-only wallet balances.
+Run a [Bitcoin Core](https://bitcoincore.org/) full node with a small Go dashboard.
+Watch blocks arrive, track your own watch-only balances, check fees and BTC prices,
+and get alerts when something needs attention. Internet traffic uses Tor; your
+wallet addresses stay on your node.
 
-<img src="https://raw.githubusercontent.com/VijitSingh97/bitcoin-starter-stack/main/images/dashboard.png" width="80%" alt="Bitcoin node dashboard: live node status card, watch-only wallet balances in gold with sparklines above a 3D block tower" />
+<img src="https://raw.githubusercontent.com/VijitSingh97/bitcoin-starter-stack/main/images/dashboard.jpg" width="100%" alt="Go dashboard with Bitcoin Core status, a verified public Binance address, and Your Wallet marked Pending history above the block tower; demo data" />
 
 </div>
 
@@ -25,12 +26,12 @@ sync progress, peers, mempool fees, and watch-only wallet balances.
   validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
   config key.
 - 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
-  (`onlynet=onion`) — your home IP is never associated with your node. Accepts **inbound
-  over a Tor onion service by default** to serve blocks back to the network (no IP
-  exposure, no host port); set `inbound_onion: false` to run outbound-only.
+  (`onlynet=onion`). Bitcoin and the dashboard cannot route directly to the internet,
+  and local DNS forwarding is disabled. Inbound Bitcoin connections use an onion
+  service by default. See the [privacy model and Tor bootstrap](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
-  low-space warning) on your LAN at port `80` — optionally behind basic auth. RPC stays
-  inside the Docker network; nothing but the dashboard port is exposed.
+  low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
+  add a password and an onion address for remote access. RPC stays inside Docker.
 - 🔑 **Credentials handled properly.** Config renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
   `rpcauth` hash, never the plaintext.
@@ -40,10 +41,13 @@ sync progress, peers, mempool fees, and watch-only wallet balances.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- 👀 **Watch-only balances.** Add your `xpub`s (or descriptors) right in the dashboard — each
-  balance and a total, read straight off your own node, your addresses never touching a block
-  explorer. Add and remove them from the UI; watch-only, so no keys and no spend risk. See
-  [Watch-only](docs/watch-only.md).
+- 👀 **Balances from your own node.** Import an address, `xpub`, `zpub`, or public
+  descriptor. New imports show **Pending history…** until the scan finishes, so an
+  unfinished scan never looks like an empty wallet. A clearly marked public Binance
+  address gives fresh installs an example; it is excluded from your totals.
+  [How watch-only works](docs/watch-only.md).
+- 💱 **BTC in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
+  CoinGecko quotes are fetched through Tor, cached, and labeled when stale.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
   applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
   with a button from the dashboard; the stack runs the host-side agent for you.
@@ -54,29 +58,29 @@ sync progress, peers, mempool fees, and watch-only wallet balances.
 ## 🚀 Quick Start
 
 **Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
-`jq`, an SSD with ~1 TB free (the chain is ~800 GB and grows — or ~30 GB
+`jq` and `curl`, an SSD with ~1 TB free (the chain is ~800 GB and grows — or ~30 GB
 [pruned](docs/configuration.md#pruned-node)), and 8 GB+ RAM.
 Details in [Hardware Requirements](docs/hardware.md).
 
+First set up [Tor for downloads](docs/privacy.md#bootstrap-and-apt), including the
+initial Tor image and Docker's proxy. There is no automatic clearnet fallback.
+With the source and images available locally:
+
 ```bash
-git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
-cd bitcoin-starter-stack   # or unpack the tarball from the latest release
-./stack up                 # generates config, creates the data dir, and starts — nothing to edit
+cd bitcoin-starter-stack
+./stack init              # optional guided setup; Enter accepts each default
+./stack up                # creates local settings and starts preloaded images
 ```
 
-That's it — no file to edit. `./stack up` writes a `.env` with sensible defaults
-and an auto-generated RPC password (username defaults to `bitcoin`), for a full
-node over Tor, then starts the stack. It **pulls prebuilt images** (amd64 and
-arm64/Raspberry Pi) from GHCR, so
-there's nothing to compile — it only builds locally if you're on an unreleased
-commit.
+The internal RPC password is generated for you. Runtime images are prebuilt for
+amd64 and arm64; the node does not need a compiler or Python. `./stack pull`
+fetches images after checking the host's Tor proxy. Unreleased development builds
+are kept separate from the deployment path.
 
-Prefer to be asked? **`./stack init`** walks you through the options — a dashboard
-password (Enter generates a strong one), a Tor onion, inbound Tor connections, a
-fast clearnet initial sync, pruning — each with a default you accept by pressing
-Enter. Everything is
-optional; you can also set it later by editing `config.json` and running
-`./stack apply`. See [Configuration](docs/configuration.md).
+For LAN access, set `dashboard.bind_ip` to the server's private IPv4 address in
+`config.json`, then run `./stack apply`. The default is local access only.
+[Configuration](docs/configuration.md) covers pruning, existing chain data, alerts,
+and optional remote access through an onion service.
 
 Then watch it come up:
 
@@ -96,8 +100,8 @@ dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-start
 
 ## 📈 Monitoring
 
-Open the dashboard at `http://localhost`, or from another machine on your LAN at
-`http://<hostname>.local` (needs `avahi-daemon` on the node box).
+Open `http://localhost` on the node. After setting a private LAN bind address,
+use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
 
 - **Node mode** — a **Full** or **Pruned** badge in the header.
 - **Sync progress** — block height vs. headers, with a progress bar.
@@ -106,8 +110,8 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
   blocks (once synced), with a 24-hour fee sparkline.
 - **Watch-only balances** — add `xpub`s/descriptors from the UI; per-key balances and a total
-  (shown once you have more than one), read off your own node. Fresh installs start
-  with an empty wallet list; imports show pending history until ready
+  (shown for multiple personal wallets), read off your own node. The public example
+  is excluded from personal totals; imports show pending history until ready
   ([Watch-only](docs/watch-only.md)).
 - **BTC price** — CoinGecko quotes in USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, or CNY, fetched through
   Tor every five minutes. The selector remembers your currency; stale quotes are labeled.
@@ -120,9 +124,9 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
   day is pushed down and a fresh one starts. Driven purely by the clock — no history or node
   lookups. Theme-aware and paused for `prefers-reduced-motion`.
 
-The status page is open unless you set a dashboard password. Personal wallet views,
-wallet changes, and upgrades require a password. Keep it on your trusted LAN and don't
-port-forward `80` to the internet.
+The status page and public example can be viewed without a password. Personal
+wallet views, changes, and upgrades require one. LAN HTTP is unencrypted: use a
+trusted LAN or the onion service, and keep port `80` off the public internet.
 
 ## 🏗️ How it works
 
@@ -137,15 +141,18 @@ flowchart LR
         Tor["🧅 Tor"]
     end
 
-    You ==>|HTTP :80| Dashboard
+    You ==>|LAN HTTP :80| Tor
+    Tor -->|Fixed local relay| Dashboard
     Dashboard -.->|RPC| Bitcoin
     Bitcoin ==>|SOCKS5| Tor
     Tor <==> Net
 ```
 
-Three services on an isolated Docker network: `tor` (SOCKS5 proxy), `bitcoin` (Bitcoin Core,
-non-root, RPC reachable only from inside the network), and `dashboard` (a small Go server
-polling the node over RPC). Full breakdown in [Architecture](docs/architecture.md).
+Three containers. Bitcoin Core and the Go dashboard share an internal network;
+only Tor joins an external network. The Tor container also forwards the private
+LAN dashboard port to its fixed internal destination.
+[Architecture](docs/architecture.md) explains the layout; [Privacy](docs/privacy.md)
+covers downloads, DNS, and the limits of the guarantee.
 
 ## 📚 Documentation
 
@@ -155,6 +162,7 @@ polling the node over RPC). Full breakdown in [Architecture](docs/architecture.m
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
 | [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
+| [Tor & Privacy](docs/privacy.md) | Enforced routing, LAN access, host downloads, and bootstrap. |
 | [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 | [Notifications & Remote Access](docs/notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |
@@ -173,7 +181,7 @@ tests/run.sh
 Runs shellcheck, `configure.sh` and CLI tests, a docker-compose contract test, a
 release-consistency check, an upgrade-path test, Go race/vet/unit checks, the retained Python
 reference suite, cross-runtime HTTP parity tests, frontend tests, and a real end-to-end boot
-whose **egress audit asserts every established connection from the containers is Tor-only** —
+whose **egress tests attempt direct IP and DNS access with Tor stopped** —
 the same suite [CI](.github/workflows/ci.yml) runs on every push, plus a full image build,
 secret scanning (gitleaks), and Dockerfile lint (hadolint). See
 [CONTRIBUTING.md](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/main/CONTRIBUTING.md).
@@ -184,6 +192,10 @@ secret scanning (gitleaks), and Dockerfile lint (hadolint). See
 a full node is resource-intensive (bandwidth, disk, memory). Understand your firewall setup
 before exposing anything beyond your LAN. Security posture and reporting:
 [SECURITY.md](SECURITY.md). Licensed [MIT](LICENSE).
+
+The screenshot uses public and fictional demo data. “Your Wallet” illustrates a
+pending import. A single public address is not an exchange’s total reserves or
+proof of solvency.
 
 The dashboard runtime is Go; Python remains in the development test harness only.
 Only public keys, public descriptors, and addresses are accepted for watch-only imports.
