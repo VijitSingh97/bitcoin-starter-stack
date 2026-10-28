@@ -132,6 +132,27 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' |
 curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1" ||
   fail "metrics endpoint missing bitcoin_node_up"
 
+curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"can_configure":false' ||
+  fail "LAN HTTP can edit notification secrets"
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2edash \
+  -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' -d '{"reset":true}' "$dashboard_url/api/settings")
+[ "$code" = 403 ] || fail "LAN HTTP accepted a notification settings write"
+settings_auth=$(printf 'x:e2edash' | base64 | tr -d '\n')
+settings_body='{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}'
+printf 'POST /api/settings HTTP/1.1\r\nHost: localhost\r\nAuthorization: Basic %s\r\nX-Requested-With: fetch\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+  "$settings_auth" "${#settings_body}" "$settings_body" | docker exec -i dashboard nc -w 3 127.0.0.1 8001 | grep -q '"overridden":true' ||
+  fail "internal notification settings write failed"
+docker exec dashboard sh -c 'test "$(stat -c %a /state/notification_settings.json)" = 600' ||
+  fail "saved notification settings are not private"
+docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashboard ||
+  fail "dashboard recreation failed"
+curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
+  fail "notification settings did not survive container recreation"
+settings_body='{"reset":true}'
+printf 'POST /api/settings HTTP/1.1\r\nHost: localhost\r\nAuthorization: Basic %s\r\nX-Requested-With: fetch\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+  "$settings_auth" "${#settings_body}" "$settings_body" | docker exec -i dashboard nc -w 3 127.0.0.1 8001 | grep -q '"overridden":false' ||
+  fail "notification reset did not restore the server configuration"
+
 restarts=$(docker inspect tor --format '{{.RestartCount}}')
 docker exec tor sh -c 'kill "$(pidof socat)"'
 forwarder_recovered=""
@@ -163,7 +184,7 @@ done
 # application network namespaces; every attempt must fail closed.
 tor_bootstrapped=""
 for _ in $(seq 1 30); do
-  if docker logs tor 2>&1 | grep -q "Bootstrapped 100"; then
+  if docker logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
     tor_bootstrapped=1
     break
   fi

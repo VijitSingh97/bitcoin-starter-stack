@@ -15,9 +15,9 @@ git archive --worktree-attributes HEAD >"$tmp/release.tar"
 tar -tf "$tmp/release.tar" >"$tmp/contents"
 for required in stack configure.sh docker-compose.yml config.example.json VERSION \
   .dockerignore .gitignore README.md CHANGELOG.md LICENSE SECURITY.md \
-  build/dashboard/Dockerfile build/dashboard/go.mod build/dashboard/main.go \
+  build/dashboard/Dockerfile build/dashboard/go.mod build/dashboard/main.go build/dashboard/settings.go \
   build/dashboard/index.html build/dashboard/static/watch.js \
-  build/dashboard/static/prices.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
+  build/dashboard/static/prices.js build/dashboard/static/settings.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
   docs/getting-started.md docs/configuration.md docs/operations.md docs/watch-only.md docs/privacy.md; do
   grep -Fxq "$required" "$tmp/contents" || fail "release archive is missing $required"
 done

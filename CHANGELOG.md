@@ -24,6 +24,8 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- A password-protected notification settings menu with persistent JSON overrides,
+  live updates, masked secrets, and an encrypted onion/localhost management path.
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.

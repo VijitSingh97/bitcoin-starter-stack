@@ -52,14 +52,17 @@ type monitorState struct {
 }
 
 type Monitor struct {
-	version        string
-	dataDir        string
-	eventsLog      string
-	telegramToken  string
-	telegramChatID string
-	healthchecks   string
-	nodeName       string
-	alertNewBlock  bool
+	version   string
+	dataDir   string
+	eventsLog string
+	nodeName  string
+
+	settingsMu         sync.RWMutex
+	settings           notificationSettings
+	settingsBaseline   notificationSettings
+	settingsPath       string
+	settingsErr        error
+	settingsOverridden bool
 
 	client     *http.Client
 	now        func() time.Time
@@ -79,20 +82,27 @@ func NewMonitor(version, dataDir, stateDir string) *Monitor {
 	if value, ok := os.LookupEnv("EVENTS_LOG"); ok {
 		eventsLog = value
 	}
+	settingsPath := filepath.Join(stateDir, "notification_settings.json")
+	baseline := notificationSettingsFromEnv()
+	settings, overridden, settingsErr := loadNotificationSettings(settingsPath, baseline)
+	if settingsErr != nil {
+		settings = notificationSettings{}
+	}
 	return &Monitor{
-		version:        version,
-		dataDir:        dataDir,
-		eventsLog:      eventsLog,
-		telegramToken:  os.Getenv("TELEGRAM_BOT_TOKEN"),
-		telegramChatID: os.Getenv("TELEGRAM_CHAT_ID"),
-		healthchecks:   strings.TrimRight(strings.TrimSpace(os.Getenv("HEALTHCHECKS_URL")), "/"),
-		nodeName:       envOr("NODE_NAME", "bitcoin-node"),
-		alertNewBlock:  enabled(os.Getenv("ALERT_NEW_BLOCK")),
-		client:         newTorHTTPClient(torProxy),
-		now:            time.Now,
-		diskFreeGB:     freeGB,
-		output:         os.Stdout,
-		tickEvery:      time.Minute,
+		version:            version,
+		dataDir:            dataDir,
+		eventsLog:          eventsLog,
+		nodeName:           envOr("NODE_NAME", "bitcoin-node"),
+		settings:           settings,
+		settingsBaseline:   baseline,
+		settingsPath:       settingsPath,
+		settingsErr:        settingsErr,
+		settingsOverridden: overridden,
+		client:             newTorHTTPClient(torProxy),
+		now:                time.Now,
+		diskFreeGB:         freeGB,
+		output:             os.Stdout,
+		tickEvery:          time.Minute,
 	}
 }
 
@@ -150,7 +160,7 @@ func (m *Monitor) tick(info, network map[string]any) {
 		m.state.ibd = hasIBD && ibd
 
 		if blocks, ok := integer(info["blocks"]); ok {
-			if m.alertNewBlock && m.state.hasLastBlock && hasIBD && !ibd && blocks > m.state.lastBlock && blocks-m.state.lastBlock <= 6 {
+			if m.notificationSettings().AlertNewBlock && m.state.hasLastBlock && hasIBD && !ibd && blocks > m.state.lastBlock && blocks-m.state.lastBlock <= 6 {
 				m.sendTelegram("🟧 new block " + strconv.FormatInt(blocks, 10))
 			}
 			m.state.lastBlock = blocks
@@ -190,11 +200,12 @@ func (m *Monitor) tick(info, network map[string]any) {
 
 func (m *Monitor) sendTelegram(text string) {
 	m.logEvent(text)
-	if m.telegramToken == "" || m.telegramChatID == "" {
+	settings := m.notificationSettings()
+	if !settings.TelegramEnabled || settings.TelegramBotToken == "" || settings.TelegramChatID == "" {
 		return
 	}
 	payload, err := json.Marshal(map[string]string{
-		"chat_id": m.telegramChatID,
+		"chat_id": settings.TelegramChatID,
 		"text":    "[" + m.nodeName + "] " + text,
 	})
 	if err != nil {
@@ -202,7 +213,7 @@ func (m *Monitor) sendTelegram(text string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+m.telegramToken+"/sendMessage", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+settings.TelegramBotToken+"/sendMessage", bytes.NewReader(payload))
 	if err != nil {
 		m.writeOutput("Telegram send failed")
 		return
@@ -217,15 +228,16 @@ func (m *Monitor) sendTelegram(text string) {
 }
 
 func (m *Monitor) pingHealthchecks(healthy bool) bool {
-	if m.healthchecks == "" {
+	settings := m.notificationSettings()
+	if !settings.HealthchecksEnabled || settings.HealthchecksURL == "" {
 		return true
 	}
-	endpoint, err := url.Parse(m.healthchecks)
+	endpoint, err := url.Parse(settings.HealthchecksURL)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil {
 		m.logEvent("healthchecks ping failed: HTTPS URL required")
 		return false
 	}
-	url := m.healthchecks
+	url := settings.HealthchecksURL
 	if !healthy {
 		url += "/fail"
 	}

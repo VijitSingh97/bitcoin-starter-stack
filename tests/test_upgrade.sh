@@ -52,7 +52,7 @@ git remote add origin "$bare"
 git push -q origin HEAD --tags
 # Pin the datadir via config.json (gitignored, so it survives the upgrade's
 # checkout and is re-rendered identically on every configure).
-printf '{"bitcoin": {"data_dir": "%s"}}\n' "$data" >config.json
+printf '{"bitcoin": {"data_dir": "%s"}, "dashboard": {"password": "upgradetest"}}\n' "$data" >config.json
 
 # Pre-build both releases' images and tag them as the compose image refs
 # (ghcr…:0.0.2 / :0.0.1). The dashboard bakes VERSION at build time, so each
@@ -69,6 +69,12 @@ done
 docker compose up -d --wait --wait-timeout 300 || fail "v0.0.1 did not come up healthy"
 [ "$(docker network inspect btc_net --format '{{.Internal}}')" = false ] || fail "old release did not start with the legacy external network"
 
+# Seed a safe dashboard override so the upgrade backup proves UI-managed state
+# survives independently of config.json and .env.
+notification_settings='{"telegram_enabled":false,"telegram_bot_token":"","telegram_chat_id":"","healthchecks_enabled":false,"healthchecks_url":"","alert_new_block":true}'
+printf '%s\n' "$notification_settings" | docker exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/notification_settings.json' ||
+  fail "could not seed notification settings"
+
 # The upgrade: fetch tags, see v0.0.2 is newer, back up, check out, re-apply.
 out=$(./stack upgrade 2>&1) || fail "upgrade exited non-zero:
 $out"
@@ -76,7 +82,15 @@ echo "$out" | grep -q "Upgrading v0.0.1 -> v0.0.2" || fail "upgrade did not move
 $out"
 [ "$(cat VERSION)" = "0.0.2" ] || fail "checkout did not land on v0.0.2 (VERSION=$(cat VERSION))"
 [ "$(docker network inspect btc_net --format '{{.Internal}}')" = true ] || fail "upgrade retained the legacy external network"
-ls backups/stack-backup-*.tar.gz >/dev/null 2>&1 || fail "no pre-upgrade backup was written"
+archive=$(find backups -maxdepth 1 -type f -name 'stack-backup-*.tar.gz' -print | sort | tail -1)
+[ -n "$archive" ] || fail "no pre-upgrade backup was written"
+tar tzf "$archive" | grep -Eq '^\.?/?dashboard_state/notification_settings\.json$' ||
+  fail "pre-upgrade backup missing notification settings"
+archived_settings=$(tar xOf "$archive" ./dashboard_state/notification_settings.json 2>/dev/null || tar xOf "$archive" dashboard_state/notification_settings.json 2>/dev/null) ||
+  fail "could not read notification settings from pre-upgrade backup"
+printf '%s' "$archived_settings" | grep -q '"telegram_enabled":false' || fail "backup changed disabled Telegram setting"
+printf '%s' "$archived_settings" | grep -q '"healthchecks_enabled":false' || fail "backup changed disabled Healthchecks setting"
+printf '%s' "$archived_settings" | grep -q '"alert_new_block":true' || fail "backup changed new-block alert setting"
 
 # The stack must be healthy on the new release. `up -d` recreated the dashboard
 # (new image), so its healthcheck restarts — wait for it to re-heal.
@@ -95,7 +109,23 @@ for _ in $(seq 1 30); do
 done
 [ -n "$ok" ] || fail "stack not healthy after upgrade ($unhealthy)"
 # and serving the new baked version
-curl -fsS localhost 2>/dev/null | grep -q "v0.0.2" || fail "dashboard not serving v0.0.2 after upgrade"
+curl -fsS -u x:upgradetest localhost 2>/dev/null | grep -q "v0.0.2" || fail "dashboard not serving v0.0.2 after upgrade"
+docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
+  fail "notification settings did not survive upgrade"
+
+# Change the live file, restore the pre-upgrade archive, then recreate the
+# dashboard to prove it loads the restored override.
+docker exec -u 1000 dashboard sed -i 's/"alert_new_block":true/"alert_new_block":false/' /state/notification_settings.json ||
+  fail "could not alter notification settings before restore"
+./stack restore -y "$archive" >/dev/null || fail "could not restore pre-upgrade backup"
+docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
+  fail "restore did not recover notification settings"
+./stack apply >/dev/null || fail "could not apply configuration after restore"
+./stack restart dashboard >/dev/null || fail "dashboard did not restart with restored notification settings"
+docker compose up -d --no-deps --wait --wait-timeout 300 dashboard ||
+  fail "dashboard did not become healthy with restored notification settings"
+curl -fsS -u x:upgradetest localhost/api/settings 2>/dev/null | grep -q '"alert_new_block":true' ||
+  fail "dashboard did not load restored notification settings"
 
 # --- upgrade-agent: the host agent must consume a dashboard-written request ---
 # The Upgrade button (endpoint tested in test_node_status.py) drops this marker in

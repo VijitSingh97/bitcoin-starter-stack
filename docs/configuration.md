@@ -71,6 +71,17 @@ for the Tor-verified image download and first-install bootstrap process.
 
 ## Applying changes
 
+The dashboard gear can change Telegram, Healthchecks, and `alert_new_block`
+without restarting the node. It saves a separate persistent JSON override; see
+[Dashboard settings](notifications.md#dashboard-settings). Personal wallets are
+already managed by the watch-only card. Both require a dashboard password;
+notification changes additionally require the onion dashboard or localhost.
+
+Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
+cache and memory limits, RPC credentials, `inbound_onion`, and dashboard password,
+bind address, onion publication, and `control`. They change storage, process
+limits, access, or host privileges and require an explicit server-side apply.
+
 ```bash
 nano config.json
 ./stack apply    # re-renders .env and recreates only the containers that changed

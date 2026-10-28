@@ -11,7 +11,7 @@ if [ "${DASHBOARD_ONION:-0}" = "1" ]; then
 
 # Dashboard hidden service (dashboard.onion in config.json)
 HiddenServiceDir /var/lib/tor/dashboard_onion/
-HiddenServicePort 80 172.29.0.27:8000
+HiddenServicePort 80 172.29.0.27:8001
 EOF
 fi
 

@@ -256,7 +256,8 @@ func TestHealthchecksRejectsUnencryptedOrCredentialedURLs(t *testing.T) {
 				t.Fatal("invalid URL reached the network")
 				return nil, nil
 			})
-			m.healthchecks = endpoint
+			m.settings.HealthchecksEnabled = true
+			m.settings.HealthchecksURL = endpoint
 			if m.pingHealthchecks(true) {
 				t.Fatal("invalid Healthchecks URL was accepted")
 			}

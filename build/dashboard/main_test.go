@@ -341,9 +341,46 @@ func TestRuntimeConfigKeepsPasswordOptional(t *testing.T) {
 	t.Setenv("RPC_PASSWORD", "rpc-password")
 	t.Setenv("DASHBOARD_PASSWORD", "")
 	t.Setenv("STACK_VERSION", " 1.31.1 ")
+	t.Setenv("SETTINGS_PORT", "")
 	cfg, err := envConfig()
-	if err != nil || cfg.dashboardPassword != "" || cfg.version != "1.31.1" {
+	if err != nil || cfg.dashboardPassword != "" || cfg.version != "1.31.1" || cfg.settingsPort != "" {
 		t.Fatalf("configuration: %#v %v", cfg, err)
+	}
+}
+
+func TestSettingsPortConfigIsOptionalDistinctAndValid(t *testing.T) {
+	t.Setenv("RPC_USER", "rpc-user")
+	t.Setenv("RPC_PASSWORD", "rpc-password")
+	t.Setenv("PORT", "8000")
+	t.Setenv("SETTINGS_PORT", "8001")
+	cfg, err := envConfig()
+	if err != nil || cfg.settingsPort != "8001" {
+		t.Fatalf("valid settings port: %#v %v", cfg, err)
+	}
+	for _, value := range []string{"8000", "08000", "0", "65536", "invalid"} {
+		t.Setenv("SETTINGS_PORT", value)
+		if _, err := envConfig(); err == nil {
+			t.Fatalf("SETTINGS_PORT=%q was accepted", value)
+		}
+	}
+}
+
+func TestServeHTTPServersStopsAllListeners(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	servers := []*http.Server{
+		{Addr: "127.0.0.1:0", Handler: http.NotFoundHandler()},
+		{Addr: "127.0.0.1:0", Handler: http.NotFoundHandler()},
+	}
+	done := make(chan error, 1)
+	go func() { done <- serveHTTPServers(ctx, servers) }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("HTTP servers did not stop after cancellation")
 	}
 }
 

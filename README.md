@@ -45,6 +45,9 @@ wallet addresses stay on your node.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
+- ⚙️ **Notification settings that stick.** Configure Telegram, Healthchecks, and
+  new-block alerts from the gear menu through the onion dashboard or localhost.
+  Secrets stay masked and a separate JSON override survives reboots and upgrades.
 - 👀 **Balances from your own node.** Import an address, `xpub`, `zpub`, or public
   descriptor. New imports show **Pending history…** until the scan finishes, so an
   unfinished scan never looks like an empty wallet. A clearly marked public Binance

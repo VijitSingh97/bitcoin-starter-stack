@@ -108,6 +108,8 @@ WantedBy=multi-user.target
 ```bash
 ./stack backup                          # writes backups/stack-backup-<ts>.tar.gz
 ./stack restore backups/stack-backup-<ts>.tar.gz
+./stack apply
+./stack restart dashboard               # reload restored dashboard state
 ```
 
 A backup holds everything that can't be re-derived — and nothing else:
@@ -115,6 +117,10 @@ A backup holds everything that can't be re-derived — and nothing else:
 - `config.json` and `.env` (settings + credentials)
 - the node's inbound-onion key (`onion_v3_private_key`, if enabled)
 - the dashboard onion keys (from the tor volume, if enabled)
+- the full `dashboard_state` volume: watch-only wallet roster and balance
+  history (including entries that still need a rescan), pending upgrade
+  request, event log, and dashboard-saved notification settings
+  (`notification_settings.json`)
 
 Losing the onion keys means new `.onion` addresses, so back up after
 enabling either onion feature. The chain itself is re-derivable from the

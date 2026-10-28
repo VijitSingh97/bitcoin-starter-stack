@@ -37,6 +37,8 @@ echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION defau
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
+echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
+grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"
 
 # The plaintext RPC password reaches ONLY the dashboard (bitcoind gets the
 # rpcauth hash) — exactly one occurrence in the whole rendered config

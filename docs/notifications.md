@@ -1,5 +1,25 @@
 # Notifications & Remote Access
 
+## Dashboard settings
+
+The gear at the bottom right opens Telegram, Healthchecks, and new-block alert
+settings. Changes apply immediately without restarting Bitcoin. A dashboard
+password is required. Use the Tor onion dashboard (enable `dashboard.onion` in
+`config.json` and open the address shown by `./stack doctor` in Tor Browser), or
+a localhost connection on the node. LAN HTTP shows these settings read-only so
+tokens cannot be entered over an unencrypted network connection.
+
+Dashboard changes are written atomically to `notification_settings.json` in the
+persistent `dashboard_state` volume, with owner-only permissions. They survive
+reboots, container recreation, and upgrades, and the existing stack backup/restore
+includes them. Saved overrides take priority over the notification values in
+`config.json`. **Use server config** removes the override and restores those
+values. After editing the server file, apply it and reset the override if needed.
+
+The browser never receives saved bot tokens or Healthchecks ping URLs. Leave a
+replacement field blank to retain its value. Disabling a service clears its
+credentials from the dashboard override; the server configuration is unchanged.
+
 Three opt-in ways to keep an eye on the node when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access
 over Tor. All three are off until configured, and every outbound
@@ -57,8 +77,9 @@ is positive.
 `./stack apply`, and you'll get the 🚀 message within a minute.
 
 > NOTE: The bot token can send messages as your bot if leaked, but it can't
-> read other chats or touch the node. It lives only in the gitignored `.env`
-> and the dashboard container's environment.
+> read other chats or touch the node. Server-configured tokens live in the
+> gitignored configuration and environment; dashboard overrides live in the
+> private persistent settings JSON. Backups contain these credentials too.
 
 ---
 

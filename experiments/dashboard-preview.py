@@ -2,6 +2,7 @@
 """Render the real dashboard with public and fictional data for README screenshots."""
 
 import importlib.util
+import base64
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,8 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +28,33 @@ fixture.RESULTS["listwallets"] = []
 class Preview(BaseHTTPRequestHandler):
     def log_message(self, _format, *_args):
         pass
+
+    def forward(self, method="GET", body=None):
+        headers = {"Authorization": "Basic " + base64.b64encode(b"demo:fakepw").decode()}
+        if body is not None:
+            headers.update({"Content-Type": "application/json", "X-Requested-With": "fetch"})
+        request = Request("http://127.0.0.1:18092" + self.path, data=body, headers=headers, method=method)
+        try:
+            response = urlopen(request, timeout=5)
+        except HTTPError as error:
+            response = error
+        with response:
+            result = response.read()
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.headers.get("Content-Type", "application/octet-stream"))
+            self.send_header("Content-Length", str(len(result)))
+            self.end_headers()
+            self.wfile.write(result)
+
+    def do_POST(self):
+        if self.path != "/api/settings":
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 < length <= 16384:
+            self.send_error(400)
+            return
+        self.forward("POST", self.rfile.read(length))
 
     def do_GET(self):
         if self.path == "/api/watch":
@@ -66,12 +95,10 @@ class Preview(BaseHTTPRequestHandler):
             content_type = "application/json"
         else:
             try:
-                with urlopen("http://127.0.0.1:18092" + self.path, timeout=5) as response:
-                    body = response.read()
-                    content_type = response.headers.get("Content-Type", "application/octet-stream")
+                self.forward()
             except OSError:
                 self.send_error(503)
-                return
+            return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -89,7 +116,7 @@ if __name__ == "__main__":
         env = dict(os.environ, RPC_URL="http://127.0.0.1:18091", RPC_USER="go", RPC_PASSWORD="fakepw",
                    STATE_DIR=directory, DATA_DIR=directory, PORT="18092", WATCH_WALLETS_B64="W10=",
                    STACK_VERSION="Go dashboard preview", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="",
-                   HEALTHCHECKS_URL="", DASHBOARD_PASSWORD="", DASHBOARD_CONTROL="0")
+                   HEALTHCHECKS_URL="", DASHBOARD_PASSWORD="fakepw", DASHBOARD_CONTROL="0")
         process = subprocess.Popen([str(binary)], cwd=dashboard, env=env)
         try:
             print("Sanitized screenshot preview: http://127.0.0.1:18090", flush=True)

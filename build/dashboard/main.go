@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,6 +38,7 @@ type config struct {
 	stateDir          string
 	version           string
 	port              string
+	settingsPort      string
 	control           bool
 }
 
@@ -181,6 +183,9 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger}
 	a.watch = NewWatchStore(cfg.stateDir)
 	a.monitor = NewMonitor(cfg.version, cfg.dataDir, cfg.stateDir)
+	if a.monitor.settingsErr != nil {
+		a.log.Print("notification settings unavailable; alerts disabled until the state file is repaired and the dashboard restarts")
+	}
 	a.prices = NewPriceCache()
 	a.ctx = context.Background()
 	a.fees = []float64{}
@@ -193,6 +198,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /metrics", a.metrics)
 	mux.HandleFunc("GET /api/fees", a.apiFees)
 	mux.HandleFunc("GET /api/prices", a.apiPrices)
+	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
+	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
 	mux.HandleFunc("POST /api/watch", a.apiWatchAdd)
 	mux.HandleFunc("DELETE /api/watch/{name}", a.apiWatchRemove)
@@ -203,6 +210,26 @@ func (a *app) routes() http.Handler {
 		a.static.ServeHTTP(w, r)
 	}))
 	return a.auth(mux)
+}
+
+type settingsAccessKey struct{}
+
+func allowSettings(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), settingsAccessKey{}, true)))
+	})
+}
+
+func canConfigureSettings(r *http.Request) bool {
+	if allowed, _ := r.Context().Value(settingsAccessKey{}).(bool); allowed || r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (a *app) auth(next http.Handler) http.Handler {
@@ -648,7 +675,7 @@ func versionLabel(version string) string {
 func envConfig() (config, error) {
 	cfg := config{
 		rpcURL: os.Getenv("RPC_URL"), rpcUser: os.Getenv("RPC_USER"), rpcPassword: os.Getenv("RPC_PASSWORD"),
-		dashboardPassword: os.Getenv("DASHBOARD_PASSWORD"), dataDir: os.Getenv("DATA_DIR"), stateDir: os.Getenv("STATE_DIR"), version: strings.TrimSpace(os.Getenv("STACK_VERSION")), port: os.Getenv("PORT"),
+		dashboardPassword: os.Getenv("DASHBOARD_PASSWORD"), dataDir: os.Getenv("DATA_DIR"), stateDir: os.Getenv("STATE_DIR"), version: strings.TrimSpace(os.Getenv("STACK_VERSION")), port: os.Getenv("PORT"), settingsPort: os.Getenv("SETTINGS_PORT"),
 	}
 	if cfg.rpcURL == "" {
 		cfg.rpcURL = "http://172.29.0.26:8332"
@@ -666,6 +693,15 @@ func envConfig() (config, error) {
 	if err != nil || portNumber < 1 || portNumber > 65535 {
 		return config{}, errors.New("PORT must be between 1 and 65535")
 	}
+	if cfg.settingsPort != "" {
+		settingsPortNumber, err := strconv.Atoi(cfg.settingsPort)
+		if err != nil || settingsPortNumber < 1 || settingsPortNumber > 65535 {
+			return config{}, errors.New("SETTINGS_PORT must be between 1 and 65535")
+		}
+		if settingsPortNumber == portNumber {
+			return config{}, errors.New("SETTINGS_PORT must differ from PORT")
+		}
+	}
 	if cfg.version == "" {
 		if baked, err := os.ReadFile("VERSION"); err == nil {
 			cfg.version = strings.TrimSpace(string(baked))
@@ -679,6 +715,53 @@ func envConfig() (config, error) {
 		return config{}, errors.New("RPC_USER and RPC_PASSWORD are required")
 	}
 	return cfg, nil
+}
+
+func serveHTTPServers(ctx context.Context, servers []*http.Server) error {
+	listeners := make([]net.Listener, 0, len(servers))
+	for _, server := range servers {
+		listener, err := net.Listen("tcp", server.Addr)
+		if err != nil {
+			for _, opened := range listeners {
+				_ = opened.Close()
+			}
+			return err
+		}
+		listeners = append(listeners, listener)
+	}
+
+	errorsByServer := make(chan error, len(servers))
+	for i, server := range servers {
+		go func(server *http.Server, listener net.Listener) {
+			errorsByServer <- server.Serve(listener)
+		}(server, listeners[i])
+	}
+
+	var firstErr error
+	consumed := false
+	select {
+	case <-ctx.Done():
+	case err := <-errorsByServer:
+		consumed = true
+		if !errors.Is(err, http.ErrServerClosed) {
+			firstErr = err
+		}
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, server := range servers {
+		_ = server.Shutdown(shutdownCtx)
+	}
+	remaining := len(servers)
+	if consumed {
+		remaining--
+	}
+	for range remaining {
+		if err := <-errorsByServer; firstErr == nil && !errors.Is(err, http.ErrServerClosed) {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func main() {
@@ -704,15 +787,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	a.startBackground(ctx)
-	server := &http.Server{Addr: ":" + cfg.port, Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
+	handler := a.routes()
+	servers := []*http.Server{{Addr: ":" + cfg.port, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second}}
+	if cfg.settingsPort != "" {
+		servers = append(servers, &http.Server{Addr: ":" + cfg.settingsPort, Handler: allowSettings(handler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second})
+		logger.Printf("onion settings listener enabled on :%s", cfg.settingsPort)
+	}
 	logger.Printf("dashboard listening on :%s", cfg.port)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveHTTPServers(ctx, servers); err != nil {
 		log.Fatal(err)
 	}
 }
