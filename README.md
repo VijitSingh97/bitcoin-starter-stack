@@ -2,7 +2,7 @@
 
 # Bitcoin Starter Stack
 
-### Your node. Your balances. Tor for every internet connection.
+### A very lightweight dashboard for monitoring your new or existing Bitcoin node.
 
 [![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -22,6 +22,10 @@ wallet addresses stay on your node.
 
 ## What it does
 
+- 🪶 **Small dashboard, low overhead.** A single Go binary with no third-party
+  runtime dependencies. The full dashboard used about **8 MiB of working memory**
+  in our [mini-1 benchmark](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/c9cdd75/experiments/go-dashboard-results/mini-1-full-port-2026-10-27/README.md).
+  Bitcoin Core's memory and chain storage are separate.
 - 🟠 **Full Bitcoin node.** The official Bitcoin Core image (digest-pinned, Dependabot-updated)
   validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
   config key.
