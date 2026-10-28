@@ -266,7 +266,7 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "set dashboard.password to manage notification settings", http.StatusForbidden)
 		return
 	}
-	view, err := a.monitor.settingsView(canConfigureSettings(r))
+	view, err := a.monitor.settingsView(true)
 	if err != nil {
 		http.Error(w, "notification settings unavailable", http.StatusServiceUnavailable)
 		return
@@ -277,10 +277,6 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
 	if a.cfg.dashboardPassword == "" {
 		http.Error(w, "set dashboard.password to manage notification settings", http.StatusForbidden)
-		return
-	}
-	if !canConfigureSettings(r) {
-		http.Error(w, "notification settings require encrypted Tor access or localhost", http.StatusForbidden)
 		return
 	}
 	if rejectCSRF(w, r) {

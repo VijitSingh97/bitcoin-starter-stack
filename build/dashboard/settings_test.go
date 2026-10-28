@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,7 +17,9 @@ import (
 
 func settingsRequest(handler http.Handler, method, password, body string, csrf bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
-	req.RemoteAddr = "127.0.0.1:12345"
+	req.RemoteAddr = "192.0.2.10:12345"
+	req.Host = "spoofed-address.onion"
+	req.Header.Set("X-Forwarded-Proto", "https")
 	if password != "" {
 		req.SetBasicAuth("dashboard", password)
 	}
@@ -42,6 +43,12 @@ func TestSettingsAPIRequiresPasswordAndNeverReturnsSecrets(t *testing.T) {
 	}
 
 	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	if got := settingsRequest(handler, http.MethodGet, "", "", false); got.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated GET = %d, want 401", got.Code)
+	}
+	if got := settingsRequest(handler, http.MethodGet, "wrong-password", "", false); got.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-password GET = %d, want 401", got.Code)
+	}
 	response := settingsRequest(handler, http.MethodGet, "dashboard-secret", "", false)
 	if response.Code != http.StatusOK {
 		t.Fatalf("GET status = %d: %s", response.Code, response.Body.String())
@@ -58,66 +65,42 @@ func TestSettingsAPIRequiresPasswordAndNeverReturnsSecrets(t *testing.T) {
 		t.Fatalf("unexpected settings view: %#v", view)
 	}
 	if view["can_configure"] != true {
-		t.Fatalf("loopback settings view is not configurable: %#v", view)
+		t.Fatalf("authenticated LAN settings view is not configurable: %#v", view)
 	}
 }
 
-func TestSettingsWritesRejectSpoofedOnionAndForwardedHTTPS(t *testing.T) {
+func TestSettingsLANWriteRequiresAuthAndCSRFPersistsAcrossRestart(t *testing.T) {
 	a, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
-	get := httptest.NewRequest(http.MethodGet, "http://node.example/api/settings", nil)
-	get.RemoteAddr = "192.0.2.10:4321"
-	get.Host = "spoofed-address.onion"
-	get.Header.Set("X-Forwarded-Proto", "https")
-	get.SetBasicAuth("dashboard", "dashboard-secret")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, get)
-	if w.Code != http.StatusOK {
-		t.Fatalf("read-only GET = %d: %s", w.Code, w.Body.String())
-	}
-	var view map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || view["can_configure"] != false {
-		t.Fatalf("spoofed settings view = %#v, %v", view, err)
-	}
-
 	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
-	post := httptest.NewRequest(http.MethodPost, "http://node.example/api/settings", strings.NewReader(body))
-	post.RemoteAddr = "192.0.2.10:4321"
-	post.Host = "spoofed-address.onion"
-	post.Header.Set("X-Forwarded-Proto", "https")
-	post.Header.Set("X-Requested-With", "fetch")
-	post.SetBasicAuth("dashboard", "dashboard-secret")
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, post)
-	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "encrypted Tor access or localhost") {
-		t.Fatalf("spoofed POST = %d: %s", w.Code, w.Body.String())
+	if got := settingsRequest(handler, http.MethodPost, "", body, true); got.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated LAN POST = %d, want 401", got.Code)
+	}
+	if got := settingsRequest(handler, http.MethodPost, "wrong-password", body, true); got.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-password LAN POST = %d, want 401", got.Code)
+	}
+	if got := settingsRequest(handler, http.MethodPost, "dashboard-secret", body, false); got.Code != http.StatusForbidden {
+		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
 	}
 	if a.monitor.settingsOverridden {
-		t.Fatal("spoofed POST changed settings")
+		t.Fatal("rejected LAN POST changed settings")
 	}
-}
-
-func TestSettingsWritesAllowInternalListenerAndRealTLS(t *testing.T) {
-	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
-	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
-	post := httptest.NewRequest(http.MethodPost, "http://dashboard:8001/api/settings", strings.NewReader(body))
-	post.RemoteAddr = "172.29.0.25:4321"
-	post.Header.Set("X-Requested-With", "fetch")
-	post.SetBasicAuth("dashboard", "dashboard-secret")
-	w := httptest.NewRecorder()
-	allowSettings(handler).ServeHTTP(w, post)
-	if w.Code != http.StatusOK {
-		t.Fatalf("internal settings POST = %d: %s", w.Code, w.Body.String())
+	post := settingsRequest(handler, http.MethodPost, "dashboard-secret", body, true)
+	if post.Code != http.StatusOK {
+		t.Fatalf("authenticated LAN POST = %d: %s", post.Code, post.Body.String())
 	}
 
-	get := httptest.NewRequest(http.MethodGet, "https://node.example/api/settings", nil)
-	get.RemoteAddr = "192.0.2.10:4321"
-	get.TLS = &tls.ConnectionState{}
-	get.SetBasicAuth("dashboard", "dashboard-secret")
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, get)
+	root := filepath.Dir(sourceFile(t))
+	restarted, err := newApp(a.cfg, a.rpc, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := settingsRequest(restarted.routes(), http.MethodGet, "dashboard-secret", "", false)
 	var view map[string]any
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &view) != nil || view["can_configure"] != true {
-		t.Fatalf("TLS settings GET = %d %#v", w.Code, view)
+	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
+		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
+	}
+	if view["can_configure"] != true || view["overridden"] != true || view["alert_new_block"] != true {
+		t.Fatalf("restarted LAN settings view = %#v", view)
 	}
 }
 

@@ -132,16 +132,21 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' |
 curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1" ||
   fail "metrics endpoint missing bitcoin_node_up"
 
-curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"can_configure":false' ||
-  fail "LAN HTTP can edit notification secrets"
-code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2edash \
-  -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' -d '{"reset":true}' "$dashboard_url/api/settings")
-[ "$code" = 403 ] || fail "LAN HTTP accepted a notification settings write"
-settings_auth=$(printf 'x:e2edash' | base64 | tr -d '\n')
+curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"can_configure":true' ||
+  fail "authenticated LAN settings are not configurable"
 settings_body='{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}'
-printf 'POST /api/settings HTTP/1.1\r\nHost: localhost\r\nAuthorization: Basic %s\r\nX-Requested-With: fetch\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
-  "$settings_auth" "${#settings_body}" "$settings_body" | docker exec -i dashboard nc -w 3 127.0.0.1 8001 | grep -q '"overridden":true' ||
-  fail "internal notification settings write failed"
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -H 'X-Requested-With: fetch' \
+  -H 'Content-Type: application/json' -d "$settings_body" "$dashboard_url/api/settings")
+[ "$code" = 401 ] || fail "unauthenticated LAN notification settings write was not denied"
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:wrong -H 'X-Requested-With: fetch' \
+  -H 'Content-Type: application/json' -d "$settings_body" "$dashboard_url/api/settings")
+[ "$code" = 401 ] || fail "wrong-password LAN notification settings write was not denied"
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2edash \
+  -H 'Content-Type: application/json' -d "$settings_body" "$dashboard_url/api/settings")
+[ "$code" = 403 ] || fail "LAN notification settings write without CSRF header was not denied"
+curl --noproxy '*' -sf -u x:e2edash -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+  -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":true' ||
+  fail "authenticated LAN notification settings write failed"
 docker exec dashboard sh -c 'test "$(stat -c %a /state/notification_settings.json)" = 600' ||
   fail "saved notification settings are not private"
 docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashboard ||
@@ -149,8 +154,8 @@ docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashbo
 curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
   fail "notification settings did not survive container recreation"
 settings_body='{"reset":true}'
-printf 'POST /api/settings HTTP/1.1\r\nHost: localhost\r\nAuthorization: Basic %s\r\nX-Requested-With: fetch\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
-  "$settings_auth" "${#settings_body}" "$settings_body" | docker exec -i dashboard nc -w 3 127.0.0.1 8001 | grep -q '"overridden":false' ||
+curl --noproxy '*' -sf -u x:e2edash -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+  -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":false' ||
   fail "notification reset did not restore the server configuration"
 
 restarts=$(docker inspect tor --format '{{.RestartCount}}')

@@ -212,26 +212,6 @@ func (a *app) routes() http.Handler {
 	return a.auth(mux)
 }
 
-type settingsAccessKey struct{}
-
-func allowSettings(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), settingsAccessKey{}, true)))
-	})
-}
-
-func canConfigureSettings(r *http.Request) bool {
-	if allowed, _ := r.Context().Value(settingsAccessKey{}).(bool); allowed || r.TLS != nil {
-		return true
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func (a *app) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.cfg.dashboardPassword == "" {
@@ -790,7 +770,7 @@ func main() {
 	handler := a.routes()
 	servers := []*http.Server{{Addr: ":" + cfg.port, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second}}
 	if cfg.settingsPort != "" {
-		servers = append(servers, &http.Server{Addr: ":" + cfg.settingsPort, Handler: allowSettings(handler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second})
+		servers = append(servers, &http.Server{Addr: ":" + cfg.settingsPort, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second})
 		logger.Printf("onion settings listener enabled on :%s", cfg.settingsPort)
 	}
 	logger.Printf("dashboard listening on :%s", cfg.port)

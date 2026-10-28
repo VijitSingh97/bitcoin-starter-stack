@@ -79,7 +79,7 @@ if (typeof document !== "undefined") {
     status.textContent = "Loading…";
     try {
       render(await request());
-      status.textContent = allowed ? "" : "Open the Tor onion dashboard or use a localhost connection to change notifications. LAN HTTP is read-only for settings.";
+      status.textContent = allowed ? "" : "Set a dashboard password in config.json to manage notifications.";
     }
     catch (error) { status.textContent = error.message; }
   }

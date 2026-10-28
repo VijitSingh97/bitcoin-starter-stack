@@ -4,10 +4,9 @@
 
 The gear at the bottom right opens Telegram, Healthchecks, and new-block alert
 settings. Changes apply immediately without restarting Bitcoin. A dashboard
-password is required. Use the Tor onion dashboard (enable `dashboard.onion` in
-`config.json` and open the address shown by `./stack doctor` in Tor Browser), or
-a localhost connection on the node. LAN HTTP shows these settings read-only so
-tokens cannot be entered over an unencrypted network connection.
+password is required. The gear works from localhost, a configured private LAN
+address, or the Tor onion dashboard (enable `dashboard.onion` in `config.json`
+and open the address shown by `./stack doctor` in Tor Browser).
 
 Dashboard changes are written atomically to `notification_settings.json` in the
 persistent `dashboard_state` volume, with owner-only permissions. They survive

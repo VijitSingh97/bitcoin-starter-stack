@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { notificationPayload, configurationAccess } from "./settings.js";
 
-test("settings remain read-only unless the server confirms the management path", () => {
+test("settings remain read-only unless the server confirms configuration access", () => {
   assert.equal(configurationAccess({ can_configure: true }), true);
   for (const data of [undefined, {}, { can_configure: false }, { can_configure: "true" }]) {
     assert.equal(configurationAccess(data), false);
