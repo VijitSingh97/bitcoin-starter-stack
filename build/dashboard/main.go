@@ -169,6 +169,7 @@ type app struct {
 	log      *log.Logger
 	watch    *WatchStore
 	monitor  *Monitor
+	prices   *PriceCache
 	ctx      context.Context
 }
 
@@ -180,6 +181,7 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger}
 	a.watch = NewWatchStore(cfg.stateDir)
 	a.monitor = NewMonitor(cfg.version, cfg.dataDir, cfg.stateDir)
+	a.prices = NewPriceCache()
 	a.ctx = context.Background()
 	a.fees = []float64{}
 	return a, nil
@@ -190,6 +192,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /", a.index)
 	mux.HandleFunc("GET /metrics", a.metrics)
 	mux.HandleFunc("GET /api/fees", a.apiFees)
+	mux.HandleFunc("GET /api/prices", a.apiPrices)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
 	mux.HandleFunc("POST /api/watch", a.apiWatchAdd)
 	mux.HandleFunc("DELETE /api/watch/{name}", a.apiWatchRemove)
@@ -349,6 +352,10 @@ func (a *app) apiFees(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"fee": fees})
 }
 
+func (a *app) apiPrices(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, a.prices.Snapshot())
+}
+
 func (a *app) nodeRPC(method string, params []any) any {
 	var result any
 	if a.rpc.call(a.ctx, method, params, &result) != nil {
@@ -377,13 +384,23 @@ func rejectCSRF(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.dashboardPassword == "" && len(a.watch.Entries()) > 0 {
+	entries := a.watch.Entries()
+	if a.cfg.dashboardPassword == "" && len(entries) > 0 && !publicGenesisRoster(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
 		return
 	}
-	view := a.watch.List(a.walletRPC)
+	var chain blockchainInfo
+	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
+	view := a.watch.List(a.walletRPC, chain.InitialBlockDownload)
 	view["has_password"] = a.cfg.dashboardPassword != ""
 	writeJSON(w, view)
+}
+
+func publicGenesisRoster(entries []WatchEntry) bool {
+	if len(entries) != 1 || entries[0].Key != genesisAddress {
+		return false
+	}
+	return entries[0].Name == "Genesis" || entries[0].Name == "Satoshi"
 }
 
 func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +440,8 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	go ProvisionOne(a.nodeRPC, a.walletRPC, saved, false)
+	a.watch.SetPending(saved.Key, true)
+	go a.provision(saved, chain.Pruned)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -436,11 +454,23 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if !a.watch.Remove(name) {
+	var entry WatchEntry
+	for _, candidate := range a.watch.Entries() {
+		if candidate.Name == name {
+			entry = candidate
+			break
+		}
+	}
+	if entry.Name == "" {
 		http.Error(w, "no such wallet", 404)
 		return
 	}
-	Deprovision(a.nodeRPC, name)
+	coreName, _ := a.watch.resolveWallet(a.walletRPC, entry)
+	if !a.watch.RemoveExact(entry) {
+		http.Error(w, "no such wallet", 404)
+		return
+	}
+	a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, coreName)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -483,11 +513,16 @@ func (a *app) recordFee(value float64) {
 
 func (a *app) startBackground(ctx context.Context) {
 	a.ctx = ctx
+	entries := a.watch.Entries()
+	for _, entry := range entries {
+		a.watch.SetPending(entry.Key, true)
+	}
 	chain := func() map[string]any {
 		result, _ := a.nodeRPC("getblockchaininfo", nil).(map[string]any)
 		return result
 	}
 	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
+	go a.prices.Run(ctx)
 	go a.monitor.Run(ctx, chain, network)
 	go a.every(ctx, time.Minute, func(ctx context.Context) {
 		var info blockchainInfo
@@ -506,14 +541,14 @@ func (a *app) startBackground(ctx context.Context) {
 		}
 	})
 	go func() {
-		if len(a.watch.Entries()) == 0 {
-			return
-		}
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			if info := chain(); info != nil {
-				EnsureWallets(a.nodeRPC, a.walletRPC, a.watch.Entries(), info["pruned"] == true)
+				for _, entry := range a.watch.Entries() {
+					a.watch.SetPending(entry.Key, true)
+					a.provision(entry, info["pruned"] == true)
+				}
 				return
 			}
 			select {
@@ -523,6 +558,20 @@ func (a *app) startBackground(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (a *app) provision(entry WatchEntry, pruned bool) {
+	if !a.watch.Contains(entry) {
+		return
+	}
+	defer a.watch.ClearPendingIfCurrent(entry)
+	name, ok := ProvisionOne(a.nodeRPC, a.walletRPC, entry, pruned)
+	if !ok {
+		return
+	}
+	if !a.watch.SetCoreWalletIfCurrent(entry, name) {
+		a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, name)
+	}
 }
 
 func (a *app) every(ctx context.Context, interval time.Duration, fn func(context.Context)) {

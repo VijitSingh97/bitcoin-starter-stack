@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -30,7 +31,7 @@ ZPUB = (
 CASES = [
     ("xpub", XPUB),
     ("zpub", ZPUB),
-    ("satoshi-address", GENESIS_ADDR),
+    ("Genesis", GENESIS_ADDR),
     ("satoshi-pubkey", f"pkh({GENESIS_PUBKEY})"),
 ]
 
@@ -71,35 +72,46 @@ def bitcoin_cli(method, params=None, wallet=None):
     return json.loads(result.stdout)
 
 
-def wait_for_wallet(name):
+def core_wallet_name(key):
+    return "watch_" + hashlib.sha256(key.strip().encode()).hexdigest()
+
+
+def wait_for_wallet(key):
+    name = core_wallet_name(key)
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         try:
-            return bitcoin_cli("getwalletinfo", wallet=f"watch_{name}")
+            info = bitcoin_cli("getwalletinfo", wallet=name)
+            imported = bitcoin_cli("listdescriptors", wallet=name)
+            if imported.get("descriptors"):
+                return name, info
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
-            time.sleep(1)
-    raise RuntimeError(f"wallet watch_{name} was not provisioned")
+            pass
+        time.sleep(1)
+    raise RuntimeError(f"wallet {name} was not provisioned")
 
 
 failures = []
 for label, key in CASES:
-    status, body = dashboard("POST", "/api/watch", {"name": label, "key": key, "birthday": ""})
-    if status != 200:
-        failures.append(f"{label}: dashboard returned HTTP {status}: {body}")
-        continue
+    if label != "Genesis":
+        status, body = dashboard("POST", "/api/watch", {"name": label, "key": key, "birthday": ""})
+        if status != 200:
+            failures.append(f"{label}: dashboard returned HTTP {status}: {body}")
+            continue
     try:
-        info = wait_for_wallet(label)
+        wallet, info = wait_for_wallet(key)
     except RuntimeError as error:
         failures.append(f"{label}: {error}")
         continue
     if not info.get("descriptors") or info.get("private_keys_enabled"):
         failures.append(f"{label}: wallet is not watch-only descriptor wallet: {info}")
     else:
-        print(f"  OK {label}: watch_{label} provisioned through the Go API")
+        print(f"  OK {label}: {wallet} provisioned through the Go API")
 
-for label in ("satoshi-address", "satoshi-pubkey"):
+for label, key in CASES[-2:]:
+    wallet = core_wallet_name(key)
     try:
-        address = bitcoin_cli("getaddressinfo", [GENESIS_ADDR], wallet=f"watch_{label}")
+        address = bitcoin_cli("getaddressinfo", [GENESIS_ADDR], wallet=wallet)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
         failures.append(f"{label}: getaddressinfo failed: {error}")
         continue
@@ -107,6 +119,27 @@ for label in ("satoshi-address", "satoshi-pubkey"):
         failures.append(f"{label}: genesis address is not watched")
     else:
         print(f"  OK {label}: watches {GENESIS_ADDR}")
+
+try:
+    legacy = "watch_reuse"
+    bitcoin_cli("createwallet", [legacy, "true", "true", "", "false", "true", "true"])
+    descriptor = bitcoin_cli("getdescriptorinfo", [f"addr({GENESIS_ADDR})"])["descriptor"]
+    bitcoin_cli("importdescriptors", [json.dumps([{"desc": descriptor, "timestamp": 0}])], wallet=legacy)
+    native = f"wpkh({XPUB}/<0;1>/*)"
+    status, body = dashboard("POST", "/api/watch", {"name": "reuse", "key": native, "birthday": ""})
+    if status != 200:
+        raise RuntimeError(f"reused label returned HTTP {status}: {body}")
+    wallet, _ = wait_for_wallet(native)
+    descriptors = bitcoin_cli("listdescriptors", wallet=wallet)["descriptors"]
+    if len(descriptors) != 2 or not all(item["desc"].startswith("wpkh(") for item in descriptors):
+        raise RuntimeError("reused label did not import both native SegWit branches")
+    if not bitcoin_cli("getaddressinfo", [GENESIS_ADDR], wallet=legacy).get("ismine"):
+        raise RuntimeError("mismatched legacy wallet was changed")
+    if dashboard("POST", "/api/watch", {"name": "duplicate", "key": native})[0] != 400:
+        raise RuntimeError("duplicate key under another label was accepted")
+    print("  OK reused label: imports the new key and preserves the old Core wallet")
+except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+    failures.append(f"reused label: {error}")
 
 if failures:
     print("FAIL: watch-only provisioning\n  " + "\n  ".join(failures))

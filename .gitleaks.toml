@@ -13,5 +13,6 @@ paths = [
 regexes = [
   '''create_a_(username|password)_for_node''',
   '''^(?:bench:)?benchpass$''',
+  '''1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa''',
   '''zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs''',
 ]

@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Replaced the Python dashboard runtime with a standard-library Go server while
+  retaining the Python reference tests and shared HTTP parity checks.
+- Fresh full-node installs include the public Genesis watch-only address, and
+  incomplete imports display pending history above the block tower.
+- Personal wallet views and wallet/upgrade changes require a dashboard password;
+  public status and the Genesis example remain available on the trusted LAN.
+
+### Added
+
+- Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
+  and explicit unavailable/stale states.
+- An address-type selector for wallets that export a bare xpub for SegWit accounts.
+
+### Fixed
+
+- Reusing a watch-only label with a different public key no longer reads the old
+  Core wallet's balance. Existing matching imports and history are preserved.
+- Private keys are rejected before wallet persistence; legacy files containing
+  private material are secured and preserved for operator recovery.
+
 ## [1.31.1] - 2026-10-27
 
 ### Changed
@@ -829,6 +853,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[Unreleased]: https://github.com/VijitSingh97/bitcoin-starter-stack/compare/v1.31.1...HEAD
 [1.31.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.1
 [1.31.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.0
 [1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0

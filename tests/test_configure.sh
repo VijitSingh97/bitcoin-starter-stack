@@ -79,8 +79,14 @@ grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not 
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
 grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
-grep -q '^WATCH_WALLETS_B64=W10=$' "$tmp/.env" || fail "empty wallets not rendered as base64 []"
+watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
+printf '%s' "$watch_b64" | openssl base64 -d -A | jq -e '. == [{name:"Genesis",key:"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",birthday:""}]' >/dev/null ||
+  fail "default Genesis wallet was not seeded from genesis"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
+
+echo '{"wallets": []}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^WATCH_WALLETS_B64=W10=$' "$tmp/.env" || fail "explicit empty wallets did not disable the default"
 
 # 8. rpcauth is a real salted HMAC of the password (re-derive to check)
 salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")

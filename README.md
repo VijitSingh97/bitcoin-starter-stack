@@ -106,7 +106,11 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
 - **Mempool & fees** — transaction backlog and sat/vB estimates for the next / ~30-min / ~1-hour
   blocks (once synced), with a 24-hour fee sparkline.
 - **Watch-only balances** — add `xpub`s/descriptors from the UI; per-key balances and a total
-  (shown once you have more than one), read off your own node ([Watch-only](docs/watch-only.md)).
+  (shown once you have more than one), read off your own node. Fresh full-node installs
+  include the public **Genesis** address; imports show pending history until ready
+  ([Watch-only](docs/watch-only.md)).
+- **BTC price** — CoinGecko quotes in USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, or CNY, fetched through
+  Tor every five minutes. The selector remembers your currency; stale quotes are labeled.
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
@@ -116,8 +120,9 @@ Open the dashboard at `http://localhost`, or from another machine on your LAN at
   day is pushed down and a fresh one starts. Driven purely by the clock — no history or node
   lookups. Theme-aware and paused for `prefers-reduced-motion`.
 
-The dashboard has no authentication — it's meant for your LAN only. Don't port-forward
-`80` to the internet.
+The status page is open unless you set a dashboard password. Personal wallet views,
+wallet changes, and upgrades require a password. Keep it on your trusted LAN and don't
+port-forward `80` to the internet.
 
 ## 🏗️ How it works
 
@@ -176,4 +181,5 @@ a full node is resource-intensive (bandwidth, disk, memory). Understand your fir
 before exposing anything beyond your LAN. Security posture and reporting:
 [SECURITY.md](SECURITY.md). Licensed [MIT](LICENSE).
 
-The dashboard runtime is Go; Python remains in the development test harness only. A dashboard password is required to manage or view saved watch-only wallets and request upgrades. The optional-password status page remains LAN-only; do not forward its port to the Internet. Only public keys, public descriptors, and addresses are accepted for watch-only imports.
+The dashboard runtime is Go; Python remains in the development test harness only.
+Only public keys, public descriptors, and addresses are accepted for watch-only imports.

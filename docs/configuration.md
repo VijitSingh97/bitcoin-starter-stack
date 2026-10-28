@@ -34,7 +34,9 @@ shows the overridable settings with their defaults:
         "healthchecks_url": "",
         "alert_new_block": false
     },
-    "wallets": []
+    "wallets": [
+        {"name": "Genesis", "key": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "birthday": ""}
+    ]
 }
 ```
 
@@ -56,7 +58,7 @@ shows the overridable settings with their defaults:
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
-| `wallets` | `[]` | Optional **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is an `xpub`/`ypub`/`zpub` or a full output descriptor. Loaded on first start; after that you add/remove wallets from the dashboard UI and this is ignored. Full node only. See [Watch-only](watch-only.md). |
+| `wallets` | Genesis public address | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. Omitted uses Genesis from the beginning; `[]` disables the example. After first start the saved dashboard list is authoritative. Full node only. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
 
 `configure.sh` applies the defaults above for any omitted key, and generates
 strong random RPC credentials on first run (reused on later runs).

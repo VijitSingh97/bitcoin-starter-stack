@@ -13,22 +13,39 @@ your balance and derive your addresses, but it has no private keys and
 The dashboard has a **Watch-only balances** card with an add form:
 
 1. **Label** — any name you like (e.g. "Cold storage").
-2. **Key** — an extended public key or a full output descriptor (see below).
+2. **Key** — an extended public key, public output descriptor, or address (see below).
+   For a bare `xpub`, choose the address type your wallet uses.
 3. **Birthday** (optional) — the date the wallet was first used; it bounds the
    one-time rescan.
 
 Click **Add**. The node imports the key and rescans the chain for its history —
-the row shows `scanning…` while that runs, then the balance appears and stays
+the row shows `Pending history…` or `scanning…` while that runs, then the balance appears and stays
 live. Remove a wallet with the **✕** next to it.
 
 Wallets are **saved to the stack**: they persist across restarts (held in Bitcoin
 Core, with the list stored on a small `dashboard_state` volume). No file editing
 required.
 
-> **No dashboard password?** Then anyone who can reach the page can add or remove
-> wallets — the card shows a warning. Set `dashboard.password` in `config.json`
-> (see [Configuration](configuration.md)) to require a login. Removing a wallet is
-> harmless (watch-only, no keys), but adding one starts a chain rescan.
+The same public key cannot be added twice under different labels. If an older
+saved list contains exact duplicate keys, only its first entry is used, keeping
+the balance from being counted twice; the original file is preserved until the
+next wallet change.
+
+Set `dashboard.password` in `config.json` to view personal wallets and add or remove
+entries. Without a password, only the public Genesis example is visible and the
+wallet controls are disabled. See [Configuration](configuration.md).
+
+## Genesis example
+
+Fresh full-node installs watch `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` as **Genesis**
+from the beginning of the chain. The original 50 BTC genesis coinbase is unspendable
+and is excluded from Bitcoin Core's wallet balance; explorers may include it in
+their address total. The dashboard displays the balance reported by your node.
+
+Set `"wallets": []` before first start to skip this example, or remove it from the
+dashboard afterward. A saved wallet list is never overwritten by the default.
+Existing entries named Satoshi for this exact address display as Genesis without
+renaming their Core wallet or losing their balance history.
 
 ## What to paste for the key
 
@@ -41,9 +58,10 @@ your wallet shows for an account:
 | `ypub` | Nested SegWit (`3…`) — BIP49 |
 | `xpub` | Legacy (`1…`) — BIP44 |
 
-The script type is inferred from the prefix. If your wallet gives a plain `xpub`
-for a SegWit account (some do), or you use Taproot, paste a **descriptor**
-instead so there's no guessing.
+The script type is inferred from the prefix. A plain `xpub` does not identify its
+script type: for a SegWit account, select **Native SegWit** (`bc1q…`) or **Nested
+SegWit** (`3…`) in the form. Legacy remains the default. A wallet-exported public
+descriptor is more precise, and is required for Taproot.
 
 **A full output descriptor** — the exact option. This is what "export" gives you
 in Sparrow, Coldcard, Ledger Live, etc. It names the script type and derivation
@@ -78,8 +96,11 @@ xpub.
   skipped on a pruned node.
 - The first import **rescans the chain**. A tight `birthday` keeps it to minutes;
   no birthday means a full-chain scan (tens of minutes on a full node). Once
-  done, the balance stays live and there's no rescan on restart. Removing then
-  re-adding the same wallet reloads it instantly — no second rescan.
+  done, the balance stays live and there's no rescan on restart. Reusing a label
+  for a different key creates a separate Core wallet; old wallet files are retained.
+- A birthday must be on or before the first payment. Leave it blank to check the
+  whole chain if you are unsure. Receiving without ever sending still creates a
+  balance; spending is not required for discovery.
 
 ### Speeding up the first scan
 
@@ -114,5 +135,6 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
   balance you'll ever use under it. It's stored on the node (the wallet list and
   Bitcoin Core's wallet files) — keep access to the box and the dashboard
   controlled, and set a dashboard password if it's reachable beyond your LAN.
-- **Nothing leaves the box.** Balances come from your node's own index; no
-  request goes to any external service.
+- **Wallet data stays on the box.** Balances come from your node's own index;
+  wallet keys and addresses are never sent to external services. The separate BTC
+  price lookup sends only Bitcoin and currency names to CoinGecko through Tor.

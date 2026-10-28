@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -170,7 +171,7 @@ func TestPrivateEntriesFilteredWithoutRewritingExistingRoster(t *testing.T) {
 	if !reflect.DeepEqual(unchanged, original) {
 		t.Fatal("loading filtered private material rewrote the existing roster")
 	}
-	view, err := json.Marshal(store.List(func(string, string, []any, time.Duration) any { return nil }))
+	view, err := json.Marshal(store.List(func(string, string, []any, time.Duration) any { return nil }, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,9 +251,12 @@ func TestWatchStoreCRUDAndStaleBalance(t *testing.T) {
 	if _, err := store.Add("cold", key, ""); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("duplicate error = %v", err)
 	}
+	if _, err := store.Add("Other", key, ""); err == nil || !strings.Contains(err.Error(), "already configured") {
+		t.Fatalf("duplicate key error = %v", err)
+	}
 	store.history.record(key, 1.25, time.Unix(0, 0))
 	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any { return nil }
-	view := store.List(walletRPC)
+	view := store.List(walletRPC, false)
 	rows := view["wallets"].([]map[string]any)
 	if rows[0]["state"] != "stale" || rows[0]["btc"] != "1.25" {
 		t.Fatalf("stale row = %#v", rows[0])
@@ -265,6 +269,263 @@ func TestWatchStoreCRUDAndStaleBalance(t *testing.T) {
 	}
 }
 
+func TestLegacyDuplicateKeysAreDeduplicatedUntilNextMutation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wallets.json")
+	original, err := json.Marshal([]WatchEntry{{Name: "First", Key: genesisAddress}, {Name: "Second", Key: "  " + genesisAddress + "  "}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCH_STORE", path)
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if got := store.Entries(); len(got) != 1 || got[0].Name != "First" {
+		t.Fatalf("deduplicated entries = %#v", got)
+	}
+	unchanged, _ := os.ReadFile(path)
+	if !reflect.DeepEqual(unchanged, original) {
+		t.Fatal("load rewrote legacy duplicate roster")
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "listdescriptors":
+			return listedDescriptors(WatchEntry{Name: "First", Key: genesisAddress})
+		case "getbalances":
+			return map[string]any{"mine": map[string]any{"trusted": 1.0}}
+		}
+		return nil
+	}
+	view := store.List(walletRPC, false)
+	if rows := view["wallets"].([]map[string]any); len(rows) != 1 || view["total"] != "1" {
+		t.Fatalf("duplicate roster view = %#v", view)
+	}
+	if !store.Remove("First") {
+		t.Fatal("deduplicated entry was not removed")
+	}
+	persisted, _ := os.ReadFile(path)
+	if string(persisted) != "[]" {
+		t.Fatalf("post-mutation roster = %s", persisted)
+	}
+}
+
+func TestPendingWalletAvoidsFalseZeroAndKeepsGenesisIdentity(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if _, err := store.Add("Satoshi", genesisAddress, ""); err != nil {
+		t.Fatal(err)
+	}
+	store.SetPending(genesisAddress, true)
+	scanning := false
+	balanceCalls := 0
+	listCalls := 0
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		switch method {
+		case "getwalletinfo":
+			if scanning {
+				return watchInfo(map[string]any{"progress": 0.5})
+			}
+			return watchInfo(false)
+		case "listdescriptors":
+			listCalls++
+			return listedDescriptors(WatchEntry{Name: "Satoshi", Key: genesisAddress})
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "getbalances":
+			balanceCalls++
+			return map[string]any{"mine": map[string]any{"trusted": 0.0}}
+		}
+		return nil
+	}
+	rows := store.List(walletRPC, false)["wallets"].([]map[string]any)
+	if rows[0]["state"] != "pending" || rows[0]["btc"] != nil || rows[0]["display_name"] != "Genesis" || rows[0]["name"] != "Satoshi" {
+		t.Fatalf("pending Genesis row = %#v", rows[0])
+	}
+	store.Sample(walletRPC)
+	if balanceCalls != 0 || len(store.history.series(genesisAddress)) != 0 {
+		t.Fatal("pending wallet sampled a false zero balance")
+	}
+	scanning = true
+	rows = store.List(walletRPC, false)["wallets"].([]map[string]any)
+	if rows[0]["state"] != "scanning" {
+		t.Fatalf("pending scanning row = %#v", rows[0])
+	}
+	scanning = false
+	store.SetPending(genesisAddress, false)
+	view := store.List(walletRPC, true)
+	rows = view["wallets"].([]map[string]any)
+	if rows[0]["state"] != "pending" || view["total_state"] != "pending" || balanceCalls != 0 {
+		t.Fatalf("IBD Genesis view = %#v", view)
+	}
+	rows = store.List(walletRPC, false)["wallets"].([]map[string]any)
+	if rows[0]["state"] != "ok" || rows[0]["btc"] != "0" || balanceCalls != 1 || listCalls != 1 {
+		t.Fatalf("completed Genesis row = %#v, balance calls = %d, descriptor checks = %d", rows[0], balanceCalls, listCalls)
+	}
+}
+
+func TestMissingBalanceResponseUsesErrorAndStaleStates(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if _, err := store.Add("Cold", parityZpub, ""); err != nil {
+		t.Fatal(err)
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if method == "getwalletinfo" {
+			return watchInfo(false)
+		}
+		if method == "listdescriptors" {
+			return listedDescriptors(WatchEntry{Name: "Cold", Key: parityZpub})
+		}
+		if method == "getdescriptorinfo" {
+			return descriptorInfo(params)
+		}
+		return nil
+	}
+	view := store.List(walletRPC, false)
+	rows := view["wallets"].([]map[string]any)
+	if rows[0]["state"] != "error" || rows[0]["btc"] != nil {
+		t.Fatalf("missing balance row = %#v", rows[0])
+	}
+	if view["total_state"] != "unavailable" {
+		t.Fatalf("missing balance total state = %v", view["total_state"])
+	}
+	store.history.record(parityZpub, 1.25, time.Unix(0, 0))
+	rows = store.List(walletRPC, false)["wallets"].([]map[string]any)
+	if rows[0]["state"] != "stale" || rows[0]["btc"] != "1.25" {
+		t.Fatalf("missing balance stale row = %#v", rows[0])
+	}
+}
+
+func TestInvalidTrustedBalancesAreErrors(t *testing.T) {
+	for _, trusted := range []any{nil, "1", math.NaN(), math.Inf(1), -1.0} {
+		dir := t.TempDir()
+		t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+		t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+		store := NewWatchStore(dir)
+		if _, err := store.Add("Cold", genesisAddress, ""); err != nil {
+			t.Fatal(err)
+		}
+		walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+			switch method {
+			case "getwalletinfo":
+				return watchInfo(false)
+			case "getdescriptorinfo":
+				return descriptorInfo(params)
+			case "listdescriptors":
+				return listedDescriptors(WatchEntry{Name: "Cold", Key: genesisAddress})
+			case "getbalances":
+				return map[string]any{"mine": map[string]any{"trusted": trusted}}
+			}
+			return nil
+		}
+		row := store.List(walletRPC, false)["wallets"].([]map[string]any)[0]
+		if row["state"] != "error" || row["btc"] != nil {
+			t.Fatalf("trusted %v row = %#v", trusted, row)
+		}
+	}
+}
+
+func TestChangedKeyNeverReadsMismatchedLegacyBalance(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	entry, err := store.Add("Ledger", parityZpub, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldEntry := WatchEntry{Name: "Ledger", Key: genesisAddress}
+	balanceCalls := 0
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != walletName(entry.Name) {
+			return nil
+		}
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "listdescriptors":
+			return listedDescriptors(oldEntry)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "getbalances":
+			balanceCalls++
+			return map[string]any{"mine": map[string]any{"trusted": 57.0}}
+		}
+		return nil
+	}
+	rows := store.List(walletRPC, false)["wallets"].([]map[string]any)
+	if rows[0]["state"] != "error" || rows[0]["btc"] != nil || balanceCalls != 0 {
+		t.Fatalf("mismatched legacy row = %#v, balance calls = %d", rows[0], balanceCalls)
+	}
+}
+
+func TestPendingIdentityDoesNotFollowReusedLabel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	if _, err := store.Add("Ledger", genesisAddress, ""); err != nil {
+		t.Fatal(err)
+	}
+	store.SetPending(genesisAddress, true)
+	if !store.Remove("Ledger") {
+		t.Fatal("old Ledger was not removed")
+	}
+	if _, err := store.Add("Ledger", parityZpub, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, pending := store.snapshot()
+	if pending[watchKeyID(parityZpub)] || len(pending) != 0 {
+		t.Fatalf("pending state followed reused label: %#v", pending)
+	}
+}
+
+func TestRemoveExactDoesNotDeleteSameLabelReplacement(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WATCH_STORE", filepath.Join(dir, "wallets.json"))
+	t.Setenv("BALANCE_HISTORY", filepath.Join(dir, "history.json"))
+	store := NewWatchStore(dir)
+	old, err := store.Add("Ledger", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.RemoveExact(old) {
+		t.Fatal("old entry was not removed")
+	}
+	replacement, err := store.Add("Ledger", parityZpub, "2021-01-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetPending(replacement.Key, true)
+	store.SetCoreWallet(replacement.Key, coreWalletName(replacement))
+	if store.RemoveExact(old) {
+		t.Fatal("stale exact removal deleted a replacement")
+	}
+	if got := store.Entries(); !reflect.DeepEqual(got, []WatchEntry{replacement}) {
+		t.Fatalf("entries after stale removal = %#v", got)
+	}
+	_, pending := store.snapshot()
+	if !pending[watchKeyID(replacement.Key)] {
+		t.Fatal("stale removal cleared replacement pending state")
+	}
+	store.mu.Lock()
+	coreName := store.coreNames[watchKeyID(replacement.Key)]
+	store.mu.Unlock()
+	if coreName != coreWalletName(replacement) {
+		t.Fatal("stale removal cleared replacement Core route")
+	}
+}
+
 func TestProvisionCreatesWatchOnlyWallet(t *testing.T) {
 	var nodeCalls []rpcCall
 	var walletCalls []walletCall
@@ -274,12 +535,19 @@ func TestProvisionCreatesWatchOnlyWallet(t *testing.T) {
 		case "createwallet":
 			return map[string]any{"name": params[0]}
 		case "getdescriptorinfo":
-			return map[string]any{"descriptor": params[0].(string) + "#test", "isrange": true}
+			return map[string]any{"descriptor": params[0].(string) + "#test", "isrange": true, "hasprivatekeys": false}
 		}
 		return nil
 	}
 	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
 		walletCalls = append(walletCalls, walletCall{wallet, method, params, timeout})
+		if method == "importdescriptors" {
+			results := make([]any, len(params[0].([]any)))
+			for index := range results {
+				results[index] = map[string]any{"success": true}
+			}
+			return results
+		}
 		return nil
 	}
 	ProvisionOne(rpc, walletRPC, WatchEntry{Name: "Cold", Key: parityZpub, Birthday: "2021-01-01"}, false)
@@ -297,39 +565,263 @@ func TestProvisionCreatesWatchOnlyWallet(t *testing.T) {
 	}
 }
 
-func TestProvisionShortCircuitsWithoutCreating(t *testing.T) {
-	tests := []struct {
-		name      string
-		key       string
-		pruned    bool
-		loaded    bool
-		readd     bool
-		wantCalls []string
-	}{
-		{name: "loaded", key: parityZpub, loaded: true},
-		{name: "readd", key: parityZpub, readd: true, wantCalls: []string{"loadwallet"}},
-		{name: "pruned", key: parityZpub, pruned: true, wantCalls: []string{"loadwallet"}},
-		{name: "bad key", key: "not-a-key", wantCalls: []string{"loadwallet"}},
+func TestProvisionReusesOnlyDescriptorMatchingLegacyWallet(t *testing.T) {
+	entry := WatchEntry{Name: "Satoshi", Key: genesisAddress}
+	var nodeCalls []rpcCall
+	rpc := func(method string, params []any) any {
+		nodeCalls = append(nodeCalls, rpcCall{method, params})
+		return nil
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			var calls []string
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != walletName(entry.Name) {
+			return nil
+		}
+		if method == "getwalletinfo" {
+			return watchInfo(false)
+		}
+		if method == "listdescriptors" {
+			return listedDescriptors(entry)
+		}
+		if method == "getdescriptorinfo" {
+			return descriptorInfo(params)
+		}
+		return nil
+	}
+	name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+	if !ok || name != walletName(entry.Name) || len(nodeCalls) != 0 {
+		t.Fatalf("legacy reuse = %q, %v; node calls = %#v", name, ok, nodeCalls)
+	}
+}
+
+func TestProvisionChangedKeyUsesHashWalletAndPreservesLegacy(t *testing.T) {
+	oldEntry := WatchEntry{Name: "Ledger", Key: genesisAddress}
+	newEntry := WatchEntry{Name: "Ledger", Key: parityZpub}
+	for _, loaded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unloaded", true: "loaded"}[loaded], func(t *testing.T) {
+			var created string
+			var unloaded []string
 			rpc := func(method string, params []any) any {
-				calls = append(calls, method)
-				if method == "loadwallet" && test.readd {
-					return map[string]any{"name": params[0]}
+				switch method {
+				case "loadwallet":
+					if params[0] == walletName(oldEntry.Name) && !loaded {
+						return map[string]any{"name": params[0]}
+					}
+				case "createwallet":
+					created = params[0].(string)
+					return map[string]any{"name": created}
+				case "getdescriptorinfo":
+					return map[string]any{"descriptor": params[0], "isrange": true, "hasprivatekeys": false}
+				case "unloadwallet":
+					unloaded = append(unloaded, params[0].(string))
 				}
 				return nil
 			}
 			walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
-				if test.loaded {
-					return map[string]any{"scanning": false}
+				if method == "getdescriptorinfo" {
+					return descriptorInfo(params)
+				}
+				if wallet == walletName(oldEntry.Name) {
+					if method == "getwalletinfo" && loaded {
+						return watchInfo(false)
+					}
+					if method == "listdescriptors" {
+						return listedDescriptors(oldEntry)
+					}
+				}
+				if wallet == coreWalletName(newEntry) && method == "importdescriptors" {
+					results := make([]any, len(params[0].([]any)))
+					for index := range results {
+						results[index] = map[string]any{"success": true}
+					}
+					return results
 				}
 				return nil
 			}
-			ProvisionOne(rpc, walletRPC, WatchEntry{Name: "Cold", Key: test.key}, test.pruned)
-			if !reflect.DeepEqual(calls, test.wantCalls) {
-				t.Fatalf("calls = %v, want %v", calls, test.wantCalls)
+			name, ok := ProvisionOne(rpc, walletRPC, newEntry, false)
+			if !ok || name != coreWalletName(newEntry) || created != coreWalletName(newEntry) {
+				t.Fatalf("changed-key provision = %q, %v; created %q", name, ok, created)
+			}
+			if loaded && len(unloaded) != 0 || !loaded && !reflect.DeepEqual(unloaded, []string{walletName(oldEntry.Name)}) {
+				t.Fatalf("loaded=%v unloads = %v", loaded, unloaded)
+			}
+		})
+	}
+}
+
+func TestProvisionHashWalletMismatchFailsClosed(t *testing.T) {
+	entry := WatchEntry{Name: "Ledger", Key: parityZpub}
+	wrong := WatchEntry{Name: "Other", Key: genesisAddress}
+	created := false
+	rpc := func(method string, params []any) any {
+		if method == "createwallet" {
+			created = true
+		}
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != coreWalletName(entry) {
+			return nil
+		}
+		if method == "getwalletinfo" {
+			return watchInfo(false)
+		}
+		if method == "listdescriptors" {
+			return listedDescriptors(wrong)
+		}
+		if method == "getdescriptorinfo" {
+			return descriptorInfo(params)
+		}
+		return nil
+	}
+	if name, ok := ProvisionOne(rpc, walletRPC, entry, false); ok || name != "" || created {
+		t.Fatalf("mismatched hash wallet = %q, %v; created=%v", name, ok, created)
+	}
+}
+
+func TestHotLegacyCollisionIsNeverReusedOrUnexpectedlyUnloaded(t *testing.T) {
+	entry := WatchEntry{Name: "Ledger", Key: parityZpub}
+	for _, preloaded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unloaded", true: "loaded"}[preloaded], func(t *testing.T) {
+			loaded := preloaded
+			unloads := 0
+			rpc := func(method string, params []any) any {
+				switch method {
+				case "loadwallet":
+					if params[0] == walletName(entry.Name) && !loaded {
+						loaded = true
+						return map[string]any{"name": params[0]}
+					}
+				case "unloadwallet":
+					unloads++
+					loaded = false
+				case "createwallet":
+					return map[string]any{"name": params[0]}
+				case "getdescriptorinfo":
+					return descriptorInfo(params)
+				}
+				return nil
+			}
+			walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+				if wallet == walletName(entry.Name) && method == "getwalletinfo" && loaded {
+					return map[string]any{"descriptors": true, "private_keys_enabled": true, "scanning": false}
+				}
+				if wallet == coreWalletName(entry) && method == "importdescriptors" {
+					results := make([]any, len(params[0].([]any)))
+					for index := range results {
+						results[index] = map[string]any{"success": true}
+					}
+					return results
+				}
+				return nil
+			}
+			name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+			if !ok || name != coreWalletName(entry) {
+				t.Fatalf("hot collision provision = %q, %v", name, ok)
+			}
+			if preloaded && unloads != 0 || !preloaded && unloads != 1 {
+				t.Fatalf("preloaded=%v unloads=%d", preloaded, unloads)
+			}
+		})
+	}
+}
+
+func TestWalletMatchChecksInternalRoleAndBirthdayCoverage(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub, Birthday: "2021-01-01"}
+	listed := listedDescriptors(entry)
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if method == "getdescriptorinfo" {
+			return descriptorInfo(params)
+		}
+		return listed
+	}
+	if !walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("matching descriptors were rejected")
+	}
+	items := listed["descriptors"].([]any)
+	first := items[0].(map[string]any)
+	first["internal"] = !first["internal"].(bool)
+	if walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("receive/change descriptor role mismatch was accepted")
+	}
+	first["internal"] = !first["internal"].(bool)
+	delete(first, "range")
+	if walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("ranged descriptor without range metadata was accepted")
+	}
+	first["range"] = []any{float64(0), float64(998)}
+	if walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("insufficient descriptor range was accepted")
+	}
+	first["range"] = []any{float64(0), float64(999)}
+	first["timestamp"] = birthdayTimestamp(entry.Birthday) + 1
+	if walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("wallet with later descriptor timestamp was treated as complete")
+	}
+}
+
+func TestProvisionReusesCoreCanonicalizedPublicDescriptor(t *testing.T) {
+	xpub, _, err := toXpub(parityZpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "wpkh([d34db33f/84'/0'/0']" + xpub + "/0/*)"
+	canonical := strings.ReplaceAll(raw, "'", "h")
+	entry := WatchEntry{Name: "Exported", Key: raw}
+	created := false
+	rpc := func(method string, params []any) any {
+		if method == "createwallet" {
+			created = true
+		}
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return map[string]any{"descriptor": strings.ReplaceAll(params[0].(string), "'", "h") + "#canonical", "hasprivatekeys": false}
+		case "listdescriptors":
+			return map[string]any{"descriptors": []any{map[string]any{"desc": canonical + "#stored", "internal": false, "timestamp": 0, "range": []any{float64(0), float64(999)}}}}
+		}
+		return nil
+	}
+	name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+	if !ok || name != walletName(entry.Name) || created {
+		t.Fatalf("canonical legacy reuse = %q, %v; created=%v", name, ok, created)
+	}
+}
+
+func TestProvisionRequiresCompleteSuccessfulImport(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub}
+	for _, mode := range []string{"missing descriptor info", "partial import failure"} {
+		t.Run(mode, func(t *testing.T) {
+			descriptorCalls := 0
+			importCalls := 0
+			rpc := func(method string, params []any) any {
+				switch method {
+				case "createwallet":
+					return map[string]any{"name": params[0]}
+				case "getdescriptorinfo":
+					descriptorCalls++
+					if mode == "missing descriptor info" && descriptorCalls == 2 {
+						return nil
+					}
+					return descriptorInfo(params)
+				}
+				return nil
+			}
+			walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+				if method != "importdescriptors" {
+					return nil
+				}
+				importCalls++
+				return []any{map[string]any{"success": true}, map[string]any{"success": false}}
+			}
+			if name, ok := ProvisionOne(rpc, walletRPC, entry, false); ok || name != "" {
+				t.Fatalf("incomplete import reported success: %q, %v", name, ok)
+			}
+			if mode == "missing descriptor info" && importCalls != 0 {
+				t.Fatal("partial descriptor request was imported")
 			}
 		})
 	}
@@ -345,6 +837,30 @@ type walletCall struct {
 	method  string
 	params  []any
 	timeout time.Duration
+}
+
+func listedDescriptors(entry WatchEntry) map[string]any {
+	descriptors, _ := descriptorsFor(entry.Key)
+	items := make([]any, 0, len(descriptors))
+	for _, item := range descriptors {
+		listed := map[string]any{
+			"desc": item.Desc + "#checksum", "internal": item.Internal,
+			"timestamp": birthdayTimestamp(entry.Birthday),
+		}
+		if strings.Contains(item.Desc, "/*") {
+			listed["range"] = []any{float64(0), float64(999)}
+		}
+		items = append(items, listed)
+	}
+	return map[string]any{"descriptors": items}
+}
+
+func watchInfo(scanning any) map[string]any {
+	return map[string]any{"scanning": scanning, "descriptors": true, "private_keys_enabled": false}
+}
+
+func descriptorInfo(params []any) map[string]any {
+	return map[string]any{"descriptor": params[0].(string) + "#canonical", "isrange": strings.Contains(params[0].(string), "/*"), "hasprivatekeys": false}
 }
 
 func syntheticExtendedPrivate(version string) string {

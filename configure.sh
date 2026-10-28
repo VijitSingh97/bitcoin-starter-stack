@@ -48,7 +48,7 @@ healthchecks_url=$(get '.notifications.healthchecks_url')
 alert_new_block=$(flag '.notifications.alert_new_block')
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
-watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
+watch_wallets_b64=$(jq -cj '.wallets // [{name:"Genesis",key:"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",birthday:""}]' <<<"$config" | base64 | tr -d '\n')
 
 check_alnum() {
   case "$2" in

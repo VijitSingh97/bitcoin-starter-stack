@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 )
 
 const maxWatchWallets = 20
+
+const genesisAddress = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 
 var (
 	base58Alphabet  = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -66,6 +69,8 @@ type WatchStore struct {
 	path         string
 	entries      []WatchEntry
 	history      *balanceHistory
+	pending      map[string]bool
+	coreNames    map[string]string
 	unsafeRoster bool
 }
 
@@ -300,6 +305,7 @@ func loadWatchConfig() []WatchEntry {
 func normalizeEntries(items []map[string]any) ([]WatchEntry, bool) {
 	entries := make([]WatchEntry, 0, len(items))
 	privateFound := false
+	seenKeys := map[string]bool{}
 	for _, item := range items {
 		name := strings.TrimSpace(stringValue(item["name"]))
 		key := strings.TrimSpace(stringValue(item["key"]))
@@ -307,8 +313,10 @@ func normalizeEntries(items []map[string]any) ([]WatchEntry, bool) {
 			privateFound = true
 			continue
 		}
-		if name != "" && key != "" {
+		identity := watchKeyID(key)
+		if name != "" && key != "" && !seenKeys[identity] {
 			entries = append(entries, WatchEntry{Name: name, Key: key, Birthday: stringValue(item["birthday"])})
+			seenKeys[identity] = true
 		}
 	}
 	return entries, privateFound
@@ -379,6 +387,109 @@ func (s *WatchStore) Entries() []WatchEntry {
 	return append([]WatchEntry(nil), s.entries...)
 }
 
+func (s *WatchStore) Contains(entry WatchEntry) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, current := range s.entries {
+		if current == entry {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *WatchStore) UsesKey(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity := watchKeyID(key)
+	for _, current := range s.entries {
+		if watchKeyID(current.Key) == identity {
+			return true
+		}
+	}
+	return false
+}
+
+func watchKeyID(key string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	return hex.EncodeToString(sum[:])
+}
+
+func coreWalletName(entry WatchEntry) string {
+	return "watch_" + watchKeyID(entry.Key)
+}
+
+func (s *WatchStore) SetPending(key string, pending bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity := watchKeyID(key)
+	if pending {
+		if s.pending == nil {
+			s.pending = map[string]bool{}
+		}
+		s.pending[identity] = true
+		return
+	}
+	delete(s.pending, identity)
+}
+
+func (s *WatchStore) ClearPendingIfCurrent(entry WatchEntry) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, current := range s.entries {
+		if current == entry {
+			delete(s.pending, watchKeyID(entry.Key))
+			return true
+		}
+	}
+	return false
+}
+
+func (s *WatchStore) SetCoreWallet(key, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity := watchKeyID(key)
+	if name == "" {
+		delete(s.coreNames, identity)
+		return
+	}
+	if s.coreNames == nil {
+		s.coreNames = map[string]string{}
+	}
+	s.coreNames[identity] = name
+}
+
+func (s *WatchStore) SetCoreWalletIfCurrent(entry WatchEntry, name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := false
+	for _, item := range s.entries {
+		if item == entry {
+			current = true
+			break
+		}
+	}
+	if !current {
+		return false
+	}
+	if s.coreNames == nil {
+		s.coreNames = map[string]string{}
+	}
+	s.coreNames[watchKeyID(entry.Key)] = name
+	return true
+}
+
+func (s *WatchStore) snapshot() ([]WatchEntry, map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := append([]WatchEntry(nil), s.entries...)
+	pending := make(map[string]bool, len(s.pending))
+	for identity := range s.pending {
+		pending[identity] = true
+	}
+	return entries, pending
+}
+
 func (s *WatchStore) Add(name, key, birthday string) (WatchEntry, error) {
 	name, key, birthday = strings.TrimSpace(name), strings.TrimSpace(key), strings.TrimSpace(birthday)
 	if name == "" || key == "" {
@@ -402,6 +513,9 @@ func (s *WatchStore) Add(name, key, birthday string) (WatchEntry, error) {
 		if strings.EqualFold(entry.Name, name) {
 			return WatchEntry{}, errors.New("A wallet with that name already exists.")
 		}
+		if watchKeyID(entry.Key) == watchKeyID(key) {
+			return WatchEntry{}, errors.New("That watch key is already configured.")
+		}
 	}
 	entry := WatchEntry{Name: name, Key: key, Birthday: birthday}
 	s.entries = append(s.entries, entry)
@@ -417,17 +531,39 @@ func (s *WatchStore) Remove(name string) bool {
 	}
 	for index, entry := range s.entries {
 		if entry.Name == name {
-			s.entries = append(s.entries[:index], s.entries[index+1:]...)
-			s.saveLocked()
-			return true
+			return s.removeIndexLocked(index, entry)
 		}
 	}
 	return false
 }
 
-func (s *WatchStore) List(walletRPC WalletRPCFunc) map[string]any {
-	entries := s.Entries()
-	rows, total := walletBalances(walletRPC, entries, nil)
+func (s *WatchStore) RemoveExact(entry WatchEntry) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unsafeRoster {
+		return false
+	}
+	for index, current := range s.entries {
+		if current == entry {
+			return s.removeIndexLocked(index, current)
+		}
+	}
+	return false
+}
+
+func (s *WatchStore) removeIndexLocked(index int, entry WatchEntry) bool {
+	s.entries = append(s.entries[:index], s.entries[index+1:]...)
+	identity := watchKeyID(entry.Key)
+	delete(s.pending, identity)
+	delete(s.coreNames, identity)
+	s.saveLocked()
+	return true
+}
+
+func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) map[string]any {
+	entries, pending := s.snapshot()
+	rows, total := s.walletBalances(walletRPC, entries, pending, initialBlockDownload, nil)
+	totalState := "ok"
 	for _, row := range rows {
 		history := s.history.series(row["key"].(string))
 		row["history"] = history
@@ -435,31 +571,75 @@ func (s *WatchStore) List(walletRPC WalletRPCFunc) map[string]any {
 			row["state"] = "stale"
 			row["btc"] = formatBTC(history[len(history)-1])
 		}
+		if row["state"] == "pending" || row["state"] == "scanning" {
+			totalState = "pending"
+		} else if totalState == "ok" && (row["state"] == "error" || row["state"] == "stale") {
+			totalState = "unavailable"
+		}
 	}
-	return map[string]any{"wallets": rows, "total": formatBTC(total), "show_total": len(rows) > 1}
+	return map[string]any{"wallets": rows, "total": formatBTC(total), "total_state": totalState, "show_total": len(rows) > 1}
 }
 
 func (s *WatchStore) Sample(walletRPC WalletRPCFunc) {
-	entries := s.Entries()
-	walletBalances(walletRPC, entries, func(key string, btc float64) {
+	entries, pending := s.snapshot()
+	s.walletBalances(walletRPC, entries, pending, false, func(key string, btc float64) {
 		s.history.record(key, btc, time.Now())
 	})
 }
 
-func walletBalances(walletRPC WalletRPCFunc, entries []WatchEntry, sample func(string, float64)) ([]map[string]any, float64) {
+func (s *WatchStore) resolveWallet(walletRPC WalletRPCFunc, entry WatchEntry) (string, map[string]any) {
+	identity := watchKeyID(entry.Key)
+	s.mu.Lock()
+	name := s.coreNames[identity]
+	s.mu.Unlock()
+	if name != "" {
+		if info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second)); safeWatchWallet(info) {
+			return name, info
+		}
+		s.SetCoreWallet(entry.Key, "")
+	}
+	name, info := resolveWallet(walletRPC, entry)
+	if name != "" {
+		s.SetCoreWallet(entry.Key, name)
+	}
+	return name, info
+}
+
+func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntry, pending map[string]bool, initialBlockDownload bool, sample func(string, float64)) ([]map[string]any, float64) {
 	rows := make([]map[string]any, 0, len(entries))
 	total := 0.0
 	for _, entry := range entries {
-		info := mapValue(walletRPC(walletName(entry.Name), "getwalletinfo", []any{}, 8*time.Second))
+		name, info := s.resolveWallet(walletRPC, entry)
 		row := map[string]any{"name": entry.Name, "key": entry.Key, "btc": nil}
+		isPending := pending[watchKeyID(entry.Key)] || initialBlockDownload
+		if entry.Name == "Satoshi" && entry.Key == genesisAddress {
+			row["display_name"] = "Genesis"
+		}
 		if info == nil {
-			row["state"] = "error"
+			if isPending {
+				row["state"] = "pending"
+			} else {
+				row["state"] = "error"
+			}
 		} else if truthy(info["scanning"]) {
 			row["state"] = "scanning"
+		} else if isPending {
+			row["state"] = "pending"
 		} else {
-			balances := mapValue(walletRPC(walletName(entry.Name), "getbalances", []any{}, 8*time.Second))
+			balances := mapValue(walletRPC(name, "getbalances", []any{}, 8*time.Second))
 			mine := mapValue(valueFrom(balances, "mine"))
-			btc := numberValue(valueFrom(mine, "trusted"))
+			trusted, ok := mine["trusted"]
+			if balances == nil || mine == nil || !ok {
+				row["state"] = "error"
+				rows = append(rows, row)
+				continue
+			}
+			btc, valid := balanceValue(trusted)
+			if !valid {
+				row["state"] = "error"
+				rows = append(rows, row)
+				continue
+			}
 			total += btc
 			row["state"] = "ok"
 			row["btc"] = formatBTC(btc)
@@ -472,26 +652,146 @@ func walletBalances(walletRPC WalletRPCFunc, entries []WatchEntry, sample func(s
 	return rows, total
 }
 
-func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned bool) {
-	name := walletName(entry.Name)
-	if walletRPC(name, "getwalletinfo", []any{}, 8*time.Second) != nil {
-		return
+func descriptorIdentity(item descriptor) string {
+	return fmt.Sprintf("%t:%s", item.Internal, strings.SplitN(item.Desc, "#", 2)[0])
+}
+
+func descriptorTimestamp(value any) (int64, bool) {
+	switch timestamp := value.(type) {
+	case float64:
+		return int64(timestamp), true
+	case int:
+		return int64(timestamp), true
+	case int64:
+		return timestamp, true
+	case json.Number:
+		result, err := timestamp.Int64()
+		return result, err == nil
+	default:
+		return 0, false
 	}
-	if rpc("loadwallet", []any{name}) != nil {
-		return
+}
+
+func descriptorRangeCovers(value any) bool {
+	values, ok := value.([]any)
+	if !ok || len(values) != 2 {
+		return false
+	}
+	start, startOK := balanceValue(values[0])
+	end, endOK := balanceValue(values[1])
+	return startOK && endOK && start <= 0 && end >= 999
+}
+
+func walletMatches(walletRPC WalletRPCFunc, name string, entry WatchEntry) bool {
+	descriptors, err := descriptorsFor(entry.Key)
+	if err != nil {
+		return false
+	}
+	want := make(map[string]bool, len(descriptors))
+	for _, item := range descriptors {
+		info := mapValue(walletRPC(name, "getdescriptorinfo", []any{item.Desc}, 8*time.Second))
+		canonical := stringValue(info["descriptor"])
+		hasPrivateKeys, public := info["hasprivatekeys"].(bool)
+		if canonical == "" || !public || hasPrivateKeys {
+			return false
+		}
+		want[descriptorIdentity(descriptor{Desc: canonical, Internal: item.Internal})] = strings.Contains(canonical, "/*")
+	}
+	listed := mapValue(walletRPC(name, "listdescriptors", []any{false}, 8*time.Second))
+	values, ok := listed["descriptors"].([]any)
+	if !ok || len(values) != len(want) {
+		return false
+	}
+	seen := make(map[string]bool, len(values))
+	requested := birthdayTimestamp(entry.Birthday)
+	for _, value := range values {
+		item := mapValue(value)
+		identity := descriptorIdentity(descriptor{Desc: stringValue(item["desc"]), Internal: truthy(item["internal"])})
+		ranged, expected := want[identity]
+		if !expected || seen[identity] {
+			return false
+		}
+		if ranged && !descriptorRangeCovers(item["range"]) {
+			return false
+		}
+		timestamp, present := item["timestamp"]
+		if !present {
+			return false
+		}
+		existing, valid := descriptorTimestamp(timestamp)
+		if !valid {
+			return false
+		}
+		if existing > requested && !(requested == 0 && existing <= 1) {
+			return false
+		}
+		seen[identity] = true
+	}
+	return len(seen) == len(want)
+}
+
+func resolveWallet(walletRPC WalletRPCFunc, entry WatchEntry) (string, map[string]any) {
+	for _, name := range []string{walletName(entry.Name), coreWalletName(entry)} {
+		info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))
+		if safeWatchWallet(info) && walletMatches(walletRPC, name, entry) {
+			return name, info
+		}
+	}
+	return "", nil
+}
+
+func safeWatchWallet(info map[string]any) bool {
+	descriptors, descriptorsOK := info["descriptors"].(bool)
+	privateKeys, privateKeysOK := info["private_keys_enabled"].(bool)
+	return descriptorsOK && descriptors && privateKeysOK && !privateKeys
+}
+
+func probeCandidate(rpc RPCFunc, walletRPC WalletRPCFunc, name string) (bool, bool, bool) {
+	if info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second)); info != nil {
+		return true, false, safeWatchWallet(info)
+	}
+	if rpc("loadwallet", []any{name}) == nil {
+		return false, false, false
+	}
+	info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))
+	return true, true, safeWatchWallet(info)
+}
+
+func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned bool) (string, bool) {
+	legacy := walletName(entry.Name)
+	legacyExists, legacyLoaded, legacySafe := probeCandidate(rpc, walletRPC, legacy)
+	if legacyExists {
+		if legacySafe && walletMatches(walletRPC, legacy, entry) {
+			return legacy, true
+		}
+		if legacyLoaded {
+			rpc("unloadwallet", []any{legacy, false})
+		}
+	}
+	name := coreWalletName(entry)
+	hashExists, hashLoaded, hashSafe := probeCandidate(rpc, walletRPC, name)
+	if hashExists {
+		if hashSafe && walletMatches(walletRPC, name, entry) {
+			return name, true
+		}
+		if hashLoaded {
+			rpc("unloadwallet", []any{name, false})
+		}
+		return "", false
 	}
 	descriptors, err := descriptorsFor(entry.Key)
 	if err != nil || pruned {
-		return
+		return "", false
 	}
 	if rpc("createwallet", []any{name, true, true, "", false, true, true}) == nil {
-		return
+		return "", false
 	}
 	requests := make([]any, 0, len(descriptors))
 	for _, item := range descriptors {
 		info := mapValue(rpc("getdescriptorinfo", []any{item.Desc}))
-		if len(info) == 0 {
-			continue
+		hasPrivateKeys, public := info["hasprivatekeys"].(bool)
+		if len(info) == 0 || !public || hasPrivateKeys || stringValue(info["descriptor"]) == "" {
+			return "", false
 		}
 		request := map[string]any{
 			"desc": info["descriptor"], "timestamp": birthdayTimestamp(entry.Birthday),
@@ -502,9 +802,19 @@ func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned
 		}
 		requests = append(requests, request)
 	}
-	if len(requests) > 0 {
-		walletRPC(name, "importdescriptors", []any{requests}, time.Hour)
+	if len(requests) != len(descriptors) {
+		return "", false
 	}
+	results, ok := walletRPC(name, "importdescriptors", []any{requests}, time.Hour).([]any)
+	if !ok || len(results) != len(requests) {
+		return "", false
+	}
+	for _, result := range results {
+		if !truthy(valueFrom(mapValue(result), "success")) {
+			return "", false
+		}
+	}
+	return name, true
 }
 
 func EnsureWallets(rpc RPCFunc, walletRPC WalletRPCFunc, entries []WatchEntry, pruned bool) {
@@ -513,8 +823,38 @@ func EnsureWallets(rpc RPCFunc, walletRPC WalletRPCFunc, entries []WatchEntry, p
 	}
 }
 
-func Deprovision(rpc RPCFunc, name string) {
-	rpc("unloadwallet", []any{walletName(name), false})
+func Deprovision(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry) {
+	if name, _ := resolveWallet(walletRPC, entry); name != "" {
+		rpc("unloadwallet", []any{name, false})
+	}
+}
+
+func DeprovisionNameIfMatches(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, name string) {
+	if name != walletName(entry.Name) && name != coreWalletName(entry) {
+		return
+	}
+	info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))
+	if safeWatchWallet(info) && walletMatches(walletRPC, name, entry) {
+		rpc("unloadwallet", []any{name, false})
+	}
+}
+
+func (s *WatchStore) DeprovisionNameIfUnused(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity := watchKeyID(entry.Key)
+	for _, current := range s.entries {
+		if watchKeyID(current.Key) == identity {
+			return
+		}
+	}
+	if name != walletName(entry.Name) && name != coreWalletName(entry) {
+		return
+	}
+	info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))
+	if safeWatchWallet(info) && walletMatches(walletRPC, name, entry) {
+		rpc("unloadwallet", []any{name, false})
+	}
 }
 
 func mapValue(value any) map[string]any {
@@ -545,6 +885,29 @@ func numberValue(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func balanceValue(value any) (float64, bool) {
+	var btc float64
+	switch amount := value.(type) {
+	case float64:
+		btc = amount
+	case float32:
+		btc = float64(amount)
+	case int:
+		btc = float64(amount)
+	case int64:
+		btc = float64(amount)
+	case json.Number:
+		var err error
+		btc, err = amount.Float64()
+		if err != nil {
+			return 0, false
+		}
+	default:
+		return 0, false
+	}
+	return btc, !math.IsNaN(btc) && !math.IsInf(btc, 0) && btc >= 0
 }
 
 func truthy(value any) bool {

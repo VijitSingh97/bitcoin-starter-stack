@@ -147,6 +147,30 @@ h2 {
    its padding on the overflow (bottom) edge from the scroll area, so the bottom
    would sit flush. Padding on the content itself is always counted. */
 .stack-col { display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px; }
+.price-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 3px 10px;
+  padding: 0 8px;
+  font-family: monospace;
+}
+.price-row .price-label { color: var(--muted); }
+.price-row #btc-price-value { color: var(--accent); justify-self: end; }
+.price-row #btc-price-currency {
+  background: var(--tag-bg);
+  border: 1px solid var(--tag-border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 5px;
+}
+.price-row #btc-price-status {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: right;
+}
+.price-row #btc-price-status.stale { color: #e0a800; }
 .watch-card h2 { font-size: 1.1rem; }
 .wk-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wk { /* truncated key/address, click to expand */

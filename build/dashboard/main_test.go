@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -15,9 +16,110 @@ import (
 )
 
 type rpcFixture struct {
-	mu      sync.Mutex
-	calls   []string
-	invalid bool
+	mu                   sync.Mutex
+	calls                []string
+	invalid              bool
+	initialBlockDownload bool
+}
+
+type lifecycleRPC struct {
+	mu            sync.Mutex
+	wallets       map[string][]map[string]any
+	unloaded      []string
+	blockWallet   string
+	importStarted chan struct{}
+	releaseImport chan struct{}
+	chainStarted  chan struct{}
+	releaseChain  chan struct{}
+	importOnce    sync.Once
+	chainOnce     sync.Once
+}
+
+func newLifecycleRPC() *lifecycleRPC {
+	return &lifecycleRPC{wallets: map[string][]map[string]any{}}
+}
+
+func (f *lifecycleRPC) handler(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Method string `json:"method"`
+		Params []any  `json:"params"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	wallet := strings.TrimPrefix(r.URL.Path, "/wallet/")
+	var result any
+	switch request.Method {
+	case "getblockchaininfo":
+		if f.chainStarted != nil {
+			f.chainOnce.Do(func() { close(f.chainStarted) })
+		}
+		if f.releaseChain != nil {
+			<-f.releaseChain
+		}
+		result = map[string]any{"pruned": false, "initialblockdownload": false}
+	case "getnetworkinfo":
+		result = map[string]any{"subversion": "/Satoshi:31.1.0/"}
+	case "createwallet":
+		name := request.Params[0].(string)
+		f.mu.Lock()
+		f.wallets[name] = nil
+		f.mu.Unlock()
+		result = map[string]any{"name": name}
+	case "loadwallet":
+	case "unloadwallet":
+		name := request.Params[0].(string)
+		f.mu.Lock()
+		f.unloaded = append(f.unloaded, name)
+		f.mu.Unlock()
+		result = map[string]any{}
+	case "getwalletinfo":
+		f.mu.Lock()
+		_, ok := f.wallets[wallet]
+		f.mu.Unlock()
+		if ok {
+			result = map[string]any{"descriptors": true, "private_keys_enabled": false, "scanning": false}
+		}
+	case "getdescriptorinfo":
+		desc := request.Params[0].(string)
+		result = map[string]any{"descriptor": strings.SplitN(desc, "#", 2)[0] + "#fixture", "hasprivatekeys": false, "isrange": strings.Contains(desc, "/*")}
+	case "importdescriptors":
+		if wallet == f.blockWallet && f.importStarted != nil {
+			f.importOnce.Do(func() { close(f.importStarted) })
+			<-f.releaseImport
+		}
+		requests := request.Params[0].([]any)
+		listed := make([]map[string]any, 0, len(requests))
+		results := make([]any, 0, len(requests))
+		for _, value := range requests {
+			item := value.(map[string]any)
+			listedItem := map[string]any{"desc": item["desc"], "internal": item["internal"], "timestamp": item["timestamp"]}
+			if _, ok := item["range"]; ok {
+				listedItem["range"] = []any{float64(0), float64(999)}
+			}
+			listed = append(listed, listedItem)
+			results = append(results, map[string]any{"success": true})
+		}
+		f.mu.Lock()
+		f.wallets[wallet] = listed
+		f.mu.Unlock()
+		result = results
+	case "listdescriptors":
+		f.mu.Lock()
+		descriptors, ok := f.wallets[wallet]
+		f.mu.Unlock()
+		if ok {
+			values := make([]any, len(descriptors))
+			for index := range descriptors {
+				values[index] = descriptors[index]
+			}
+			result = map[string]any{"descriptors": values}
+		}
+	}
+	status := http.StatusOK
+	if result == nil {
+		status = http.StatusInternalServerError
+	}
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": result, "error": nil})
 }
 
 func (f *rpcFixture) handler(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +142,7 @@ func (f *rpcFixture) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results := map[string]any{
-		"getblockchaininfo": map[string]any{"blocks": 900000, "headers": 900001, "verificationprogress": 0.9999, "initialblockdownload": false, "pruned": true, "prune_target_size": 10 * 1024 * 1024 * 1024, "size_on_disk": 11 * 1024 * 1024 * 1024},
+		"getblockchaininfo": map[string]any{"blocks": 900000, "headers": 900001, "verificationprogress": 0.9999, "initialblockdownload": f.initialBlockDownload, "pruned": true, "prune_target_size": 10 * 1024 * 1024 * 1024, "size_on_disk": 11 * 1024 * 1024 * 1024},
 		"getnetworkinfo":    map[string]any{"subversion": `<script>alert("x")</script>`, "connections": 10},
 		"getpeerinfo":       []any{map[string]any{"inbound": true}, map[string]any{"inbound": false}},
 		"uptime":            90061,
@@ -67,6 +169,10 @@ func testApp(t *testing.T, fixture *rpcFixture, password string) (*app, http.Han
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.monitor.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, ""), nil
+	})}
+	a.monitor.output = io.Discard
 	return a, a.routes()
 }
 
@@ -99,12 +205,18 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 	if got := request(t, handler, http.MethodGet, "/", "wrong"); got.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong password = %d", got.Code)
 	}
+	if got := request(t, handler, http.MethodGet, "/api/prices", ""); got.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated prices = %d", got.Code)
+	}
+	if got := request(t, handler, http.MethodGet, "/api/prices", "dashboard-secret"); got.Code != http.StatusOK {
+		t.Fatalf("authenticated prices = %d", got.Code)
+	}
 	got := request(t, handler, http.MethodGet, "/", "dashboard-secret")
 	if got.Code != http.StatusOK {
 		t.Fatalf("status = %d", got.Code)
 	}
 	body := got.Body.String()
-	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned"} {
+	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
@@ -165,6 +277,24 @@ func TestMetricsAndReadAPIs(t *testing.T) {
 	fees := request(t, handler, http.MethodGet, "/api/fees", "")
 	if fees.Code != http.StatusOK || !strings.Contains(fees.Body.String(), "4.2") {
 		t.Fatalf("fees = %d %q", fees.Code, fees.Body.String())
+	}
+	a.prices.mu.Lock()
+	a.prices.prices = map[string]float64{"usd": 70000}
+	a.prices.updatedAt = 1_800_000_000
+	a.prices.lastFetchFailed = false
+	a.prices.mu.Unlock()
+	a.prices.now = func() time.Time { return time.Unix(1_800_000_000, 0) }
+	priceCalls := 0
+	a.prices.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		priceCalls++
+		return response(http.StatusInternalServerError, ""), nil
+	})}
+	prices := request(t, handler, http.MethodGet, "/api/prices", "")
+	if prices.Code != http.StatusOK || !strings.Contains(prices.Body.String(), `"usd":70000`) || !strings.Contains(prices.Body.String(), `"available":true`) {
+		t.Fatalf("prices = %d %q", prices.Code, prices.Body.String())
+	}
+	if priceCalls != 0 {
+		t.Fatalf("prices handler fetched provider: calls = %d", priceCalls)
 	}
 	watch := request(t, handler, http.MethodGet, "/api/watch", "")
 	if watch.Code != http.StatusOK || !strings.Contains(watch.Body.String(), `"wallets":[]`) {
@@ -241,12 +371,340 @@ func TestSensitiveRoutesRequirePassword(t *testing.T) {
 	if response := request(t, handler, "GET", "/api/watch", ""); response.Code != 200 {
 		t.Fatal("empty view compatibility lost")
 	}
-	if _, err := a.watch.Add("Cold", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", ""); err != nil {
+	if _, err := a.watch.Add("Satoshi", genesisAddress, ""); err != nil {
 		t.Fatal(err)
 	}
 	response := request(t, handler, "GET", "/api/watch", "")
-	if response.Code != 403 || strings.Contains(response.Body.String(), "1A1zP1e") {
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"display_name":"Genesis"`) || !strings.Contains(response.Body.String(), genesisAddress) {
+		t.Fatalf("public Genesis response = %d %q", response.Code, response.Body.String())
+	}
+	if !a.watch.Remove("Satoshi") {
+		t.Fatal("could not replace public Genesis entry")
+	}
+	if _, err := a.watch.Add("Cold", genesisAddress, ""); err != nil {
+		t.Fatal(err)
+	}
+	response = request(t, handler, "GET", "/api/watch", "")
+	if response.Code != 403 || strings.Contains(response.Body.String(), genesisAddress) {
 		t.Fatal("unauthenticated roster exposed")
+	}
+}
+
+func TestPublicGenesisRosterRequiresExactIdentity(t *testing.T) {
+	valid := []WatchEntry{{Name: "Satoshi", Key: genesisAddress}}
+	if !publicGenesisRoster(valid) || !publicGenesisRoster([]WatchEntry{{Name: "Genesis", Key: genesisAddress}}) {
+		t.Fatal("approved Genesis identities were not public")
+	}
+	for _, entries := range [][]WatchEntry{
+		{{Name: "satoshi", Key: genesisAddress}},
+		{{Name: "Satoshi", Key: genesisAddress + "x"}},
+		{{Name: "Satoshi", Key: genesisAddress}, {Name: "Genesis", Key: genesisAddress}},
+	} {
+		if publicGenesisRoster(entries) {
+			t.Fatalf("non-exact roster was public: %#v", entries)
+		}
+	}
+}
+
+func TestGenesisWatchUsesActualIBDState(t *testing.T) {
+	fixture := &rpcFixture{initialBlockDownload: true}
+	a, handler := testApp(t, fixture, "")
+	if _, err := a.watch.Add("Satoshi", genesisAddress, ""); err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, handler, http.MethodGet, "/api/watch", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"pending"`) || strings.Contains(response.Body.String(), `"btc":"0"`) {
+		t.Fatalf("IBD watch response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestWatchAddSetsAndClearsPendingByKey(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		var result any
+		switch request.Method {
+		case "getblockchaininfo":
+			result = map[string]any{"pruned": false, "initialblockdownload": false}
+		case "getdescriptorinfo":
+			result = map[string]any{"descriptor": "addr(" + genesisAddress + ")", "hasprivatekeys": false, "isrange": false}
+		case "getwalletinfo":
+			<-release
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": result, "error": nil})
+	}))
+	defer server.Close()
+	cfg := config{dashboardPassword: "dashboard-secret", stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	rpc := &rpcClient{url: server.URL, client: server.Client()}
+	a, err := newApp(cfg, rpc, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/watch", strings.NewReader(`{"name":"Cold","key":"`+genesisAddress+`"}`))
+	req.SetBasicAuth("x", "dashboard-secret")
+	req.Header.Set("X-Requested-With", "fetch")
+	response := httptest.NewRecorder()
+	a.routes().ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("add response = %d %q", response.Code, response.Body.String())
+	}
+	_, pending := a.watch.snapshot()
+	if !pending[watchKeyID(genesisAddress)] {
+		t.Fatal("new wallet was not marked pending before provisioning")
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for {
+		_, pending = a.watch.snapshot()
+		if !pending[watchKeyID(genesisAddress)] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pending state was not cleared after provisioning")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestProvisionCompletionDoesNotAttachOrUnloadReplacement(t *testing.T) {
+	tests := []struct {
+		name        string
+		replacement WatchEntry
+		wantUnload  bool
+	}{
+		{name: "different key", replacement: WatchEntry{Name: "Cold", Key: parityZpub}, wantUnload: true},
+		{name: "same key new generation", replacement: WatchEntry{Name: "Cold", Key: genesisAddress, Birthday: "2021-01-01"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newLifecycleRPC()
+			fixture.importStarted = make(chan struct{})
+			fixture.releaseImport = make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+			defer server.Close()
+			cfg := config{dashboardPassword: "secret", stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+			a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.ctx = context.Background()
+			original, err := a.watch.Add("Cold", genesisAddress, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.blockWallet = coreWalletName(original)
+			a.watch.SetPending(original.Key, true)
+			done := make(chan struct{})
+			go func() {
+				a.provision(original, false)
+				close(done)
+			}()
+			select {
+			case <-fixture.importStarted:
+			case <-time.After(time.Second):
+				t.Fatal("provisioning did not reach blocked import")
+			}
+			if !a.watch.Remove(original.Name) {
+				t.Fatal("original entry was not removed")
+			}
+			replacement, err := a.watch.Add(tt.replacement.Name, tt.replacement.Key, tt.replacement.Birthday)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.watch.SetPending(replacement.Key, true)
+			close(fixture.releaseImport)
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("stale provisioning did not finish")
+			}
+
+			fixture.mu.Lock()
+			unloaded := append([]string(nil), fixture.unloaded...)
+			fixture.mu.Unlock()
+			if got := len(unloaded) > 0; got != tt.wantUnload {
+				t.Fatalf("unloaded wallets = %v, want unload %v", unloaded, tt.wantUnload)
+			}
+			a.watch.mu.Lock()
+			mapped := a.watch.coreNames[watchKeyID(original.Key)]
+			pending := a.watch.pending[watchKeyID(replacement.Key)]
+			a.watch.mu.Unlock()
+			if mapped != "" {
+				t.Fatalf("stale wallet mapping retained: %q", mapped)
+			}
+			if !pending {
+				t.Fatal("replacement pending state was cleared by stale provisioning")
+			}
+		})
+	}
+}
+
+func TestDeleteCleanupPreservesSameKeyReadd(t *testing.T) {
+	fixture := newLifecycleRPC()
+	server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer server.Close()
+	cfg := config{dashboardPassword: "secret", stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.ctx = context.Background()
+	entry, err := a.watch.Add("Cold", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.watch.SetPending(entry.Key, true)
+	a.provision(entry, false)
+	name, _ := a.watch.resolveWallet(a.walletRPC, entry)
+	if name != coreWalletName(entry) {
+		t.Fatalf("resolved wallet = %q", name)
+	}
+	if !a.watch.RemoveExact(entry) {
+		t.Fatal("exact entry was not removed")
+	}
+	replacement, err := a.watch.Add("Cold", genesisAddress, "2021-01-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.watch.SetPending(replacement.Key, true)
+	a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, name)
+
+	fixture.mu.Lock()
+	unloaded := append([]string(nil), fixture.unloaded...)
+	fixture.mu.Unlock()
+	if len(unloaded) != 0 {
+		t.Fatalf("same-key replacement wallet was unloaded: %v", unloaded)
+	}
+	if !a.watch.Contains(replacement) {
+		t.Fatal("same-key replacement was removed")
+	}
+	a.watch.mu.Lock()
+	pending := a.watch.pending[watchKeyID(replacement.Key)]
+	a.watch.mu.Unlock()
+	if !pending {
+		t.Fatal("same-key replacement pending state was cleared")
+	}
+}
+
+func TestStartupProvisionsCurrentRosterAfterRPCBecomesAvailable(t *testing.T) {
+	fixture := newLifecycleRPC()
+	fixture.chainStarted = make(chan struct{})
+	fixture.releaseChain = make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer server.Close()
+	cfg := config{stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := a.watch.Add("Cold", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.prices.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, ""), nil
+	})}
+	a.prices.url = "https://provider.test/prices"
+	a.monitor.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, ""), nil
+	})}
+	a.monitor.output = io.Discard
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.startBackground(ctx)
+	select {
+	case <-fixture.chainStarted:
+	case <-time.After(time.Second):
+		t.Fatal("startup did not wait for blockchain RPC")
+	}
+	if !a.watch.Remove(old.Name) {
+		t.Fatal("old startup entry was not removed")
+	}
+	replacement, err := a.watch.Add("Cold", parityZpub, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(fixture.releaseChain)
+	deadline := time.Now().Add(time.Second)
+	for {
+		a.watch.mu.Lock()
+		mapped := a.watch.coreNames[watchKeyID(replacement.Key)]
+		a.watch.mu.Unlock()
+		if mapped == coreWalletName(replacement) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("current startup roster was not provisioned")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	fixture.mu.Lock()
+	_, oldCreated := fixture.wallets[coreWalletName(old)]
+	fixture.mu.Unlock()
+	if oldCreated {
+		t.Fatal("removed startup entry was provisioned after RPC recovered")
+	}
+}
+
+func TestStartupMarksWalletsPendingBeforeWorkers(t *testing.T) {
+	a, _ := testApp(t, &rpcFixture{}, "")
+	entry, err := a.watch.Add("Cold", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.rpc.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	a.prices.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, ""), nil
+	})}
+	a.prices.url = "https://provider.test/prices"
+	ctx, cancel := context.WithCancel(context.Background())
+	a.startBackground(ctx)
+	_, pending := a.watch.snapshot()
+	if !pending[watchKeyID(entry.Key)] {
+		t.Fatal("startup wallet was not marked pending synchronously")
+	}
+	cancel()
+}
+
+func TestPriceCacheStartsWithBackgroundWorkers(t *testing.T) {
+	a, _ := testApp(t, &rpcFixture{}, "")
+	started := make(chan struct{})
+	a.prices.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		close(started)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	a.prices.url = "https://provider.test/prices"
+	ctx, cancel := context.WithCancel(context.Background())
+	a.startBackground(ctx)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("price cache did not start")
+	}
+	cancel()
+}
+
+func TestPriceWidgetStaysOutsideLiveRefreshRegion(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(source)
+	widget := strings.Index(html, `id="btc-price"`)
+	watch := strings.Index(html, `id="watch"`)
+	liveClose := strings.Index(html, "    </div>\n    <section")
+	if widget < 0 || watch < 0 || liveClose < 0 || widget < liveClose || widget > watch {
+		t.Fatal("price widget must be in stack-col after #live and before #watch")
+	}
+	if strings.Count(html, `/static/prices.js`) != 1 {
+		t.Fatal("price module must load exactly once")
 	}
 }
 

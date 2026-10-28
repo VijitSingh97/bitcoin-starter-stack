@@ -49,6 +49,14 @@
         <div class="footer"><span>Updated: {{.LastUpdate}}</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </div>
+    <section id="btc-price" class="card" hidden>
+      <div class="price-row">
+        <span class="price-label">Bitcoin price</span>
+        <strong id="btc-price-value">—</strong>
+        <select id="btc-price-currency" aria-label="Price currency"></select>
+        <span id="btc-price-status">Price unavailable</span>
+      </div>
+    </section>
     <section id="watch" class="card watch-card" hidden></section>
   </div>
 {{end}}
@@ -56,6 +64,7 @@
   <script type="module" src="/static/theme.js"></script>
   <script type="module" src="/static/sparkline.js"></script>
   <script type="module" src="/static/refresh.js"></script>
+  <script type="module" src="/static/prices.js"></script>
   {{if not .Loading}}<script type="module" src="/static/watch.js"></script>
   <script type="module" src="/static/upgrade.js"></script>{{end}}
 </body>

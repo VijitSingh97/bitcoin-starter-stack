@@ -56,12 +56,18 @@ Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
   Healthchecks.io pings (both opt-in) go through the tor container's SOCKS
   proxy (`socks5h`, so even DNS resolves through Tor) — enabling alerts
   never turns the stack into a clearnet beacon.
+- **BTC prices use the same Tor proxy.** A background CoinGecko request every five
+  minutes caches nine fiat quotes; page loads and currency changes only read the
+  cache. DNS resolves through Tor, TLS is verified, and failures never fall back to
+  a direct connection. Quotes become stale after a failed fetch or fifteen minutes.
 
 ## Trust boundaries — and non-boundaries
 
 - The dashboard has **no authentication by default** (`dashboard.password`
   adds basic auth). LAN exposure is the feature; internet exposure is on you
   not to configure. See [SECURITY.md](../SECURITY.md).
+  Personal wallet views and all wallet/upgrade mutations require a configured
+  password. The known public Genesis example can be viewed without one.
 - The opt-in Upgrade button keeps the container↔host boundary intact: the
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls

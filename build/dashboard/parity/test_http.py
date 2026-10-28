@@ -50,7 +50,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                 state['wallets'][params[0]]['loaded'] = True
                 result = {'name': params[0]}
             elif method == 'createwallet':
-                state['wallets'][params[0]] = {'loaded': True, 'mode': 'ok'}
+                state['wallets'][params[0]] = {'loaded': True, 'mode': 'ok', 'descriptors': []}
                 result = {'name': params[0]}
             elif method == 'unloadwallet' and params[0] in state['wallets']:
                 state['wallets'][params[0]]['loaded'] = False
@@ -60,11 +60,19 @@ class Fixture(http.server.BaseHTTPRequestHandler):
             elif method == 'getwalletinfo' and wallet in state['wallets']:
                 info = state['wallets'][wallet]
                 if info['loaded'] and info['mode'] != 'error':
-                    result = {'scanning': {'progress': 0.5} if info['mode'] == 'scanning' else False}
+                    result = {'scanning': {'progress': 0.5} if info['mode'] == 'scanning' else False,
+                              'descriptors': True, 'private_keys_enabled': False}
             elif method == 'getbalances':
                 result = {'mine': {'trusted': 1.23456789}}
             elif method == 'importdescriptors':
+                state['wallets'][wallet]['descriptors'] = [
+                    {'desc': item['desc'], 'internal': item['internal'], 'timestamp': item['timestamp'],
+                     **({'range': [0, item['range']]} if 'range' in item else {})}
+                    for item in params[0]
+                ]
                 result = [{'success': True} for _ in params[0]]
+            elif method == 'listdescriptors' and wallet in state['wallets']:
+                result = {'descriptors': state['wallets'][wallet].get('descriptors', [])}
         if method in state.get('failed_methods', []):
             result = None
         body = json.dumps({'result': result, 'error': None if result is not None else {'code': -18}, 'id': value.get('id')}).encode()
@@ -82,6 +90,7 @@ class DashboardContracts(unittest.TestCase):
         self.fixture = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
         self.fixture.lock = threading.Lock()
         self.fixture.state = {'calls': [], 'wallets': {}, 'down': False, 'ibd': False, 'pruned': False, 'version': '/Satoshi:31.1.0/'}
+        self.go_dashboard = 'DASHBOARD_COMMAND' in os.environ
         self.thread = threading.Thread(target=self.fixture.serve_forever, daemon=True)
         self.thread.start()
         self.log = (self.state_dir / 'server.log').open('w+')
@@ -158,10 +167,16 @@ class DashboardContracts(unittest.TestCase):
         for _ in range(100):
             with self.fixture.lock:
                 ready = any(method == 'importdescriptors' for _, method, _, _ in self.fixture.state['calls'])
-            if ready:
+            if ready and any(row['name'] == name and row['state'] in ('ok', 'scanning')
+                             for row in self.body()['wallets']):
                 return
             time.sleep(0.01)
         self.fail('descriptor import did not complete')
+
+    def wallet_name(self, label='Cold', key=ADDRESS):
+        if self.go_dashboard:
+            return 'watch_' + hashlib.sha256(key.strip().encode()).hexdigest()
+        return 'watch_' + label
 
     def test_auth_covers_routes_and_static(self):
         for path in ['/', '/metrics', '/api/watch', '/api/fees', '/api/upgrade', '/static/dashboard.css']:
@@ -221,8 +236,9 @@ class DashboardContracts(unittest.TestCase):
         self.assertFalse(view['show_total'])
         stored = json.loads((self.state_dir/'wallets.json').read_text())
         self.assertEqual(stored, [{'name':'Cold','key':ADDRESS,'birthday':'2021-03-15'}])
+        core_name = self.wallet_name()
         create = next(row[2] for row in self.fixture.state['calls'] if row[1]=='createwallet')
-        self.assertEqual(create, ['watch_Cold',True,True,'',False,True,True])
+        self.assertEqual(create, [core_name,True,True,'',False,True,True])
         imported = next(row[2][0][0] for row in self.fixture.state['calls'] if row[1]=='importdescriptors')
         self.assertEqual(imported, {'desc':f'addr({ADDRESS})#fixture','timestamp':1615766400,'active':False,'internal':False})
         self.stop()
@@ -231,7 +247,7 @@ class DashboardContracts(unittest.TestCase):
         self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 200)
         self.assertEqual(self.body()['wallets'], [])
         self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 404)
-        self.assertIn(('', 'unloadwallet', ['watch_Cold',False]), [row[:3] for row in self.fixture.state['calls']])
+        self.assertIn(('', 'unloadwallet', [core_name,False]), [row[:3] for row in self.fixture.state['calls']])
 
     def test_wallet_validation_and_csrf(self):
         for data in [{}, {'name':'Cold','key':'bad'}, {'name':'Cold','key':ADDRESS,'birthday':'tomorrow'}]:
@@ -244,12 +260,13 @@ class DashboardContracts(unittest.TestCase):
 
     def test_wallet_scanning_and_stale_history(self):
         self.add()
-        self.fixture.state['wallets']['watch_Cold']['mode']='scanning'
+        core_name = self.wallet_name()
+        self.fixture.state['wallets'][core_name]['mode']='scanning'
         self.assertEqual(self.body()['wallets'][0]['state'], 'scanning')
         self.stop()
         kid=hashlib.sha256(ADDRESS.encode()).hexdigest()[:16]
         (self.state_dir/'balance_history.json').write_text(json.dumps({kid:[[100,0.5],[3700,0.75]]}))
-        self.fixture.state['wallets']['watch_Cold']['mode']='error'
+        self.fixture.state['wallets'][core_name]['mode']='error'
         self.start()
         row=self.body()['wallets'][0]
         self.assertEqual((row['state'],row['btc'],row['history']), ('stale','0.75',[0.5,0.75]))
