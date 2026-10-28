@@ -866,8 +866,13 @@ func TestProvisionHashWalletMismatchFailsClosed(t *testing.T) {
 	wrong := WatchEntry{Name: "Other", Key: genesisAddress}
 	created := false
 	rpc := func(method string, params []any) any {
-		if method == "createwallet" {
+		switch method {
+		case "createwallet":
 			created = true
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "unloadwallet":
+			t.Fatal("preloaded mismatched wallet was unloaded")
 		}
 		return nil
 	}
@@ -888,6 +893,185 @@ func TestProvisionHashWalletMismatchFailsClosed(t *testing.T) {
 	}
 	if name, ok := ProvisionOne(rpc, walletRPC, entry, false); ok || name != "" || created {
 		t.Fatalf("mismatched hash wallet = %q, %v; created=%v", name, ok, created)
+	}
+}
+
+func TestProvisionRetriesCompatiblePartialHashWallet(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub, Birthday: "2021-01-01"}
+	walletExists := false
+	listed := []any{}
+	createCalls := 0
+	importSizes := []int{}
+	rpc := func(method string, params []any) any {
+		switch method {
+		case "createwallet":
+			createCalls++
+			walletExists = true
+			return map[string]any{"name": params[0]}
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		}
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != coreWalletName(entry) || !walletExists {
+			return nil
+		}
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "listdescriptors":
+			return map[string]any{"descriptors": append([]any(nil), listed...)}
+		case "importdescriptors":
+			requests := params[0].([]any)
+			importSizes = append(importSizes, len(requests))
+			results := make([]any, len(requests))
+			for index, value := range requests {
+				request := mapValue(value)
+				if len(importSizes) == 1 && index == 1 {
+					results[index] = map[string]any{"success": false}
+					continue
+				}
+				item := map[string]any{
+					"desc": request["desc"], "internal": request["internal"], "timestamp": request["timestamp"],
+				}
+				if _, ranged := request["range"]; ranged {
+					item["range"] = []any{float64(0), float64(999)}
+				}
+				listed = append(listed, item)
+				results[index] = map[string]any{"success": true}
+			}
+			return results
+		}
+		return nil
+	}
+	if name, ok := ProvisionOne(rpc, walletRPC, entry, false); ok || name != "" {
+		t.Fatalf("partial first import = %q, %v", name, ok)
+	}
+	name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+	if !ok || name != coreWalletName(entry) {
+		t.Fatalf("retry = %q, %v", name, ok)
+	}
+	if createCalls != 1 || !reflect.DeepEqual(importSizes, []int{2, 1}) || len(listed) != 2 {
+		t.Fatalf("create calls=%d import sizes=%v descriptors=%#v", createCalls, importSizes, listed)
+	}
+}
+
+func TestProvisionRetriesEmptyHashWallet(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub}
+	imported := 0
+	rpc := func(method string, params []any) any {
+		switch method {
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "createwallet", "unloadwallet":
+			t.Fatalf("unexpected %s", method)
+		}
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != coreWalletName(entry) {
+			return nil
+		}
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "listdescriptors":
+			return map[string]any{"descriptors": []any{}}
+		case "importdescriptors":
+			requests := params[0].([]any)
+			imported = len(requests)
+			return []any{map[string]any{"success": true}, map[string]any{"success": true}}
+		}
+		return nil
+	}
+	name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+	if !ok || name != coreWalletName(entry) || imported != 2 {
+		t.Fatalf("empty retry = %q, %v; imported=%d", name, ok, imported)
+	}
+}
+
+func TestProvisionDoesNotRetryHashWalletOnPrunedNode(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub}
+	imported := false
+	rpc := func(method string, params []any) any {
+		if method == "loadwallet" && params[0] == walletName(entry.Name) {
+			return nil
+		}
+		t.Fatalf("unexpected node RPC %s", method)
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		if wallet != coreWalletName(entry) {
+			return nil
+		}
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "listdescriptors":
+			return map[string]any{"descriptors": []any{}}
+		case "importdescriptors":
+			imported = true
+		}
+		return nil
+	}
+	if name, ok := ProvisionOne(rpc, walletRPC, entry, true); ok || name != "" || imported {
+		t.Fatalf("pruned retry = %q, %v; imported=%v", name, ok, imported)
+	}
+}
+
+func TestProvisionRejectsUnverifiableHashWalletRetries(t *testing.T) {
+	entry := WatchEntry{Name: "Cold", Key: parityZpub, Birthday: "2021-01-01"}
+	valid := listedDescriptors(entry)["descriptors"].([]any)[0].(map[string]any)
+	tests := []struct {
+		name string
+		info map[string]any
+		item map[string]any
+	}{
+		{name: "private keys enabled", info: map[string]any{"descriptors": true, "private_keys_enabled": true}, item: valid},
+		{name: "missing required timestamp", info: watchInfo(false), item: map[string]any{"desc": valid["desc"], "internal": false, "range": valid["range"]}},
+		{name: "invalid optional role", info: watchInfo(false), item: map[string]any{"desc": valid["desc"], "internal": "false", "timestamp": valid["timestamp"], "range": valid["range"]}},
+		{name: "foreign descriptor", info: watchInfo(false), item: map[string]any{"desc": "addr(" + genesisAddress + ")#foreign", "internal": false, "timestamp": 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imported := false
+			unloaded := false
+			rpc := func(method string, params []any) any {
+				switch method {
+				case "getdescriptorinfo":
+					return descriptorInfo(params)
+				case "unloadwallet":
+					unloaded = true
+				}
+				return nil
+			}
+			walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+				if wallet != coreWalletName(entry) {
+					return nil
+				}
+				switch method {
+				case "getwalletinfo":
+					return tt.info
+				case "getdescriptorinfo":
+					return descriptorInfo(params)
+				case "listdescriptors":
+					return map[string]any{"descriptors": []any{tt.item}}
+				case "importdescriptors":
+					imported = true
+				}
+				return nil
+			}
+			if name, ok := ProvisionOne(rpc, walletRPC, entry, false); ok || name != "" || imported || unloaded {
+				t.Fatalf("retry = %q, %v; imported=%v unloaded=%v", name, ok, imported, unloaded)
+			}
+		})
 	}
 }
 
@@ -1052,9 +1236,11 @@ func TestProvisionRequiresCompleteSuccessfulImport(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			descriptorCalls := 0
 			importCalls := 0
+			createCalls := 0
 			rpc := func(method string, params []any) any {
 				switch method {
 				case "createwallet":
+					createCalls++
 					return map[string]any{"name": params[0]}
 				case "getdescriptorinfo":
 					descriptorCalls++
@@ -1077,6 +1263,9 @@ func TestProvisionRequiresCompleteSuccessfulImport(t *testing.T) {
 			}
 			if mode == "missing descriptor info" && importCalls != 0 {
 				t.Fatal("partial descriptor request was imported")
+			}
+			if mode == "missing descriptor info" && createCalls != 0 {
+				t.Fatal("wallet was created before descriptor validation completed")
 			}
 		})
 	}

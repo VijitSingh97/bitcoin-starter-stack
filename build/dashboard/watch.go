@@ -834,6 +834,97 @@ func probeCandidate(rpc RPCFunc, walletRPC WalletRPCFunc, name string) (bool, bo
 	return true, true, safeWatchWallet(info)
 }
 
+func importRequests(rpc RPCFunc, entry WatchEntry) ([]any, bool) {
+	descriptors, err := descriptorsFor(entry.Key)
+	if err != nil {
+		return nil, false
+	}
+	requests := make([]any, 0, len(descriptors))
+	for _, item := range descriptors {
+		info := mapValue(rpc("getdescriptorinfo", []any{item.Desc}))
+		hasPrivateKeys, public := info["hasprivatekeys"].(bool)
+		if len(info) == 0 || !public || hasPrivateKeys || stringValue(info["descriptor"]) == "" {
+			return nil, false
+		}
+		request := map[string]any{
+			"desc": info["descriptor"], "timestamp": birthdayTimestamp(entry.Birthday),
+			"active": false, "internal": item.Internal,
+		}
+		if truthy(info["isrange"]) {
+			request["range"] = 1000
+		}
+		requests = append(requests, request)
+	}
+	return requests, len(requests) == len(descriptors)
+}
+
+func retryImportRequests(walletRPC WalletRPCFunc, name string, requests []any) ([]any, bool) {
+	want := make(map[string]map[string]any, len(requests))
+	for _, value := range requests {
+		request := mapValue(value)
+		identity := descriptorIdentity(descriptor{Desc: stringValue(request["desc"])})
+		if identity == "" || want[identity] != nil {
+			return nil, false
+		}
+		want[identity] = request
+	}
+	listed := mapValue(walletRPC(name, "listdescriptors", []any{false}, 8*time.Second))
+	values, ok := listed["descriptors"].([]any)
+	if !ok || len(values) > len(want) {
+		return nil, false
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		item := mapValue(value)
+		identity := descriptorIdentity(descriptor{Desc: stringValue(item["desc"])})
+		request := want[identity]
+		if request == nil || seen[identity] {
+			return nil, false
+		}
+		expectedInternal, expectedInternalOK := request["internal"].(bool)
+		if !expectedInternalOK {
+			return nil, false
+		}
+		if internal, present := item["internal"]; present {
+			role, valid := internal.(bool)
+			if !valid || role != expectedInternal {
+				return nil, false
+			}
+		}
+		_, ranged := request["range"]
+		if ranged && !descriptorRangeCovers(item["range"]) {
+			return nil, false
+		}
+		existing, valid := descriptorTimestamp(item["timestamp"])
+		requested, requestedOK := descriptorTimestamp(request["timestamp"])
+		if !valid || !requestedOK || existing > requested && !(requested == 0 && existing <= 1) {
+			return nil, false
+		}
+		seen[identity] = true
+	}
+	missing := make([]any, 0, len(requests)-len(seen))
+	for _, value := range requests {
+		identity := descriptorIdentity(descriptor{Desc: stringValue(mapValue(value)["desc"])})
+		if !seen[identity] {
+			missing = append(missing, value)
+		}
+	}
+	return missing, true
+}
+
+func importDescriptors(walletRPC WalletRPCFunc, name string, requests []any) bool {
+	results, ok := walletRPC(name, "importdescriptors", []any{requests}, time.Hour).([]any)
+	if !ok || len(results) != len(requests) {
+		return false
+	}
+	for _, result := range results {
+		if !truthy(valueFrom(mapValue(result), "success")) {
+			return false
+		}
+	}
+	return true
+}
+
 func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned bool) (string, bool) {
 	legacy := walletName(entry.Name)
 	legacyExists, legacyLoaded, legacySafe := probeCandidate(rpc, walletRPC, legacy)
@@ -847,8 +938,25 @@ func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned
 	}
 	name := coreWalletName(entry)
 	hashExists, hashLoaded, hashSafe := probeCandidate(rpc, walletRPC, name)
+	if hashExists && hashSafe && walletMatches(walletRPC, name, entry) {
+		return name, true
+	}
+	if pruned {
+		if hashLoaded {
+			rpc("unloadwallet", []any{name, false})
+		}
+		return "", false
+	}
+	requests, valid := importRequests(rpc, entry)
+	if !valid {
+		if hashLoaded {
+			rpc("unloadwallet", []any{name, false})
+		}
+		return "", false
+	}
 	if hashExists {
-		if hashSafe && walletMatches(walletRPC, name, entry) {
+		missing, compatible := retryImportRequests(walletRPC, name, requests)
+		if hashSafe && compatible && len(missing) > 0 && importDescriptors(walletRPC, name, missing) {
 			return name, true
 		}
 		if hashLoaded {
@@ -856,40 +964,11 @@ func ProvisionOne(rpc RPCFunc, walletRPC WalletRPCFunc, entry WatchEntry, pruned
 		}
 		return "", false
 	}
-	descriptors, err := descriptorsFor(entry.Key)
-	if err != nil || pruned {
-		return "", false
-	}
 	if rpc("createwallet", []any{name, true, true, "", false, true, true}) == nil {
 		return "", false
 	}
-	requests := make([]any, 0, len(descriptors))
-	for _, item := range descriptors {
-		info := mapValue(rpc("getdescriptorinfo", []any{item.Desc}))
-		hasPrivateKeys, public := info["hasprivatekeys"].(bool)
-		if len(info) == 0 || !public || hasPrivateKeys || stringValue(info["descriptor"]) == "" {
-			return "", false
-		}
-		request := map[string]any{
-			"desc": info["descriptor"], "timestamp": birthdayTimestamp(entry.Birthday),
-			"active": false, "internal": item.Internal,
-		}
-		if truthy(info["isrange"]) {
-			request["range"] = 1000
-		}
-		requests = append(requests, request)
-	}
-	if len(requests) != len(descriptors) {
+	if !importDescriptors(walletRPC, name, requests) {
 		return "", false
-	}
-	results, ok := walletRPC(name, "importdescriptors", []any{requests}, time.Hour).([]any)
-	if !ok || len(results) != len(requests) {
-		return "", false
-	}
-	for _, result := range results {
-		if !truthy(valueFrom(mapValue(result), "success")) {
-			return "", false
-		}
 	}
 	return name, true
 }

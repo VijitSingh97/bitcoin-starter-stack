@@ -2,9 +2,8 @@
 // `dashboard.control` AND a newer release is available. Clicking asks the
 // host-side `./stack upgrade-agent` to run the upgrade — the dashboard itself
 // has no host/docker access; it only drops a request marker.
-const box = document.getElementById("upgrade");
-
 async function refresh() {
+  const box = document.getElementById("upgrade");
   if (!box) return;
   let s;
   try {
@@ -50,3 +49,4 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 15000);
+window.addEventListener("live-updated", refresh);

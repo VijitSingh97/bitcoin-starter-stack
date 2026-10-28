@@ -34,6 +34,9 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Failed initial wallet imports can recover after a restart without deleting
+  the existing watch-only wallet or accepting unrelated descriptors.
+- The dashboard upgrade control survives automatic status-panel refreshes.
 - Reusing a watch-only label with a different public key no longer reads the old
   Core wallet's balance. Existing matching imports and history are preserved.
 - Private keys are rejected before wallet persistence; legacy files containing

@@ -26,6 +26,8 @@ fixture.RESULTS["listwallets"] = []
 
 
 class Preview(BaseHTTPRequestHandler):
+    update_pending = False
+
     def log_message(self, _format, *_args):
         pass
 
@@ -47,6 +49,13 @@ class Preview(BaseHTTPRequestHandler):
             self.wfile.write(result)
 
     def do_POST(self):
+        if self.path == "/api/upgrade":
+            type(self).update_pending = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+            return
         if self.path != "/api/settings":
             self.send_error(404)
             return
@@ -82,6 +91,10 @@ class Preview(BaseHTTPRequestHandler):
                 "total": None,
                 "total_state": "pending",
             }).encode()
+            content_type = "application/json"
+        elif self.path == "/api/upgrade":
+            body = json.dumps({"enabled": True, "update": "stack v9.9.9 available (running v1.31.1)",
+                               "pending": type(self).update_pending}).encode()
             content_type = "application/json"
         elif self.path == "/api/prices":
             body = json.dumps({
