@@ -861,6 +861,15 @@ func TestWalletMatchChecksInternalRoleAndBirthdayCoverage(t *testing.T) {
 	}
 	items := listed["descriptors"].([]any)
 	first := items[0].(map[string]any)
+	for _, value := range items {
+		delete(value.(map[string]any), "internal")
+	}
+	if !walletMatches(walletRPC, "watch_test", entry) {
+		t.Fatal("inactive descriptors without internal metadata were rejected")
+	}
+	for index, value := range items {
+		value.(map[string]any)["internal"] = index == 1
+	}
 	first["internal"] = !first["internal"].(bool)
 	if walletMatches(walletRPC, "watch_test", entry) {
 		t.Fatal("receive/change descriptor role mismatch was accepted")
@@ -878,6 +887,39 @@ func TestWalletMatchChecksInternalRoleAndBirthdayCoverage(t *testing.T) {
 	first["timestamp"] = birthdayTimestamp(entry.Birthday) + 1
 	if walletMatches(walletRPC, "watch_test", entry) {
 		t.Fatal("wallet with later descriptor timestamp was treated as complete")
+	}
+}
+
+func TestProvisionReusesInactiveAccountDescriptorsWithoutInternalMetadata(t *testing.T) {
+	entry := WatchEntry{Name: "Ledger", Key: parityZpub, Birthday: "2021-01-01"}
+	listed := listedDescriptors(entry)
+	for _, value := range listed["descriptors"].([]any) {
+		delete(value.(map[string]any), "internal")
+	}
+	created := false
+	imported := false
+	rpc := func(method string, params []any) any {
+		if method == "createwallet" {
+			created = true
+		}
+		return nil
+	}
+	walletRPC := func(wallet, method string, params []any, timeout time.Duration) any {
+		switch method {
+		case "getwalletinfo":
+			return watchInfo(false)
+		case "getdescriptorinfo":
+			return descriptorInfo(params)
+		case "listdescriptors":
+			return listed
+		case "importdescriptors":
+			imported = true
+		}
+		return nil
+	}
+	name, ok := ProvisionOne(rpc, walletRPC, entry, false)
+	if !ok || name != walletName(entry.Name) || created || imported {
+		t.Fatalf("inactive account reuse = %q, %v; created=%v imported=%v", name, ok, created, imported)
 	}
 }
 

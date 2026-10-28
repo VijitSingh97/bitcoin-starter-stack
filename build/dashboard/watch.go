@@ -696,7 +696,7 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 }
 
 func descriptorIdentity(item descriptor) string {
-	return fmt.Sprintf("%t:%s", item.Internal, strings.SplitN(item.Desc, "#", 2)[0])
+	return strings.SplitN(item.Desc, "#", 2)[0]
 }
 
 func descriptorTimestamp(value any) (int64, bool) {
@@ -730,7 +730,11 @@ func walletMatches(walletRPC WalletRPCFunc, name string, entry WatchEntry) bool 
 	if err != nil {
 		return false
 	}
-	want := make(map[string]bool, len(descriptors))
+	type expectation struct {
+		internal bool
+		ranged   bool
+	}
+	want := make(map[string]expectation, len(descriptors))
 	for _, item := range descriptors {
 		info := mapValue(walletRPC(name, "getdescriptorinfo", []any{item.Desc}, 8*time.Second))
 		canonical := stringValue(info["descriptor"])
@@ -738,7 +742,7 @@ func walletMatches(walletRPC WalletRPCFunc, name string, entry WatchEntry) bool 
 		if canonical == "" || !public || hasPrivateKeys {
 			return false
 		}
-		want[descriptorIdentity(descriptor{Desc: canonical, Internal: item.Internal})] = strings.Contains(canonical, "/*")
+		want[descriptorIdentity(descriptor{Desc: canonical})] = expectation{item.Internal, strings.Contains(canonical, "/*")}
 	}
 	listed := mapValue(walletRPC(name, "listdescriptors", []any{false}, 8*time.Second))
 	values, ok := listed["descriptors"].([]any)
@@ -749,12 +753,18 @@ func walletMatches(walletRPC WalletRPCFunc, name string, entry WatchEntry) bool 
 	requested := birthdayTimestamp(entry.Birthday)
 	for _, value := range values {
 		item := mapValue(value)
-		identity := descriptorIdentity(descriptor{Desc: stringValue(item["desc"]), Internal: truthy(item["internal"])})
-		ranged, expected := want[identity]
+		identity := descriptorIdentity(descriptor{Desc: stringValue(item["desc"])})
+		expectedDescriptor, expected := want[identity]
 		if !expected || seen[identity] {
 			return false
 		}
-		if ranged && !descriptorRangeCovers(item["range"]) {
+		if internal, present := item["internal"]; present {
+			role, valid := internal.(bool)
+			if !valid || role != expectedDescriptor.internal {
+				return false
+			}
+		}
+		if expectedDescriptor.ranged && !descriptorRangeCovers(item["range"]) {
 			return false
 		}
 		timestamp, present := item["timestamp"]

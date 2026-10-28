@@ -72,7 +72,10 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                 ]
                 result = [{'success': True} for _ in params[0]]
             elif method == 'listdescriptors' and wallet in state['wallets']:
-                result = {'descriptors': state['wallets'][wallet].get('descriptors', [])}
+                result = {'descriptors': [
+                    {key: value for key, value in item.items() if key != 'internal'}
+                    for item in state['wallets'][wallet].get('descriptors', [])
+                ]}
         if method in state.get('failed_methods', []):
             result = None
         body = json.dumps({'result': result, 'error': None if result is not None else {'code': -18}, 'id': value.get('id')}).encode()
@@ -243,7 +246,9 @@ class DashboardContracts(unittest.TestCase):
         self.assertEqual(imported, {'desc':f'addr({ADDRESS})#fixture','timestamp':1615766400,'active':False,'internal':False})
         self.stop()
         self.start()
-        self.assertEqual(self.body()['wallets'][0]['name'], 'Cold')
+        restarted = self.body()['wallets'][0]
+        self.assertEqual((restarted['name'], restarted['state'], restarted['btc']),
+                         ('Cold', 'ok', '1.23456789'))
         self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 200)
         self.assertEqual(self.body()['wallets'], [])
         self.assertEqual(self.call('/api/watch/Cold', 'DELETE')[0], 404)
