@@ -31,6 +31,9 @@ if (typeof document !== "undefined") {
       const next = doc.getElementById("live");
       const cur = document.getElementById("live");
       if (next && cur) {
+        const price = document.getElementById("btc-price");
+        const nextPrice = next.querySelector("#btc-price");
+        if (price && nextPrice) nextPrice.replaceWith(price);
         cur.replaceWith(next);
         // let the fee sparkline redraw into the fresh canvas
         window.dispatchEvent(new Event("live-updated"));

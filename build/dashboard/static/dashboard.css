@@ -2,6 +2,7 @@
    picks it, or in "auto"/unset mode when the OS prefers light. The bitcoin
    accent is nudged darker in light mode for contrast on white. */
 :root {
+  color-scheme: dark;
   --bg: #0f0f0f;
   --card: #1a1a1a;
   --text: #e0e0e0;
@@ -15,6 +16,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #f4f4f5;
   --card: #ffffff;
   --text: #1a1a1a;
@@ -30,6 +32,7 @@
 @media (prefers-color-scheme: light) {
   /* auto (or no explicit choice) follows the OS; an explicit dark pick wins */
   :root:not([data-theme="dark"]) {
+    color-scheme: light;
     --bg: #f4f4f5;
     --card: #ffffff;
     --text: #1a1a1a;

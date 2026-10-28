@@ -44,19 +44,20 @@
         <div class="row"><span class="label">Mempool:</span> <span>{{.MempoolTxs}} tx · {{printf "%.1f" .MempoolMB}} MB</span></div>
         <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{.FeeNext}} / {{.Fee30m}} / {{.FeeHour}}</span></div>
         <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>{{end}}
+        <section id="btc-price" hidden>
+          <hr>
+          <div class="price-row">
+            <span class="price-label">Bitcoin price</span>
+            <strong id="btc-price-value">—</strong>
+            <select id="btc-price-currency" aria-label="Price currency"></select>
+            <span id="btc-price-status">Price unavailable</span>
+          </div>
+        </section>
         {{if .UpdateNote}}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{.UpdateNote}}</div>{{end}}
         <div id="upgrade" class="row" hidden></div>
         <div class="footer"><span>Updated: {{.LastUpdate}}</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </div>
-    <section id="btc-price" class="card" hidden>
-      <div class="price-row">
-        <span class="price-label">Bitcoin price</span>
-        <strong id="btc-price-value">—</strong>
-        <select id="btc-price-currency" aria-label="Price currency"></select>
-        <span id="btc-price-status">Price unavailable</span>
-      </div>
-    </section>
     <section id="watch" class="card watch-card" hidden></section>
   </div>
 {{end}}

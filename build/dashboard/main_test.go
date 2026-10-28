@@ -863,17 +863,27 @@ func TestPriceCacheStartsWithBackgroundWorkers(t *testing.T) {
 	cancel()
 }
 
-func TestPriceWidgetStaysOutsideLiveRefreshRegion(t *testing.T) {
+func TestPriceWidgetLivesInsideStatusCard(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(source)
 	widget := strings.Index(html, `id="btc-price"`)
-	watch := strings.Index(html, `id="watch"`)
-	liveClose := strings.Index(html, "    </div>\n    <section")
-	if widget < 0 || watch < 0 || liveClose < 0 || widget < liveClose || widget > watch {
-		t.Fatal("price widget must be in stack-col after #live and before #watch")
+	if widget < 0 {
+		t.Fatal("price widget missing")
+	}
+	live := strings.LastIndex(html[:widget], `<div id="live"`)
+	fees := strings.LastIndex(html[:widget], `id="spark-fee"`)
+	footer := strings.Index(html[widget:], `class="footer"`)
+	liveClose := strings.Index(html[widget:], "      </div>\n    </div>\n    <section id=\"watch\"")
+	divider := strings.Index(html[widget:], "<hr>")
+	priceRow := strings.Index(html[widget:], `class="price-row"`)
+	if live < 0 || fees < live || footer < 0 || liveClose < 0 {
+		t.Fatal("price widget must be inside #live after fees and before the status footer")
+	}
+	if divider < 0 || priceRow < 0 || divider > priceRow || priceRow > footer {
+		t.Fatal("price widget must put a divider before the price row and footer")
 	}
 	if strings.Count(html, `/static/prices.js`) != 1 {
 		t.Fatal("price module must load exactly once")
