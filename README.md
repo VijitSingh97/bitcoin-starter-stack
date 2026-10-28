@@ -14,7 +14,7 @@ Watch blocks arrive, track your own watch-only balances, check fees and BTC pric
 and get alerts when something needs attention. Internet traffic uses Tor; your
 wallet addresses stay on your node.
 
-<img src="https://raw.githubusercontent.com/VijitSingh97/bitcoin-starter-stack/main/images/dashboard.jpg" width="100%" alt="Go dashboard with Bitcoin Core status, a verified public Binance address, and Your Wallet marked Pending history above the block tower; demo data" />
+<img src="https://raw.githubusercontent.com/VijitSingh97/bitcoin-starter-stack/031db09/images/dashboard.jpg" width="100%" alt="Go dashboard with Bitcoin Core status, a verified public Binance address, and Your Wallet marked Pending history above the block tower; demo data" />
 
 </div>
 
