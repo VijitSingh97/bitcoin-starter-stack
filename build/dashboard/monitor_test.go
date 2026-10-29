@@ -71,7 +71,7 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(900001)}, nil)
 
 	want := []string{
-		"[alice] 🔴 node down — RPC unreachable for 3 minutes",
+		"[alice] 🔴 node RPC unavailable for 3 minutes while initial sync was in progress",
 		"[alice] 🟢 node recovered — RPC is answering again",
 		"[alice] ✅ initial sync complete at height 900000",
 		"[alice] 🟧 new block 900001",
@@ -254,14 +254,18 @@ func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 
 	m.tick(nil, nil)
 	m.tick(nil, nil)
+	if len(paths) != 0 {
+		t.Fatalf("transient failures pinged Healthchecks: %v", paths)
+	}
 	m.tick(nil, nil)
-	for range 4 {
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	if got, want := strings.Join(paths, ","), "/private-uuid/fail?source=node,/private-uuid/fail?source=node,/private-uuid/fail?source=node"; got != want {
+		t.Fatalf("sustained failure paths = %q, want %q", got, want)
+	}
+	for range 5 {
 		m.tick(map[string]any{"initialblockdownload": false}, nil)
 	}
-	if got, want := strings.Join(paths, ","), "/private-uuid/fail?source=node,/private-uuid/fail?source=node,/private-uuid/fail?source=node"; got != want {
-		t.Fatalf("paths = %q, want %q", got, want)
-	}
-	m.tick(map[string]any{"initialblockdownload": false}, nil)
 	if len(paths) != 4 || paths[3] != "/private-uuid/?source=node" {
 		t.Fatalf("paths after cadence = %v", paths)
 	}

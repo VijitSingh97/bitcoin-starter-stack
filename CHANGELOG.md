@@ -29,7 +29,7 @@ All notable changes to this project are documented here. Format follows
 ### Added
 
 - A notification settings menu with persistent JSON overrides, live updates,
-  masked secrets, and the dashboard's optional password on LAN or onion access.
+  visible saved values, and the dashboard's optional password on LAN or onion access.
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.
@@ -40,6 +40,9 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Busy initial sync no longer inherits the page's short timeout for health
+  checks; temporary misses show the last confirmed sync progress and alerts
+  wait for sustained failure.
 - Failed Telegram release alerts retry until delivery succeeds, Healthchecks
   failure pings preserve query strings, and future wallet birthdays are rejected.
 - Refreshed the dashboard screenshot and wallet selector theme styling.

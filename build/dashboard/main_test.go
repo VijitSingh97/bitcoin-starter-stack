@@ -272,6 +272,45 @@ func TestInitialSyncShowsLivePercentageWithoutHidingStatus(t *testing.T) {
 	}
 }
 
+func TestHealthBlockchainUsesDedicatedDeadlineWithoutCachingHealth(t *testing.T) {
+	available := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		if !available {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"blocks": 300000, "headers": 900000, "verificationprogress": 0.25, "initialblockdownload": true,
+		}, "error": nil})
+	}))
+	defer server.Close()
+
+	a := &app{rpc: &rpcClient{url: server.URL, client: &http.Client{Transport: server.Client().Transport, Timeout: time.Millisecond}}}
+	if info := a.healthBlockchain(t.Context()); info == nil {
+		t.Fatal("health poll inherited the interactive RPC timeout")
+	}
+	loading := a.loadingPageData()
+	if !loading.LastKnownSync || loading.Progress != 25 || loading.Blocks != 300000 {
+		t.Fatalf("display sync snapshot = %#v", loading)
+	}
+
+	available = false
+	if info := a.healthBlockchain(t.Context()); info != nil {
+		t.Fatalf("failed fresh health poll returned cached data: %#v", info)
+	}
+	if loading = a.loadingPageData(); !loading.LastKnownSync || loading.Progress != 25 {
+		t.Fatalf("display snapshot was not retained after health failure: %#v", loading)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	started := time.Now()
+	if info := a.healthBlockchain(ctx); info != nil || time.Since(started) > 100*time.Millisecond {
+		t.Fatalf("cancelled health poll = %#v after %s", info, time.Since(started))
+	}
+}
+
 func TestRPCNilParamsUsesEmptyArray(t *testing.T) {
 	var params json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

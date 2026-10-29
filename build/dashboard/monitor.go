@@ -199,11 +199,15 @@ func (m *Monitor) tick(info, network map[string]any) {
 	} else {
 		m.state.fails++
 		if m.state.fails >= downAfterTicks && !m.state.downAlerted {
-			m.state.downAlerted = m.sendOperationalTelegram(fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks))
+			message := fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks)
+			if m.state.ibd {
+				message = fmt.Sprintf("🔴 node RPC unavailable for %d minutes while initial sync was in progress", downAfterTicks)
+			}
+			m.state.downAlerted = m.sendOperationalTelegram(message)
 		}
 	}
 
-	if m.state.ticks >= m.state.pingDue && m.pingHealthchecks(healthy) {
+	if m.state.ticks >= m.state.pingDue && (healthy || m.state.fails >= downAfterTicks) && m.pingHealthchecks(healthy) {
 		m.state.pingDue = m.state.ticks + pingEveryTicks
 	}
 	if healthy && network != nil && m.state.ticks%updateCheckEveryTick == 0 {

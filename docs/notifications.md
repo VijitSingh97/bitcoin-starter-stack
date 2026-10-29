@@ -18,9 +18,10 @@ includes them. Saved overrides take priority over the notification values in
 `config.json`. **Use server config** removes the override and restores those
 values. After editing the server file, apply it and reset the override if needed.
 
-The browser never receives saved bot tokens or Healthchecks ping URLs. Leave a
-replacement field blank to retain its value. Disabling a service clears its
-credentials from the dashboard override; the server configuration is unchanged.
+The gear displays the saved bot token and Healthchecks ping URL so they can be
+edited directly. Anyone with dashboard access can view those values. Disabling a
+service clears its credentials from the dashboard override; the server
+configuration is unchanged.
 
 Three opt-in ways to keep an eye on the node when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access

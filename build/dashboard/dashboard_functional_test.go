@@ -17,8 +17,15 @@ import (
 type dashboardRPC struct {
 	mu          sync.RWMutex
 	unavailable bool
+	chain       blockchainInfo
 	wallets     map[string]float64
 	entries     map[string]WatchEntry
+}
+
+func (f *dashboardRPC) setChain(chain blockchainInfo) {
+	f.mu.Lock()
+	f.chain = chain
+	f.mu.Unlock()
 }
 
 func (f *dashboardRPC) setUnavailable(value bool) {
@@ -38,6 +45,7 @@ func (f *dashboardRPC) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.RLock()
 	unavailable := f.unavailable
+	chain := f.chain
 	balance, knownWallet := f.wallets[strings.TrimPrefix(r.URL.Path, "/wallet/")]
 	entry := f.entries[strings.TrimPrefix(r.URL.Path, "/wallet/")]
 	f.mu.RUnlock()
@@ -49,7 +57,7 @@ func (f *dashboardRPC) handler(w http.ResponseWriter, r *http.Request) {
 	var result any
 	switch request.Method {
 	case "getblockchaininfo":
-		result = map[string]any{"blocks": 900000, "headers": 900001, "verificationprogress": 0.9999, "initialblockdownload": false, "pruned": false, "size_on_disk": 12 * 1024 * 1024}
+		result = chain
 	case "getnetworkinfo":
 		result = map[string]any{"subversion": "/Satoshi:31.1.0/", "connections": 2}
 	case "getpeerinfo":
@@ -95,7 +103,10 @@ func newDashboardFixture(t *testing.T, control bool) *dashboardFixture {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("TELEGRAM_CHAT_ID", "")
 	t.Setenv("HEALTHCHECKS_URL", "")
-	rpcFixture := &dashboardRPC{wallets: make(map[string]float64), entries: make(map[string]WatchEntry)}
+	rpcFixture := &dashboardRPC{
+		chain:   blockchainInfo{Blocks: 900000, Headers: 900001, VerificationProgress: 0.9999, InitialBlockDownload: false, SizeOnDisk: 12 * 1024 * 1024},
+		wallets: make(map[string]float64), entries: make(map[string]WatchEntry),
+	}
 	rpcServer := httptest.NewServer(http.HandlerFunc(rpcFixture.handler))
 	t.Cleanup(rpcServer.Close)
 	root := filepath.Dir(sourceFile(t))
@@ -177,6 +188,46 @@ func TestDashboardNodePageTransitionsFromSyncedToInitializing(t *testing.T) {
 	body = responseBody(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Bitcoin Node Initializing") || strings.Contains(body, "900000 / 900001") {
 		t.Fatalf("initializing page = %d %q", resp.StatusCode, body)
+	}
+}
+
+func TestDashboardKeepsOnlyLastConfirmedInProgressSyncForRPCFailures(t *testing.T) {
+	fixture := newDashboardFixture(t, false)
+	fixture.rpc.setChain(blockchainInfo{Blocks: 300000, Headers: 900001, VerificationProgress: 0.25, InitialBlockDownload: true, Pruned: true})
+
+	body := responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	if !strings.Contains(body, "25.00% synced") || strings.Contains(body, "Last known:") {
+		t.Fatalf("live sync page = %q", body)
+	}
+
+	fixture.rpc.setUnavailable(true)
+	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	for _, want := range []string{"Bitcoin Node Syncing", "Waiting for a fresh response", "Last known: 25.00% synced", "Last confirmed ", "block 300000 of 900001"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stale sync page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<h2>Bitcoin Node Status") {
+		t.Error("stale sync page displayed normal status as live")
+	}
+
+	fixture.rpc.setUnavailable(false)
+	fixture.rpc.setChain(blockchainInfo{Blocks: 400000, Headers: 900002, VerificationProgress: 0.5, InitialBlockDownload: true, Pruned: true})
+	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	if !strings.Contains(body, "50.00% synced") || strings.Contains(body, "Last known:") {
+		t.Fatalf("fresh recovered sync page = %q", body)
+	}
+
+	fixture.rpc.setChain(blockchainInfo{Blocks: 900002, Headers: 900002, VerificationProgress: 1, InitialBlockDownload: false, Pruned: true})
+	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	if !strings.Contains(body, "Bitcoin Node Status") || strings.Contains(body, "% synced") {
+		t.Fatalf("synced page = %q", body)
+	}
+
+	fixture.rpc.setUnavailable(true)
+	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	if !strings.Contains(body, "Bitcoin Node Initializing") || strings.Contains(body, "Last known:") || strings.Contains(body, "% synced") {
+		t.Fatalf("post-sync failure page = %q", body)
 	}
 }
 

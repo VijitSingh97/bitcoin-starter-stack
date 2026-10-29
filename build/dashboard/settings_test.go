@@ -58,32 +58,31 @@ func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
 	}
 }
 
-func TestSettingsAPINeverReturnsSecretsAndHonorsConfiguredPassword(t *testing.T) {
+func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:top-secret")
 	t.Setenv("TELEGRAM_CHAT_ID", "-10042")
 	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid")
 	t.Setenv("ALERT_NEW_BLOCK", "1")
 
 	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
-	if got := settingsRequest(handler, http.MethodGet, "", "", false); got.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated GET = %d, want 401", got.Code)
+	if got := settingsRequest(handler, http.MethodGet, "", "", false); got.Code != http.StatusUnauthorized || strings.Contains(got.Body.String(), "top-secret") || strings.Contains(got.Body.String(), "private-uuid") {
+		t.Fatalf("unauthenticated GET = %d: %s", got.Code, got.Body.String())
 	}
-	if got := settingsRequest(handler, http.MethodGet, "wrong-password", "", false); got.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong-password GET = %d, want 401", got.Code)
+	if got := settingsRequest(handler, http.MethodGet, "wrong-password", "", false); got.Code != http.StatusUnauthorized || strings.Contains(got.Body.String(), "top-secret") || strings.Contains(got.Body.String(), "private-uuid") {
+		t.Fatalf("wrong-password GET = %d: %s", got.Code, got.Body.String())
 	}
 	response := settingsRequest(handler, http.MethodGet, "dashboard-secret", "", false)
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("settings GET allows saved credentials to be cached")
+	}
 	if response.Code != http.StatusOK {
 		t.Fatalf("GET status = %d: %s", response.Code, response.Body.String())
-	}
-	body := response.Body.String()
-	if strings.Contains(body, "top-secret") || strings.Contains(body, "private-uuid") {
-		t.Fatalf("GET leaked a secret: %s", body)
 	}
 	var view map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view["telegram_enabled"] != true || view["telegram_bot_token_set"] != true || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url_set"] != true || view["alert_new_block"] != true || view["overridden"] != false {
+	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["overridden"] != false {
 		t.Fatalf("unexpected settings view: %#v", view)
 	}
 	if view["can_configure"] != true {
@@ -104,8 +103,8 @@ func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *tes
 	if post.Code != http.StatusOK {
 		t.Fatalf("passwordless LAN POST = %d: %s", post.Code, post.Body.String())
 	}
-	if strings.Contains(post.Body.String(), "passwordless-secret") {
-		t.Fatalf("passwordless LAN POST leaked a secret: %s", post.Body.String())
+	if !strings.Contains(post.Body.String(), "passwordless-secret") {
+		t.Fatalf("passwordless LAN POST did not return the saved token: %s", post.Body.String())
 	}
 
 	root := filepath.Dir(sourceFile(t))
@@ -115,13 +114,10 @@ func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *tes
 	}
 	get := settingsRequestHost(restarted.routes(), http.MethodGet, "", "", false, "192.168.1.117")
 	var view map[string]any
-	if strings.Contains(get.Body.String(), "passwordless-secret") {
-		t.Fatalf("restarted LAN GET leaked a secret: %s", get.Body.String())
-	}
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
 	}
-	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token_set"] != true || view["alert_new_block"] != true {
+	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true {
 		t.Fatalf("restarted LAN settings view = %#v", view)
 	}
 }
@@ -218,14 +214,14 @@ func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
 		t.Fatalf("POST without CSRF header = %d, want 403", got.Code)
 	}
 	response := settingsRequest(handler, http.MethodPost, "dashboard-secret", valid, true)
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("settings POST allows saved credentials to be cached")
+	}
 	if response.Code != http.StatusOK {
 		t.Fatalf("valid POST = %d: %s", response.Code, response.Body.String())
 	}
-	if strings.Contains(response.Body.String(), "original-token") || strings.Contains(response.Body.String(), "original-id") {
-		t.Fatalf("POST response leaked a secret: %s", response.Body.String())
-	}
 	var savedView map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" {
+	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" || savedView["telegram_bot_token"] != "123:original-token" || savedView["healthchecks_url"] != "https://hc-ping.com/original-id" {
 		t.Fatalf("POST response view = %#v, %v", savedView, err)
 	}
 	settings := a.monitor.notificationSettings()

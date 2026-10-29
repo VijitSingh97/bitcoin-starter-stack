@@ -12,9 +12,16 @@
 <body class="center-screen">
   <canvas id="tower"></canvas><div id="tower-label"></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
-  <div id="live"><div class="loading-card">
+  <div id="live"><div class="loading-card{{if .LastKnownSync}} sync-card{{end}}">
+    {{if .LastKnownSync}}
+    <h2>Bitcoin Node Syncing</h2><div class="spinner"></div>
+    <p>Waiting for a fresh response from Bitcoin Core...</p>
+    <p class="sync-percentage" role="status">Last known: {{printf "%.2f" .Progress}}% synced</p>
+    <p>Last confirmed {{.LastSyncTime}} · block {{.Blocks}} of {{.Headers}}</p>
+    {{else}}
     <h2>Bitcoin Node Initializing</h2><div class="spinner"></div>
     <p>Connecting to the Bitcoin node...</p>
+    {{end}}
     <p style="color: var(--muted); font-size: 0.8rem;">The dashboard will load automatically when the node is ready. Still stuck? Run ./stack doctor.</p>
     <p style="color: var(--faint); font-size: 0.7rem;">{{.Version}}</p>
   </div></div>
@@ -73,16 +80,16 @@
       <fieldset id="settings-telegram">
         <legend>Telegram</legend>
         <label class="settings-check"><input id="settings-telegram-enabled" type="checkbox"> Enable Telegram alerts</label>
-        <label>Bot token<input id="settings-telegram-token" type="password" autocomplete="new-password" maxlength="256"></label>
+        <label>Bot token<input id="settings-telegram-token" type="text" autocomplete="off" maxlength="256"></label>
         <label>Chat or channel ID<input id="settings-telegram-chat" type="text" autocomplete="off" maxlength="100"></label>
       </fieldset>
       <fieldset id="settings-healthchecks">
         <legend>Healthchecks</legend>
         <label class="settings-check"><input id="settings-healthchecks-enabled" type="checkbox"> Enable Healthchecks pings</label>
-        <label>HTTPS ping URL<input id="settings-healthchecks-url" type="password" autocomplete="new-password" maxlength="2048"></label>
+        <label>HTTPS ping URL<input id="settings-healthchecks-url" type="url" autocomplete="off" maxlength="2048"></label>
       </fieldset>
       <label class="settings-check"><input id="settings-new-block" type="checkbox"> Alert on each new block (about 144 per day)</label>
-      <p class="settings-note">Node-down, recovery, sync-complete, and low-disk alerts are automatic when Telegram is enabled. Saved secrets are never displayed.</p>
+      <p class="settings-note">Node-down, recovery, sync-complete, and low-disk alerts are automatic when Telegram is enabled. Saved values are visible to anyone with dashboard access.</p>
       <p id="settings-source" class="settings-note"></p>
       <div class="settings-actions"><button id="settings-save" type="submit">Save</button><button id="settings-reset" type="button">Use server config</button></div>
       <p id="settings-status" role="status" aria-live="polite"></p>
