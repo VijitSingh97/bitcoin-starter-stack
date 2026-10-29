@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxWatchWallets = 20
@@ -317,6 +318,9 @@ func (s *WatchStore) Add(name, key, birthday string) (WatchEntry, error) {
 	}
 	if birthday != "" && birthdayTimestamp(birthday) == 0 {
 		return WatchEntry{}, errors.New("Birthday must be a date like 2021-03-15.")
+	}
+	if birthday > time.Now().UTC().Format("2006-01-02") {
+		return WatchEntry{}, errors.New("Birthday cannot be in the future.")
 	}
 	if _, err := descriptorsFor(key); err != nil {
 		return WatchEntry{}, err

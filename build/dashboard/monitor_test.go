@@ -60,7 +60,7 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 			t.Fatalf("chat id = %q", payload.ChatID)
 		}
 		messages = append(messages, payload.Text)
-		return response(http.StatusOK, ""), nil
+		return response(http.StatusOK, `{"ok":true}`), nil
 	})
 
 	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
@@ -81,16 +81,170 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 	}
 }
 
+func TestOperationalAlertsRetryUntilDelivered(t *testing.T) {
+	var messages []string
+	attempt := 0
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, payload.Text)
+		attempt++
+		switch attempt {
+		case 1:
+			return response(http.StatusBadGateway, `{"ok":false}`), nil
+		case 3:
+			return response(http.StatusOK, `{"ok":false}`), nil
+		default:
+			return response(http.StatusOK, `{"ok":true}`), nil
+		}
+	})
+
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(map[string]any{"initialblockdownload": false}, nil)
+	m.tick(map[string]any{"initialblockdownload": false}, nil)
+	m.tick(map[string]any{"initialblockdownload": false}, nil)
+
+	want := []string{
+		"[alice] 🔴 node down — RPC unreachable for 3 minutes",
+		"[alice] 🔴 node down — RPC unreachable for 3 minutes",
+		"[alice] 🟢 node recovered — RPC is answering again",
+		"[alice] 🟢 node recovered — RPC is answering again",
+	}
+	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("operational retries:\n%s\nwant:\n%s", strings.Join(messages, "\n"), strings.Join(want, "\n"))
+	}
+	if m.state.downAlerted || m.state.fails != 0 {
+		t.Fatalf("recovered state = downAlerted %v, fails %d", m.state.downAlerted, m.state.fails)
+	}
+}
+
+func TestSyncAndNewBlockAlertsRetryUntilDelivered(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		ticks []map[string]any
+		want  string
+	}{
+		{
+			name: "sync complete",
+			ticks: []map[string]any{
+				{"initialblockdownload": true, "blocks": float64(100)},
+				{"initialblockdownload": false, "blocks": float64(100)},
+				{"initialblockdownload": false, "blocks": float64(100)},
+				{"initialblockdownload": false, "blocks": float64(100)},
+			},
+			want: "[alice] ✅ initial sync complete at height 100",
+		},
+		{
+			name: "new block",
+			ticks: []map[string]any{
+				{"initialblockdownload": false, "blocks": float64(100)},
+				{"initialblockdownload": false, "blocks": float64(101)},
+				{"initialblockdownload": false, "blocks": float64(101)},
+				{"initialblockdownload": false, "blocks": float64(101)},
+			},
+			want: "[alice] 🟧 new block 101",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var messages []string
+			m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+				var payload struct {
+					Text string `json:"text"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&payload)
+				messages = append(messages, payload.Text)
+				if len(messages) == 1 {
+					return response(http.StatusBadGateway, `{"ok":false}`), nil
+				}
+				return response(http.StatusOK, `{"ok":true}`), nil
+			})
+			for _, info := range test.ticks {
+				m.tick(info, nil)
+			}
+			if len(messages) != 2 || messages[0] != test.want || messages[1] != test.want {
+				t.Fatalf("retry messages = %#v, want two %q", messages, test.want)
+			}
+		})
+	}
+}
+
+func TestDiskAlertRetriesUntilDelivered(t *testing.T) {
+	free := 40.0
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages = append(messages, payload.Text)
+		if len(messages) == 1 {
+			return response(http.StatusBadGateway, `{"ok":false}`), nil
+		}
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.diskFreeGB = func(string) (float64, error) { return free, nil }
+	info := map[string]any{"initialblockdownload": false}
+	m.tick(info, nil)
+	m.tick(info, nil)
+	m.tick(info, nil)
+	free = 100
+	m.tick(info, nil)
+	free = 40
+	m.tick(info, nil)
+	if got, want := strings.Join(messages, "\n"), strings.Join([]string{
+		"[alice] 💾 disk low: 40 GB free",
+		"[alice] 💾 disk low: 40 GB free",
+		"[alice] 💾 disk low: 40 GB free",
+	}, "\n"); got != want {
+		t.Fatalf("disk retry messages:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestDisabledTelegramDoesNotRetryOperationalAlerts(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_CHAT_ID", "")
+	stateDir := t.TempDir()
+	m := NewMonitor("dev", t.TempDir(), stateDir)
+	m.output = io.Discard
+	m.diskFreeGB = func(string) (float64, error) { return 40, nil }
+	m.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("disabled Telegram made an HTTP request")
+		return nil, nil
+	})}
+	info := map[string]any{"initialblockdownload": false}
+	m.tick(info, nil)
+	m.tick(info, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+
+	events, err := os.ReadFile(filepath.Join(stateDir, "events.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(events), "disk low") != 1 || strings.Count(string(events), "node down") != 1 {
+		t.Fatalf("disabled Telegram repeated operational events: %q", events)
+	}
+}
+
 func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
-	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid/")
+	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid/?source=node")
 	m := NewMonitor("dev", t.TempDir(), t.TempDir())
 	m.diskFreeGB = func(string) (float64, error) { return 1000, nil }
 	m.output = io.Discard
 	var paths []string
 	attempt := 0
 	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		paths = append(paths, r.URL.Path)
+		paths = append(paths, r.URL.RequestURI())
 		attempt++
 		if attempt < 3 {
 			return response(http.StatusBadGateway, ""), nil
@@ -104,11 +258,11 @@ func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 	for range 4 {
 		m.tick(map[string]any{"initialblockdownload": false}, nil)
 	}
-	if got, want := strings.Join(paths, ","), "/private-uuid/fail,/private-uuid/fail,/private-uuid/fail"; got != want {
+	if got, want := strings.Join(paths, ","), "/private-uuid/fail?source=node,/private-uuid/fail?source=node,/private-uuid/fail?source=node"; got != want {
 		t.Fatalf("paths = %q, want %q", got, want)
 	}
 	m.tick(map[string]any{"initialblockdownload": false}, nil)
-	if len(paths) != 4 || paths[3] != "/private-uuid" {
+	if len(paths) != 4 || paths[3] != "/private-uuid/?source=node" {
 		t.Fatalf("paths after cadence = %v", paths)
 	}
 }
@@ -126,7 +280,7 @@ func TestUpdateCheckKeepsBadgeAndDoesNotRepeatAlert(t *testing.T) {
 			return response(http.StatusOK, `{"tag_name":"v32.0"}`), nil
 		case "api.telegram.org":
 			telegrams++
-			return response(http.StatusOK, ""), nil
+			return response(http.StatusOK, `{"ok":true}`), nil
 		default:
 			t.Fatalf("unexpected host %q", r.URL.Host)
 			return nil, nil
@@ -174,7 +328,14 @@ func TestUpdateCheckUsesBakedBaselineAndPersistsAlert(t *testing.T) {
 			return response(http.StatusOK, `{"tag_name":"v1.32.0"}`), nil
 		case "api.telegram.org":
 			telegrams++
-			return response(http.StatusOK, ""), nil
+			switch telegrams {
+			case 1:
+				return response(http.StatusBadGateway, `{"ok":false}`), nil
+			case 2:
+				return response(http.StatusOK, `{"ok":false}`), nil
+			default:
+				return response(http.StatusOK, `{"ok":true}`), nil
+			}
 		default:
 			t.Fatalf("unexpected host %q", r.URL.Host)
 			return nil, nil
@@ -187,17 +348,65 @@ func TestUpdateCheckUsesBakedBaselineAndPersistsAlert(t *testing.T) {
 	if got, want := m.UpdateNote(), "stack v1.32.0 available (running v1.31.1)"; got != want {
 		t.Fatalf("UpdateNote() = %q, want %q", got, want)
 	}
+	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
+		t.Fatalf("failed delivery persisted monitor state: %v", err)
+	}
+	m.checkUpdates()
+	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
+		t.Fatalf("rejected Telegram response persisted monitor state: %v", err)
+	}
+	m.checkUpdates()
 
+	persisted, err := os.ReadFile(filepath.Join(stateDir, "monitor_state.json"))
+	if err != nil || !strings.Contains(string(persisted), `"notified_stack":"1.32.0"`) {
+		t.Fatalf("successful delivery state = %q, %v", persisted, err)
+	}
 	legacy := []byte(`{"notified_stack":"1.32.0","notified_core":"32.0"}`)
-	if err := os.WriteFile(filepath.Join(stateDir, "monitor_state.json"), legacy, 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(stateDir, "monitor_state.json"), legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	restarted := NewMonitor("7101c3a", t.TempDir(), stateDir)
 	restarted.client = &http.Client{Transport: handler}
 	restarted.output = io.Discard
 	restarted.checkUpdates()
-	if telegrams != 1 {
-		t.Fatalf("telegram sends across restart = %d, want 1", telegrams)
+	if telegrams != 3 {
+		t.Fatalf("telegram sends across retries and restart = %d, want 3", telegrams)
+	}
+}
+
+func TestUpdateCheckWaitsForTelegramConfiguration(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_CHAT_ID", "")
+	stateDir := t.TempDir()
+	release := func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" {
+			t.Fatalf("unexpected request to %q", r.URL.Host)
+		}
+		return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
+	}
+	m := NewMonitor("1.2.0", t.TempDir(), stateDir)
+	m.client = &http.Client{Transport: roundTripFunc(release)}
+	m.output = io.Discard
+	m.checkUpdates()
+	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
+		t.Fatalf("disabled Telegram persisted monitor state: %v", err)
+	}
+
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:secret")
+	t.Setenv("TELEGRAM_CHAT_ID", "42")
+	sent := 0
+	restarted := NewMonitor("1.2.0", t.TempDir(), stateDir)
+	restarted.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "api.telegram.org" {
+			sent++
+			return response(http.StatusOK, `{"ok":true}`), nil
+		}
+		return release(r)
+	})}
+	restarted.output = io.Discard
+	restarted.checkUpdates()
+	if sent != 1 {
+		t.Fatalf("Telegram sends after configuration = %d, want 1", sent)
 	}
 }
 
@@ -230,7 +439,7 @@ func TestRunSendsOnlineAndStopsWithContext(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		seen <- payload.Text
-		return response(http.StatusOK, ""), nil
+		return response(http.StatusOK, `{"ok":true}`), nil
 	})
 	m.tickEvery = time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())

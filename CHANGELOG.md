@@ -43,6 +43,9 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Failed Telegram release alerts retry until delivery succeeds, Healthchecks
+  failure pings preserve query strings, and future wallet birthdays are rejected.
+- Refreshed the dashboard screenshot and wallet selector theme styling.
 - Failed initial wallet imports can recover after a restart without deleting
   the existing watch-only wallet or accepting unrelated descriptors.
 - The dashboard upgrade control survives automatic status-panel refreshes.

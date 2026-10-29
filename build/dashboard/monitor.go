@@ -34,8 +34,10 @@ type monitorState struct {
 	fails         int
 	downAlerted   bool
 	ibd           bool
+	syncPending   bool
 	lastBlock     int64
 	hasLastBlock  bool
+	pendingBlock  int64
 	diskAlerted   bool
 	ticks         int
 	pingDue       int
@@ -152,23 +154,34 @@ func (m *Monitor) tick(info, network map[string]any) {
 	healthy := info != nil
 	if healthy {
 		if m.state.downAlerted {
-			m.sendTelegram("🟢 node recovered — RPC is answering again")
-			m.state.downAlerted = false
+			if m.sendOperationalTelegram("🟢 node recovered — RPC is answering again") {
+				m.state.downAlerted = false
+			}
 		}
 		m.state.fails = 0
 
 		ibd, hasIBD := info["initialblockdownload"].(bool)
 		if m.state.ibd && hasIBD && !ibd {
-			m.sendTelegram("✅ initial sync complete at height " + valueString(info["blocks"]))
+			m.state.syncPending = true
 		}
-		m.state.ibd = hasIBD && ibd
+		if hasIBD {
+			m.state.ibd = ibd
+		}
+		if m.state.syncPending && m.sendOperationalTelegram("✅ initial sync complete at height "+valueString(info["blocks"])) {
+			m.state.syncPending = false
+		}
 
 		if blocks, ok := integer(info["blocks"]); ok {
 			if m.notificationSettings().AlertNewBlock && m.state.hasLastBlock && hasIBD && !ibd && blocks > m.state.lastBlock && blocks-m.state.lastBlock <= 6 {
-				m.sendTelegram("🟧 new block " + strconv.FormatInt(blocks, 10))
+				m.state.pendingBlock = blocks
 			}
 			m.state.lastBlock = blocks
 			m.state.hasLastBlock = true
+		}
+		if !m.notificationSettings().AlertNewBlock {
+			m.state.pendingBlock = 0
+		} else if m.state.pendingBlock != 0 && m.sendOperationalTelegram("🟧 new block "+strconv.FormatInt(m.state.pendingBlock, 10)) {
+			m.state.pendingBlock = 0
 		}
 
 		free, err := m.diskFreeGB(m.dataDir)
@@ -178,17 +191,15 @@ func (m *Monitor) tick(info, network map[string]any) {
 		}
 		if free < diskWarnFreeGB {
 			if !m.state.diskAlerted {
-				m.sendTelegram(fmt.Sprintf("💾 disk low: %.0f GB free", free))
-				m.state.diskAlerted = true
+				m.state.diskAlerted = m.sendOperationalTelegram(fmt.Sprintf("💾 disk low: %.0f GB free", free))
 			}
 		} else {
 			m.state.diskAlerted = false
 		}
 	} else {
 		m.state.fails++
-		if m.state.fails == downAfterTicks && !m.state.downAlerted {
-			m.sendTelegram(fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks))
-			m.state.downAlerted = true
+		if m.state.fails >= downAfterTicks && !m.state.downAlerted {
+			m.state.downAlerted = m.sendOperationalTelegram(fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks))
 		}
 	}
 

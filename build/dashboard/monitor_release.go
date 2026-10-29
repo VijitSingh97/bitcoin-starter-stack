@@ -18,9 +18,10 @@ func (m *Monitor) checkUpdates() {
 	if releaseVersion.MatchString(m.releaseBaseline) && latestStack != "" && newer(latestStack, m.releaseBaseline) {
 		note = fmt.Sprintf("stack v%s available (running v%s)", latestStack, m.releaseBaseline)
 		if m.state.notifiedStack != latestStack {
-			m.state.notifiedStack = latestStack
-			m.saveState()
-			m.sendTelegram("🆕 " + note)
+			if m.sendTelegram("🆕 " + note) {
+				m.state.notifiedStack = latestStack
+				m.saveState()
+			}
 		}
 	}
 

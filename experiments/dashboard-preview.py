@@ -20,6 +20,7 @@ spec = importlib.util.spec_from_file_location("fixture", ROOT / "experiments/go-
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 fixture.RESULTS["getblockchaininfo"].update(blocks=973490, headers=973490)
+fixture.RESULTS["getnetworkinfo"]["subversion"] = "/Satoshi:32.1.0/"
 fixture.RESULTS["getpeerinfo"] = [{"inbound": i < 3} for i in range(10)]
 fixture.RESULTS["listwalletdir"] = {"wallets": []}
 fixture.RESULTS["listwallets"] = []
@@ -93,7 +94,7 @@ class Preview(BaseHTTPRequestHandler):
             }).encode()
             content_type = "application/json"
         elif self.path == "/api/upgrade":
-            body = json.dumps({"enabled": True, "update": "stack v9.9.9 available (running v1.31.1)",
+            body = json.dumps({"enabled": True, "update": "",
                                "pending": type(self).update_pending}).encode()
             content_type = "application/json"
         elif self.path == "/api/prices":

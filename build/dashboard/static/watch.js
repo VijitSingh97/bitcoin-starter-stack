@@ -107,6 +107,7 @@ if (typeof document !== "undefined") {
   });
   const bday = el("input");
   bday.type = "date";
+  bday.max = new Date().toISOString().slice(0, 10);
   bday.title = "Wallet birthday (optional) — bounds the first rescan";
   bday.setAttribute("aria-label", "Wallet birthday (optional)");
   const add = el("button", null, "Add");

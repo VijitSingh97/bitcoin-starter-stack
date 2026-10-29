@@ -319,7 +319,8 @@ h2 {
   gap: 8px;
   margin-top: 14px;
 }
-.watch-add input {
+.watch-add input,
+.watch-add select {
   /* full width so the placeholder text isn't clipped; the date field shares
      the last row with the Add button */
   flex: 1 1 100%;
@@ -332,6 +333,7 @@ h2 {
   font-family: monospace;
   font-size: 0.85rem;
 }
+.watch-add select:disabled { color: var(--muted); opacity: 1; }
 .watch-add input[type="date"] { flex: 1 1 auto; }
 .watch-add button {
   background: var(--accent);
