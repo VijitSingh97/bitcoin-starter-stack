@@ -1,11 +1,60 @@
 #!/usr/bin/env bash
 # Single entry point for operating the stack. Run ./stack help for usage.
 set -euo pipefail
-cd "$(dirname "$0")"
+stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")" && pwd)}
+state_dir=${BITCOIN_STACK_STATE_DIR:-$stack_root}
+config_dir=${BITCOIN_STACK_CONFIG_DIR:-$state_dir}
+config_file=$config_dir/config.json
+env_file=$state_dir/.env
+stack_command=${BITCOIN_STACK_COMMAND:-./stack}
+package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+cd "$state_dir"
+
+compose() {
+  if [ "$state_dir" = "$stack_root" ]; then
+    docker compose "$@"
+  else
+    local compose_file compose_files=()
+    compose_file=$(env_get COMPOSE_FILE)
+    compose_file=${compose_file:-docker-compose.yml}
+    IFS=: read -ra compose_files <<<"$compose_file"
+    local compose_args=()
+    for compose_file in "${compose_files[@]}"; do
+      case "$compose_file" in
+        docker-compose.yml | docker-compose.rpc.yml)
+          compose_args+=( -f "$stack_root/$compose_file" )
+          ;;
+        *)
+          echo "Unsupported package Compose file: $compose_file" >&2
+          return 1
+          ;;
+      esac
+    done
+    docker compose --project-name bitcoin-starter-stack-apt \
+      --project-directory "$state_dir" --env-file "$env_file" \
+      "${compose_args[@]}" "$@"
+  fi
+}
+
+guard_package_containers() {
+  [ "$package_managed" = "1" ] || return 0
+  local service config
+  for service in tor bitcoin dashboard; do
+    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
+    case ",$config," in
+      *",$stack_root/docker-compose.yml,"*) ;;
+      *)
+        echo "Existing $service container belongs to another installation; package mode will not replace it." >&2
+        echo "Keep the source deployment or stop it and plan a manual migration; see docs/operations.md." >&2
+        return 1
+        ;;
+    esac
+  done
+}
 
 usage() {
-  cat <<'EOF'
-Usage: ./stack <command> [args]
+  cat <<EOF
+Usage: $stack_command <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
   pull                       Download images through the configured host Tor proxy
@@ -23,7 +72,7 @@ Usage: ./stack <command> [args]
 EOF
 }
 
-env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+env_get() { sed -n "s/^$1=//p" "$env_file" 2>/dev/null; }
 
 # Interactive setup: every prompt has a sensible default — press Enter to skip.
 # Writes config.json (only the values you change), then offers to start. Plain
@@ -37,11 +86,11 @@ init() {
     }
   done
 
-  if [ -f config.json ]; then
+  if [ -f "$config_file" ]; then
     printf "config.json already exists — overwrite it? [y/N] "
     read -r reply
     case "$reply" in y | Y) ;; *)
-      echo "Kept existing config.json. (Edit it and ./stack apply, or ./stack up.)"
+      echo "Kept existing config.json. (Edit it and $stack_command apply, or $stack_command up.)"
       return 0
       ;;
     esac
@@ -58,7 +107,11 @@ init() {
     echo "  generated dashboard password saved in private config.json"
   fi
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
-  read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
+  if [ "$package_managed" = "1" ]; then
+    w_control=n
+  else
+    read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
+  fi
   read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
   read -r -p "Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] " w_rpc_expose
   w_rpc_bind_ip=
@@ -67,7 +120,12 @@ init() {
     read -r -p "Private LAN address assigned to this host [required]: " w_rpc_bind_ip
     read -r -p "Host RPC port [8332]: " w_rpc_port
   fi
-  read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
+  if [ "$package_managed" = "1" ]; then
+    read -r -p "Prune the chain to save disk — size in GB [10]: " w_prune_gb
+    w_prune_gb=${w_prune_gb:-10}
+  else
+    read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
+  fi
 
   cfg=$(jq -n '{}')
   [ -n "$w_user" ] && [ "$w_user" != "bitcoin" ] && cfg=$(jq --arg v "$w_user" '.bitcoin.node_username=$v' <<<"$cfg")
@@ -88,27 +146,28 @@ init() {
     esac
   fi
 
-  printf '%s\n' "$cfg" | jq . >config.json
-  chmod 600 config.json
+  printf '%s\n' "$cfg" | jq . >"$config_file"
+  chmod 600 "$config_file"
   echo
   echo "Wrote private config.json (credentials hidden; mode 600)."
   echo
   printf "Start the stack now? [Y/n] "
   read -r reply
-  case "$reply" in n | N) echo "Later: ./stack up" ;; *)
-    ./configure.sh && offline_up && ensure_agent
+  case "$reply" in n | N) echo "Later: $stack_command up" ;; *)
+    "$stack_root/configure.sh" && offline_up && ensure_agent
     ;;
   esac
 }
 
 offline_up() {
+  guard_package_containers
   for arg in "$@"; do
     case "$arg" in
       tor | bitcoin | dashboard) ;;
       *) echo "up accepts service names only; image downloads are separate: ./stack pull (see docs/privacy.md)."; return 1 ;;
     esac
   done
-  docker compose up -d --pull never --no-build "$@" || {
+  compose up -d --pull never --no-build "$@" || {
     echo "Start failed. Missing images? Configure host Tor, then run ./stack pull. See docs/privacy.md."
     return 1
   }
@@ -130,19 +189,19 @@ pull_images() {
     echo "Image download blocked: the Tor proxy could not be verified."
     return 1
   fi
-  docker compose pull
+  compose pull
 }
 
 images_available() {
   local images image
-  images=$(docker compose config --images) || return 1
+  images=$(compose config --images) || return 1
   while IFS= read -r image; do
     [ -z "$image" ] || docker image inspect "$image" >/dev/null 2>&1 || return 1
   done <<<"$images"
 }
 
 status() {
-  docker compose ps
+  compose ps
   bad=0
   for svc in tor bitcoin dashboard; do
     st=$(docker inspect "$svc" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
@@ -165,12 +224,12 @@ doctor() {
   done
 
   echo "== Config"
-  if [ ! -f config.json ]; then
-    echo "MISS  config.json (cp config.example.json config.json)"
-  elif [ ! -f .env ]; then
-    echo "MISS  .env (run ./stack apply)"
-  elif [ config.json -nt .env ]; then
-    echo "WARN  config.json is newer than .env — run ./stack apply"
+  if [ ! -f "$config_file" ]; then
+    echo "MISS  config.json ($config_file)"
+  elif [ ! -f "$env_file" ]; then
+    echo "MISS  .env (run $stack_command apply)"
+  elif [ "$config_file" -nt "$env_file" ]; then
+    echo "WARN  config.json is newer than .env — run $stack_command apply"
   else
     echo "OK    config.json rendered into .env"
   fi
@@ -178,7 +237,7 @@ doctor() {
     if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
       echo "OK    upgrade-agent (dashboard Upgrade button)"
     else
-      echo "WARN  upgrade-agent not running — ./stack up starts it"
+      echo "WARN  upgrade-agent not running — $stack_command up starts it"
     fi
   fi
 
@@ -192,7 +251,7 @@ doctor() {
   echo "== Node"
   if docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
     jq -r '"      blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
-    echo "      RPC unreachable (normal during startup; if it's been up a while, check ./stack logs bitcoin)"
+    echo "      RPC unreachable (normal during startup; if it's been up a while, check $stack_command logs bitcoin)"
   fi
 
   echo "== Tor"
@@ -209,8 +268,8 @@ do_backup() {
   mkdir -p backups
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  [ -f config.json ] && cp config.json "$tmp/"
-  [ -f .env ] && cp .env "$tmp/"
+  [ -f "$config_file" ] && cp "$config_file" "$tmp/config.json"
+  [ -f "$env_file" ] && cp "$env_file" "$tmp/.env"
   # bitcoind stores its inbound-onion key in the datadir
   data_dir=$(env_get BITCOIN_DATA_DIR)
   if [ -n "$data_dir" ] && [ -f "$data_dir/onion_v3_private_key" ]; then
@@ -218,10 +277,10 @@ do_backup() {
       echo "WARN: node onion key not captured (unreadable — run backup as the node's user, uid 1000)"
   fi
   # the dashboard onion keys live in the tor volume
-  docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 ||
+  compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 ||
     echo "WARN: dashboard onion keys not captured (is the tor container up?)"
   # UI-managed dashboard state is not otherwise re-derivable.
-  docker compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
+  compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
     echo "WARN: dashboard state not captured (is the dashboard container up?)"
   out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
@@ -254,23 +313,23 @@ do_restore() {
   trap 'rm -rf "$tmp"' EXIT
   tar xzf "$archive" -C "$tmp"
   if [ -f "$tmp/config.json" ]; then
-    chmod 600 config.json 2>/dev/null || true
-    cp "$tmp/config.json" config.json
-    chmod 600 config.json
+    chmod 600 "$config_file" 2>/dev/null || true
+    cp "$tmp/config.json" "$config_file"
+    chmod 600 "$config_file"
     echo "Restored config.json"
   fi
   if [ -f "$tmp/.env" ]; then
-    chmod 600 .env 2>/dev/null || true
-    cp "$tmp/.env" .env && chmod 600 .env && echo "Restored .env"
+    chmod 600 "$env_file" 2>/dev/null || true
+    cp "$tmp/.env" "$env_file" && chmod 600 "$env_file" && echo "Restored .env"
   fi
   data_dir=$(env_get BITCOIN_DATA_DIR)
   if [ -f "$tmp/onion_v3_private_key" ] && [ -n "$data_dir" ]; then
     cp "$tmp/onion_v3_private_key" "$data_dir/" && echo "Restored node onion key"
   fi
   if [ -d "$tmp/dashboard_onion" ]; then
-    if docker compose cp "$tmp/dashboard_onion" tor:/var/lib/tor/ >/dev/null 2>&1 &&
-      docker compose exec -u root tor chown -R tor:tor /var/lib/tor/dashboard_onion >/dev/null 2>&1; then
-      docker compose restart tor >/dev/null
+    if compose cp "$tmp/dashboard_onion" tor:/var/lib/tor/ >/dev/null 2>&1 &&
+      compose exec -u root tor chown -R tor:tor /var/lib/tor/dashboard_onion >/dev/null 2>&1; then
+      compose restart tor >/dev/null
       echo "Restored dashboard onion keys (tor restarted)"
     else
       echo "WARN: could not restore dashboard onion keys (is the tor container up?)"
@@ -279,25 +338,36 @@ do_restore() {
   if [ -d "$tmp/dashboard_state" ]; then
     # Extract as the dashboard user so private files keep the correct owner.
     if tar -cf - -C "$tmp/dashboard_state" . |
-      docker compose exec -T -u 1000 dashboard tar -xof - -C /state; then
+    compose exec -T -u 1000 dashboard tar -xof - -C /state; then
       echo "Restored dashboard state"
     else
       echo "ERROR: could not restore dashboard state (is the dashboard container up and writable by uid 1000?)"
       exit 1
     fi
   fi
-  echo "Done. Apply with: ./stack apply"
+  echo "Done. Apply with: $stack_command apply"
 }
 
 # One-command upgrade: fetch the latest release tag and apply it. Backs up
 # first, only ever moves forward (never downgrades), and prints a rollback line.
 do_upgrade() {
+  if [ "$package_managed" = "1" ]; then
+    cat <<EOF
+This installation is managed by APT. Upgrade manually:
+  $stack_command backup
+  # First confirm APT uses Tor; see /usr/share/doc/bitcoin-starter-stack/docs/privacy.md
+  sudo apt update
+  sudo apt install --only-upgrade bitcoin-starter-stack
+  $stack_command apply
+EOF
+    return 0
+  fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Not a git checkout — upgrade by unpacking the latest release tarball:"
     echo "  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest"
     exit 1
   fi
-  current=$(cat VERSION 2>/dev/null || echo 0)
+  current=$(cat "$stack_root/VERSION" 2>/dev/null || echo 0)
   echo "Current: v$current — fetching release tags..."
   origin=$(git remote get-url origin 2>/dev/null || true)
   case "$origin" in
@@ -346,7 +416,7 @@ do_upgrade() {
     exit 1
   }
   echo "== Applying (pull new images, recreate changed containers)"
-  ./configure.sh
+  "$stack_root/configure.sh"
   images_available || pull_images
   offline_up
   echo
@@ -360,6 +430,10 @@ do_upgrade() {
 # privileges. up/apply manage it automatically via ensure_agent below; running
 # it by hand just watches in the foreground.
 upgrade_agent() {
+  if [ "$package_managed" = "1" ]; then
+    echo "The dashboard upgrade agent is unavailable for APT installations." >&2
+    exit 1
+  fi
   echo "upgrade-agent: watching for dashboard upgrade requests (Ctrl-C to stop)."
   echo "  The button appears when dashboard.control=true; requests run ./stack upgrade here."
   while true; do
@@ -379,6 +453,7 @@ upgrade_agent() {
 # ponytail: cron can't restart a crashed agent until reboot — use the systemd
 # unit if that matters to you.
 ensure_agent() {
+  [ "$package_managed" = "1" ] && return 0
   if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
     return 0 # managed by systemd — stay out of its way
   fi
@@ -406,30 +481,30 @@ cmd=${1:-help}
 
 case "$cmd" in
   up)
-    [ -f .env ] || ./configure.sh   # first run: generate .env (auto-config)
+    [ -f "$env_file" ] || "$stack_root/configure.sh"
     offline_up "$@"
     ensure_agent
     ;;
   init) init ;;
-  down) docker compose down "$@" ;;
-  restart) docker compose restart "$@" ;;
-  logs) docker compose logs -f --tail=100 "$@" ;;
-  events) docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
+  down) guard_package_containers && compose down "$@" ;;
+  restart) guard_package_containers && compose restart "$@" ;;
+  logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
+  events) guard_package_containers && docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
-    ./configure.sh
+    "$stack_root/configure.sh"
     offline_up
     ensure_agent
     ;;
   upgrade) do_upgrade ;;
   pull)
-    [ -f .env ] || ./configure.sh
+    [ -f "$env_file" ] || "$stack_root/configure.sh"
     pull_images
     ;;
   upgrade-agent) upgrade_agent ;;
   status) status ;;
   doctor) doctor ;;
-  backup) do_backup ;;
-  restore) do_restore "$@" ;;
+  backup) guard_package_containers && do_backup ;;
+  restore) guard_package_containers && do_restore "$@" ;;
   help | --help | -h) usage ;;
   *)
     echo "Unknown command: $cmd"

@@ -8,6 +8,15 @@ which docker compose reads. Tracked files are never modified, so your settings
 can't end up in a commit. `./stack init` and `./stack restore` keep both files
 private with mode `600` and do not print their credentials.
 
+APT installations use `bitcoin-stack` in place of `./stack`. Their config is
+`/etc/bitcoin-starter-stack/config.json`; generated credentials and backups live
+under `/var/lib/bitcoin-starter-stack`, and chain data defaults to the dedicated
+`/var/lib/bitcoin-starter-stack/data/bitcoin` directory. Run package commands
+with `sudo`. A fresh package installation with no config or prior `.env` defaults
+to `prune_mb: 10000`; an explicit config or existing generated value always wins.
+`dashboard.control` is unavailable for APT installations because package
+upgrades require an explicit administrator command.
+
 ## config.json reference
 
 Every key is optional. The template ([config.example.json](../config.example.json))
@@ -52,9 +61,9 @@ shows the overridable settings with their defaults:
 |---|---|---|
 | `bitcoin.node_username` | `bitcoin` | RPC username used by the dashboard and optional LAN wallet connections. Letters and numbers only. |
 | `bitcoin.node_password` | auto-generated | RPC password used by the dashboard and optional LAN wallet connections. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
-| `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
+| `bitcoin.data_dir` | `./data/bitcoin` (source), `/var/lib/bitcoin-starter-stack/data/bitcoin` (APT) | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
-| `bitcoin.prune_mb` | `0` | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). |
+| `bitcoin.prune_mb` | `0` (source), `10000` on a fresh APT install | `0` = full archival node. Any value ≥ `550` keeps only that many MB of recent blocks — see [Pruned node](#pruned-node). Existing APT config or generated state is preserved. |
 | `bitcoin.inbound_onion` | `true` | Publishes a Tor onion service so your node accepts inbound connections and serves blocks to the network — **on by default**: it strengthens the network with **no IP exposure** (it's over Tor), the only cost being some extra upload bandwidth. Set `false` to run outbound-only. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | `true` builds a compact block-filter index that makes watch-only wallet rescans dramatically faster (a shared cache reused by every wallet). Full node only (incompatible with `prune_mb`). Costs ~a few GB and a one-time background build. See [Watch-only](watch-only.md#speeding-up-the-first-scan). |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |

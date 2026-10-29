@@ -24,6 +24,46 @@ Once APT's Tor proxy is configured as described in the privacy guide, install
 
 ## Install
 
+The Ubuntu 24.04 APT package will become available with the next release, after
+matching amd64 and arm64 dashboard images are published. It installs the
+`bitcoin-stack` command globally and keeps mutable files in standard system
+locations:
+
+- configuration: `/etc/bitcoin-starter-stack/config.json`
+- generated credentials and backups: `/var/lib/bitcoin-starter-stack/`
+- Bitcoin chain data: `/var/lib/bitcoin-starter-stack/data/bitcoin/`
+
+APT installation does not start containers or change an existing checkout.
+The first `sudo bitcoin-stack up` creates these paths and defaults a new node to
+`prune_mb: 10000`; existing configuration and generated state always win, so an
+upgrade never converts a full node to pruning.
+The first package release supports fresh installations only; keep an existing
+source-managed production node on its current upgrade path. Package mode blocks
+startup when the fixed service names belong to another Compose installation.
+The commands below remain the supported installation until the feed is live.
+When the package is released, first bootstrap an existing Tor proxy or transfer
+the source, initial Tor image, and feed key from a trusted Tor-routed machine as
+described in [Bootstrap and APT](privacy.md#bootstrap-and-apt). With the stack's
+Tor proxy available at `172.29.0.25:9050`, configure APT's host proxy, fetch the
+key with the exact Tor-only `curl` command in that guide, then add the feed:
+
+```bash
+echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/bitcoin-starter-stack ./' \
+  | sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo apt update
+sudo apt install bitcoin-starter-stack
+sudo bitcoin-stack up
+```
+
+Do not run those APT commands until the host proxy is active and any
+per-repository proxy overrides have been checked. Package installation is inert;
+`sudo bitcoin-stack up` creates the package configuration and state directories
+and starts only images already present locally. Use `sudo bitcoin-stack pull`
+after configuring Docker's Tor proxy to download the published images. Docker
+keeps image layers in its own managed storage.
+
+For the current source installation:
+
 ```bash
 NO_PROXY='' no_proxy='' git -c http.proxy=socks5h://127.0.0.1:9050 clone \
   https://github.com/VijitSingh97/bitcoin-starter-stack.git

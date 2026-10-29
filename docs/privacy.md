@@ -82,6 +82,41 @@ Acquire::https::Proxy "socks5h://172.29.0.25:9050";
 ```
 
 Check existing host/per-repository proxy overrides before relying on this setting.
+The first package feed will be enabled with the next release. Its dedicated
+public-key fingerprint is intentionally unpublished until then. The release
+must replace `UNPUBLISHED` below with the committed 40-hex primary fingerprint.
+The command fails closed while that placeholder remains, downloads the key
+through Tor with remote DNS and no proxy bypass, and installs it only after an
+exact fingerprint match:
+
+```bash
+expected=UNPUBLISHED
+printf '%s\n' "$expected" | grep -Eq '^[0-9A-Fa-f]{40}$' || {
+  echo 'The APT signing fingerprint is not published yet.' >&2
+  exit 1
+}
+key=$(mktemp)
+trap 'rm -f "$key"' EXIT
+curl --fail --show-error --silent \
+  --proxy socks5h://172.29.0.25:9050 --noproxy '' \
+  https://vijitsingh97.github.io/bitcoin-starter-stack/bitcoin-starter-stack.asc \
+  --output "$key"
+actual=$(gpg --batch --show-keys --with-colons "$key" |
+  awk -F: '$1 == "fpr" { print $10; exit }')
+[ "$actual" = "$expected" ] || {
+  echo "Signing-key fingerprint mismatch: $actual" >&2
+  exit 1
+}
+sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
+```
+
+Install GnuPG through the configured APT Tor proxy before running this check.
+If the stack is not running yet, use an existing Tor SOCKS proxy such as
+`socks5h://127.0.0.1:9050`, or transfer the verified key and bootstrap bundle
+from a trusted machine whose downloads used Tor. Add the feed only after the
+APT proxy above is active; per-repository proxy rules can override the host
+setting and must be removed or routed through Tor.
+
 Source compilation, maintainer release publishing, CI, direct Docker commands, a browser reading GitHub, and
 unrelated host services are outside the running container boundary. Development
 builds need their own Tor-routed build environment; setting a Docker CLI proxy
