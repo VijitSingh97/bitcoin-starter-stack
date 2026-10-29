@@ -9,7 +9,7 @@
 ![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
 ![Tor](https://img.shields.io/badge/Networking-Tor--only-7D4698?logo=torproject&logoColor=white)
 
-Run a [Bitcoin Core](https://bitcoincore.org/) full node with a small Go dashboard.
+Run a [Bitcoin Core](https://bitcoincore.org/) node with a small Go dashboard.
 Watch blocks arrive, track your own watch-only balances, check fees and BTC prices,
 and get alerts when something needs attention. Internet traffic uses Tor; your
 wallet addresses stay on your node.
@@ -26,18 +26,20 @@ wallet addresses stay on your node.
   runtime dependencies. The full dashboard used about **8 MiB of working memory**
   in our [mini-1 benchmark](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/c9cdd75/experiments/go-dashboard-results/mini-1-full-port-2026-10-27/README.md).
   Bitcoin Core's memory and chain storage are separate.
-- 🟠 **Full Bitcoin node.** Bitcoin Core in a digest-pinned, Dependabot-updated image,
-  validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
-  config key.
+- 🟠 **Fully validating, pruned by default.** Bitcoin Core validates every block, then keeps
+  10 GB of recent blocks. Plan on **30–60 GB total disk**; archival storage remains an
+  advanced manual option.
 - 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
   (`onlynet=onion`). Bitcoin and the dashboard cannot route directly to the internet,
   and local DNS forwarding is disabled. Inbound Bitcoin connections use an onion
-  service by default. See the [privacy model and Tor bootstrap](docs/privacy.md).
+  service when enabled. See the [privacy model and Tor bootstrap](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
   add a password and an onion address for remote access. RPC is private by default,
   with optional authenticated access for wallets on your LAN.
-- 🔑 **Credentials handled properly.** Config renders into gitignored files, so a stray
+- 🔑 **One generated login.** Fresh installs share one strong password between RPC and
+  the dashboard and use username `admin`; the wizard prints the new login once. Config
+  renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
   `rpcauth` hash, never the plaintext.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
@@ -50,8 +52,9 @@ wallet addresses stay on your node.
   new-block alerts from the gear menu on localhost, your private LAN, or the onion dashboard.
   Secrets stay masked and a separate JSON override survives reboots and upgrades.
 - 👀 **Balances from your own node.** Import an address, `xpub`, `zpub`, or public
-  descriptor. New imports show **Pending history…** until the scan finishes, so an
-  unfinished scan never looks like an empty wallet. A clearly marked public Binance
+  descriptor. A pruned node scans its live UTXO set without an external address indexer;
+  new imports stay pending until that scan confirms and caches a balance. A clearly
+  marked public Binance
   address gives fresh installs an example; it is excluded from your totals.
   [How watch-only works](docs/watch-only.md).
 - 💱 **BTC in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
@@ -66,8 +69,8 @@ wallet addresses stay on your node.
 ## 🚀 Quick Start
 
 **Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
-`jq` and `curl`, an SSD with ~1 TB free (the chain is ~800 GB and grows — or ~30 GB
-[pruned](docs/configuration.md#pruned-node)), and 8 GB+ RAM.
+`jq` and `curl`, an SSD with 30–60 GB free for the default
+[pruned](docs/configuration.md#pruned-node) setup (about 1 TB for archival), and 8 GB+ RAM.
 Details in [Hardware Requirements](docs/hardware.md).
 
 First set up [Tor for downloads](docs/privacy.md#bootstrap-and-apt), including the
@@ -76,7 +79,7 @@ With the source and images available locally:
 
 ```bash
 cd bitcoin-starter-stack
-./stack init              # optional guided setup; Enter accepts each default
+./stack init              # optional guided setup; defaults to 10 GB block retention
 ./stack up                # creates local settings and starts preloaded images
 ```
 
@@ -103,8 +106,9 @@ Then watch it come up:
 Upgrading is one command: **`./stack upgrade`** fetches the latest release,
 backs up, and applies it.
 
-The initial block download is ~800 GB over Tor — expect days, with live progress on the
-dashboard the whole time. Full walkthrough: [Getting Started](docs/getting-started.md).
+The node still downloads and validates the whole historical chain, currently roughly
+900 GB, before pruning old block files. Over Tor this can take days. Full walkthrough:
+[Getting Started](docs/getting-started.md).
 
 ## 📈 Monitoring
 
@@ -119,7 +123,8 @@ use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
   blocks (once synced), with a 24-hour fee sparkline.
 - **Watch-only balances** — add `xpub`s/descriptors from the UI; per-key balances and a total
   (shown for multiple personal wallets), read off your own node. The public example
-  is excluded from personal totals; imports show pending history until ready
+  is excluded from personal totals; first scans stay pending and show their scan-height
+  freshness until a result is cached
   ([Watch-only](docs/watch-only.md)).
 - **BTC price** — CoinGecko quotes in USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, or CNY, fetched through
   Tor every five minutes. The selector remembers your currency; stale quotes are labeled.

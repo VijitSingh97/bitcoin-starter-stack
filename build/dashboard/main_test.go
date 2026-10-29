@@ -252,6 +252,24 @@ func TestInvalidRPCRendersLoading(t *testing.T) {
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "Bitcoin Node Initializing") {
 		t.Fatalf("response = %d %q", got.Code, got.Body.String())
 	}
+	if strings.Contains(got.Body.String(), "% synced") {
+		t.Fatal("unavailable Core must not invent a sync percentage")
+	}
+}
+
+func TestInitialSyncShowsLivePercentageWithoutHidingStatus(t *testing.T) {
+	fixture := &rpcFixture{initialBlockDownload: true}
+	_, handler := testApp(t, fixture, "")
+	got := request(t, handler, http.MethodGet, "/", "")
+	body := got.Body.String()
+	for _, want := range []string{"Syncing Bitcoin Core", `class="sync-percentage"`, "99.99% synced", "Bitcoin Node Status", "900000 / 900001", `id="watch"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sync page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Bitcoin Node Initializing") {
+		t.Error("a syncing node must retain its normal status view")
+	}
 }
 
 func TestRPCNilParamsUsesEmptyArray(t *testing.T) {

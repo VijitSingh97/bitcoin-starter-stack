@@ -13,15 +13,39 @@ const POLL_MS = 15000;
 const GENESIS_ADDRESS = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 
 export function balanceLabel(w) {
-  if (w.state === "pending" || w.state === "scanning") return "Pending history…";
+  if (w.state === "pending" || w.state === "scanning") {
+    return w.balance_kind === "confirmed" ? "Pending balance…" : "Pending history…";
+  }
   if (w.state === "ok" || w.state === "stale") return `${w.btc} BTC`;
   return "—"; // error / not ready
 }
 
 export function totalLabel(view) {
-  if (view.total_state === "pending") return "Pending history…";
+  if (view.total_state === "pending") {
+    return view.wallets?.some(w => w.balance_kind === "confirmed")
+      ? "Pending balance…" : "Pending history…";
+  }
   if (view.total_state === "unavailable") return "—";
   return `${view.total} BTC`;
+}
+
+export function scanNote(w) {
+  if (w.balance_kind !== "confirmed") return "";
+  const parts = [w.state === "stale" ? "Last confirmed scan · updating" : "Confirmed balance"];
+  if (Number.isInteger(w.range?.start) && Number.isInteger(w.range?.end)) {
+    parts.push(`derived indexes ${w.range.start}–${w.range.end}`);
+  }
+  if (Number.isInteger(w.scan_height)) parts.push(`block ${w.scan_height}`);
+  if (w.scan_time && Number.isFinite(Date.parse(w.scan_time))) {
+    parts.push(`scanned ${new Date(w.scan_time).toLocaleString()}`);
+  }
+  return parts.join(" · ");
+}
+
+export function watchHint(pruned) {
+  return pruned
+    ? "Public information only; never enter a seed or private key. The first balance scan may take minutes. Results cover confirmed funds in the scanned range, without mempool transactions or full transaction history."
+    : "Public information only; never enter a seed or private key. For a bare xpub/tpub, choose its wallet's address type. Set the birthday to shorten the first rescan.";
 }
 
 export function walletView(w) {
@@ -88,8 +112,8 @@ if (typeof document !== "undefined") {
   name.maxLength = 40;
   name.setAttribute("aria-label", "Wallet label");
   const key = el("input");
-  key.placeholder = "xpub / zpub / address / descriptor";
-  key.setAttribute("aria-label", "Wallet key: xpub, zpub, address, or descriptor");
+  key.placeholder = "xpub / zpub / address / public descriptor";
+  key.setAttribute("aria-label", "Public wallet information: xpub, zpub, address, or public descriptor");
   const scriptType = el("select", "watch-script");
   scriptType.setAttribute("aria-label", "Bare xpub address type");
   for (const [value, text] of [
@@ -113,8 +137,7 @@ if (typeof document !== "undefined") {
   const add = el("button", null, "Add");
   add.type = "submit";
   form.append(name, key, scriptType, bday, add);
-  const hint = el("div", "watch-hint",
-    "For a bare xpub/tpub, choose the address type used by its wallet. Set the birthday to shorten rescanning.");
+  const hint = el("div", "watch-hint", watchHint(false));
 
   card.append(el("h2", null, "Watch-only wallets"), list, form, hint, msg, warn);
 
@@ -122,6 +145,9 @@ if (typeof document !== "undefined") {
     const access = editAccess(view);
     editingEnabled = access.enabled;
     add.disabled = !editingEnabled;
+    bday.disabled = !!view.pruned;
+    if (view.pruned) bday.value = "";
+    hint.textContent = watchHint(!!view.pruned);
     list.textContent = "";
     for (const w of view.wallets) {
       const identity = walletView(w);
@@ -151,7 +177,9 @@ if (typeof document !== "undefined") {
       row.append(x);
       list.append(row);
     }
-    warn.textContent = access.warning;
+    warn.textContent = [access.warning, view.scan_cache_unavailable
+      ? "Saved balance cache unavailable. Check storage permissions and restart the dashboard."
+      : ""].filter(Boolean).join(" ");
   };
 
   // --- gold balances above the tower ---
@@ -175,6 +203,8 @@ if (typeof document !== "undefined") {
       if (w.history && w.history.length >= 2) {
         const spark = document.createElement("canvas");
         spark.className = "ws-spark";
+        spark.title = "Saved balance snapshots; not transaction history";
+        spark.setAttribute("aria-label", `${identity.label}: saved balance snapshots`);
         row.append(spark);
         drawSpark(spark, w.history);
       }
@@ -182,9 +212,11 @@ if (typeof document !== "undefined") {
       bal.setAttribute("aria-label", `${identity.label}: ${balanceLabel(w)}`);
       if (w.state === "stale") {
         bal.classList.add("stale");
-        bal.title = "last known balance — node unreachable";
+        bal.title = "Last known balance; waiting for a fresh result";
       }
       row.append(bal);
+      const scan = scanNote(w);
+      if (scan) row.append(el("span", "ws-note", scan));
       stats.append(row);
     }
     if (view.show_total) {
@@ -193,6 +225,14 @@ if (typeof document !== "undefined") {
       const totalBalance = el("span", "ws-bal", total);
       totalBalance.setAttribute("aria-label", `Total: ${total}`);
       t.append(el("span", "ws-name", "Total"), totalBalance);
+      if (view.total_reason) {
+        const reason = view.total_reason === "mixed_sources"
+          ? "Wallet sources may overlap; a combined total is unavailable."
+          : view.total_reason === "scan_cache_unavailable"
+            ? "Saved balance cache unavailable; a current total cannot be verified."
+            : "Wallet outputs could not be combined reliably; showing individual balances.";
+        t.append(el("span", "ws-note", reason));
+      }
       stats.append(t);
     }
     placeStats();
@@ -291,7 +331,9 @@ if (typeof document !== "undefined") {
         name.value = key.value = bday.value = "";
         scriptType.value = "legacy";
         scriptType.disabled = true;
-        setMsg("Added — scanning the chain for its history…");
+        setMsg(last.pruned
+          ? "Added — scanning for confirmed funds. This may take a few minutes…"
+          : "Added — scanning the chain for its history…");
       } else {
         setMsg(await res.text(), true);
       }

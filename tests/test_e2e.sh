@@ -55,11 +55,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Setup exactly as a user does it. Wizard answers: RPC user/pass Enter
-# (auto-generate), dashboard password e2edash, dashboard onion y, upgrade
-# button n (agent covered by test_upgrade.sh), inbound onion y, LAN RPC n, prune 1 GB,
-# don't start yet.
-printf '\n\ne2edash\ny\nn\ny\nn\n1\nn\n' | ./stack init >/dev/null
+# Setup exactly as a user does it: default paths, upgrade button n, LAN RPC n,
+# prune 1 GB, and don't start yet.
+printf 'e2eDashboardSharedPassword123\n\n\nn\nn\n1\nn\n' | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
 # datadir at the temp dir, bind the dashboard to this host's LAN address, and
 # shrink dbcache for CI-sized runners.
@@ -72,7 +70,7 @@ s.close()
 PY
 )
 jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$lan_ip" \
-  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 | .dashboard.bind_ip = $ip' \
+  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.inbound_onion = true | .dashboard.onion = true | .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 | .dashboard.bind_ip = $ip' \
   config.json >config.json.tmp && mv config.json.tmp config.json
 ./configure.sh >/dev/null
 dashboard_url="http://$lan_ip:80"
@@ -108,7 +106,7 @@ code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
 # With the password, it authenticates to the node and renders live stats
 body=""
 for _ in 1 2 3 4 5 6; do
-  body=$(curl --noproxy '*' -sf -u x:e2edash "$dashboard_url" || true)
+  body=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url" || true)
   echo "$body" | grep -q "Sync Progress" && break
   sleep 5
 done
@@ -133,10 +131,10 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' |
   fail "dashboard onion hostname was not provisioned"
 
 # Prometheus metrics behind the same auth
-curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1" ||
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1" ||
   fail "metrics endpoint missing bitcoin_node_up"
 
-curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"can_configure":true' ||
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/settings" | grep -q '"can_configure":true' ||
   fail "authenticated LAN settings are not configurable"
 settings_body='{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}'
 code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -H 'X-Requested-With: fetch' \
@@ -145,20 +143,20 @@ code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -H 'X-Requested-With
 code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:wrong -H 'X-Requested-With: fetch' \
   -H 'Content-Type: application/json' -d "$settings_body" "$dashboard_url/api/settings")
 [ "$code" = 401 ] || fail "wrong-password LAN notification settings write was not denied"
-code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2edash \
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2eDashboardSharedPassword123 \
   -H 'Content-Type: application/json' -d "$settings_body" "$dashboard_url/api/settings")
 [ "$code" = 403 ] || fail "LAN notification settings write without CSRF header was not denied"
-curl --noproxy '*' -sf -u x:e2edash -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
   -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":true' ||
   fail "authenticated LAN notification settings write failed"
 docker exec dashboard sh -c 'test "$(stat -c %a /state/notification_settings.json)" = 600' ||
   fail "saved notification settings are not private"
 docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashboard ||
   fail "dashboard recreation failed"
-curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
   fail "notification settings did not survive container recreation"
 settings_body='{"reset":true}'
-curl --noproxy '*' -sf -u x:e2edash -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
   -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":false' ||
   fail "notification reset did not restore the server configuration"
 
@@ -167,7 +165,7 @@ docker exec tor sh -c 'kill "$(pidof socat)"'
 forwarder_recovered=""
 for _ in $(seq 1 30); do
   current=$(docker inspect tor --format '{{.RestartCount}}')
-  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
+  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
     forwarder_recovered=1
     break
   fi
@@ -180,7 +178,7 @@ docker exec tor sh -c 'kill "$(pidof tor)"'
 tor_recovered=""
 for _ in $(seq 1 30); do
   current=$(docker inspect tor --format '{{.RestartCount}}')
-  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2edash "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
+  if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
     tor_recovered=1
     break
   fi
@@ -326,31 +324,32 @@ if [ -n "${E2E_SYNC:-}" ]; then
     fail "zero-config: stack did not reach healthy"
   dashboard_url=http://127.0.0.1:80
   code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
-  [ "$code" = "200" ] || fail "zero-config: dashboard not open without a password (HTTP $code)"
+  [ "$code" = "401" ] || fail "zero-config: dashboard did not require its generated password (HTTP $code)"
+  zero_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' .env)
+  curl --noproxy '*' -sf -u "admin:$zero_password" "$dashboard_url" >/dev/null ||
+    fail "zero-config: generated shared password did not open the dashboard"
   sync_starts "zero-config setup"
 else
   echo "  (sync-start checks skipped — set E2E_SYNC=1 to include them)"
 fi
 
-# Wallet provisioning needs a full node because the API correctly refuses new
-# rescans on pruned nodes. Keep the pruned wizard checks above, then recreate
-# only bitcoin and dashboard against a separate fresh full-node datadir.
+# Exercise archival Core watch-wallet compatibility on a separate datadir.
 docker compose stop dashboard bitcoin >/dev/null
 sed -i.bak \
   -e "s|^BITCOIN_DATA_DIR=.*|BITCOIN_DATA_DIR=$WALLET_DATA_DIR|" \
   -e 's|^BITCOIN_PRUNE=.*|BITCOIN_PRUNE=0|' \
-  -e 's|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=e2edash|' \
+  -e 's|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=e2eDashboardSharedPassword123|' \
   .env && rm -f .env.bak
 docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 bitcoin dashboard ||
   fail "full-node wallet stage did not reach healthy"
 
 dashboard_url="http://$(sed -n 's/^DASHBOARD_BIND_IP=//p' .env):80"
-body=$(curl --noproxy '*' -sf -u x:e2edash "$dashboard_url" || true)
+body=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url" || true)
 echo "$body" | grep -q "Full" || fail "dashboard missing full-node badge in wallet stage"
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
 BITCOIN_RPC_USER="$rpc_user" BITCOIN_RPC_PASSWORD="$rpc_pass" \
-  E2E_DASHBOARD_URL="$dashboard_url" E2E_DASHBOARD_PASSWORD=e2edash python3 build/dashboard/tests/e2e_watch.py ||
+  E2E_DASHBOARD_URL="$dashboard_url" E2E_DASHBOARD_PASSWORD=e2eDashboardSharedPassword123 python3 build/dashboard/tests/e2e_watch.py ||
   fail "Go watch-only provisioning failed"
 
 echo "PASS: test_e2e.sh"

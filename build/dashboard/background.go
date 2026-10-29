@@ -20,6 +20,7 @@ func (a *app) recordFee(value float64) {
 
 func (a *app) startBackground(ctx context.Context) {
 	a.ctx = ctx
+	go a.scanner.run(ctx)
 	entries := a.watch.Entries()
 	for _, entry := range entries {
 		a.watch.SetPending(entry.Key, true)
@@ -47,14 +48,21 @@ func (a *app) startBackground(ctx context.Context) {
 			a.watch.Sample(a.walletRPC)
 		}
 	})
+	go a.every(ctx, 30*time.Second, func(ctx context.Context) {
+		var info blockchainInfo
+		if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
+			a.scanner.refresh(a.watch.Entries(), info)
+		}
+	})
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
-			if info := chain(); info != nil {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
 				for _, entry := range a.watch.Entries() {
 					a.watch.SetPending(entry.Key, true)
-					a.provision(entry, info["pruned"] == true)
+					a.provisionForChain(entry, info)
 				}
 				return
 			}
@@ -68,14 +76,41 @@ func (a *app) startBackground(ctx context.Context) {
 }
 
 func (a *app) provision(entry WatchEntry, pruned bool) {
+	a.provisionState(entry, pruned, false)
+}
+
+func (a *app) provisionForChain(entry WatchEntry, chain blockchainInfo) {
+	if chain.Pruned && !chain.InitialBlockDownload && chain.BestBlockHash != "" {
+		if cache, _, ok := a.watch.scanSnapshot(entry); ok && cache.BestBlock == chain.BestBlockHash {
+			a.watch.ClearPendingIfCurrent(entry)
+			return
+		}
+	}
+	a.provisionState(entry, chain.Pruned, chain.InitialBlockDownload)
+}
+
+func (a *app) provisionState(entry WatchEntry, pruned, initialBlockDownload bool) {
 	if !a.watch.Contains(entry) {
 		return
 	}
-	defer a.watch.ClearPendingIfCurrent(entry)
 	name, ok := ProvisionOne(a.nodeRPC, a.walletRPC, entry, pruned)
 	if !ok {
+		if pruned {
+			if initialBlockDownload {
+				return
+			}
+			if a.watch.ScanErr() != nil {
+				a.watch.SetScanStateIfCurrent(entry, "error")
+				a.watch.ClearPendingIfCurrent(entry)
+				return
+			}
+			a.scanner.enqueue(entry, true)
+			return
+		}
+		a.watch.ClearPendingIfCurrent(entry)
 		return
 	}
+	a.watch.ClearPendingIfCurrent(entry)
 	if !a.watch.SetCoreWalletIfCurrent(entry, name) {
 		a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, name)
 	}

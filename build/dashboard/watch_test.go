@@ -526,7 +526,7 @@ func TestPendingWalletAvoidsFalseZeroAndKeepsGenesisIdentity(t *testing.T) {
 		t.Fatalf("IBD Genesis view = %#v", view)
 	}
 	rows = store.List(walletRPC, false)["wallets"].([]map[string]any)
-	if rows[0]["state"] != "ok" || rows[0]["btc"] != "0" || balanceCalls != 1 || listCalls != 1 {
+	if rows[0]["state"] != "ok" || rows[0]["btc"] != "0" || balanceCalls != 1 || listCalls == 0 {
 		t.Fatalf("completed Genesis row = %#v, balance calls = %d, descriptor checks = %d", rows[0], balanceCalls, listCalls)
 	}
 }

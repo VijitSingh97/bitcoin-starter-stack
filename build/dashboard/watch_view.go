@@ -3,18 +3,23 @@ package main
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"time"
 )
 
 func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) map[string]any {
+	return s.ListWithChain(walletRPC, blockchainInfo{InitialBlockDownload: initialBlockDownload})
+}
+
+func (s *WatchStore) ListWithChain(walletRPC WalletRPCFunc, chain blockchainInfo) map[string]any {
 	entries, pending := s.snapshot()
-	rows, total := s.walletBalances(walletRPC, entries, pending, initialBlockDownload, nil)
+	rows, total, totalReason := s.walletBalances(walletRPC, entries, pending, chain, nil)
 	totalState := "ok"
 	personalCount := 0
 	for _, row := range rows {
 		history := s.history.series(row["key"].(string))
 		row["history"] = history
-		if row["state"] == "error" && len(history) > 0 {
+		if row["balance_kind"] != "confirmed" && row["state"] == "error" && len(history) > 0 {
 			row["state"] = "stale"
 			row["btc"] = formatBTC(history[len(history)-1])
 		}
@@ -28,12 +33,25 @@ func (s *WatchStore) List(walletRPC WalletRPCFunc, initialBlockDownload bool) ma
 			totalState = "unavailable"
 		}
 	}
-	return map[string]any{"wallets": rows, "total": formatBTC(total), "total_state": totalState, "show_total": personalCount > 1}
+	if totalReason != "" {
+		total = 0
+		if totalState == "ok" {
+			totalState = "unavailable"
+		}
+	}
+	view := map[string]any{"wallets": rows, "total": formatBTC(total), "total_state": totalState, "show_total": personalCount > 1, "pruned": chain.Pruned}
+	if s.ScanErr() != nil {
+		view["scan_cache_unavailable"] = true
+	}
+	if totalReason != "" {
+		view["total_reason"] = totalReason
+	}
+	return view
 }
 
 func (s *WatchStore) Sample(walletRPC WalletRPCFunc) {
 	entries, pending := s.snapshot()
-	s.walletBalances(walletRPC, entries, pending, false, func(key string, btc float64) {
+	s.walletBalances(walletRPC, entries, pending, blockchainInfo{}, func(key string, btc float64) {
 		s.history.record(key, btc, time.Now())
 	})
 }
@@ -44,7 +62,7 @@ func (s *WatchStore) resolveWallet(walletRPC WalletRPCFunc, entry WatchEntry) (s
 	name := s.coreNames[identity]
 	s.mu.Unlock()
 	if name != "" {
-		if info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second)); safeWatchWallet(info) {
+		if info := mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second)); safeWatchWallet(info) && walletMatches(walletRPC, name, entry) {
 			return name, info
 		}
 		s.SetCoreWallet(entry.Key, "")
@@ -56,9 +74,29 @@ func (s *WatchStore) resolveWallet(walletRPC WalletRPCFunc, entry WatchEntry) (s
 	return name, info
 }
 
-func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntry, pending map[string]bool, initialBlockDownload bool, sample func(string, float64)) ([]map[string]any, float64) {
+func (s *WatchStore) hasResolvedWallet(walletRPC WalletRPCFunc, entry WatchEntry) bool {
+	identity := watchKeyID(entry.Key)
+	s.mu.Lock()
+	name := s.coreNames[identity]
+	s.mu.Unlock()
+	if name == "" {
+		return false
+	}
+	if safeWatchWallet(mapValue(walletRPC(name, "getwalletinfo", []any{}, 8*time.Second))) && walletMatches(walletRPC, name, entry) {
+		return true
+	}
+	s.SetCoreWallet(entry.Key, "")
+	return false
+}
+
+func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntry, pending map[string]bool, chain blockchainInfo, sample func(string, float64)) ([]map[string]any, float64, string) {
 	rows := make([]map[string]any, 0, len(entries))
-	total := 0.0
+	coreTotal := 0.0
+	coreCount := 0
+	scanCount := 0
+	scanOutpoints := map[string]int64{}
+	totalReason := ""
+	scanUnavailable := s.ScanErr() != nil
 	for _, entry := range entries {
 		name, info := s.resolveWallet(walletRPC, entry)
 		example := isPublicExample(entry)
@@ -67,12 +105,54 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 			row["example"] = true
 			row["display_name"] = "Binance"
 		}
-		isPending := pending[watchKeyID(entry.Key)] || initialBlockDownload
+		isPending := pending[watchKeyID(entry.Key)] || chain.InitialBlockDownload
 		if entry.Name == "Satoshi" && entry.Key == genesisAddress {
 			row["display_name"] = "Genesis"
 		}
 		if info == nil {
-			if isPending {
+			cache, scanState, cached := s.scanSnapshot(entry)
+			if scanUnavailable && chain.Pruned && !example {
+				totalReason = "scan_cache_unavailable"
+			}
+			if chain.Pruned || cached || scanState != "" {
+				row["balance_kind"] = "confirmed"
+				if descriptors, err := descriptorsFor(entry.Key); err == nil {
+					for _, item := range descriptors {
+						if strings.Contains(item.Desc, "/*") {
+							row["range"] = map[string]int{"start": 0, "end": 999}
+							break
+						}
+					}
+				}
+			}
+			if cached {
+				row["btc"] = formatBTC(cache.BTC)
+				row["scan_height"] = cache.Height
+				row["scan_time"] = cache.ScannedAt.Format(time.RFC3339)
+				if !scanUnavailable && chain.Pruned && !chain.InitialBlockDownload && chain.BestBlockHash != "" && cache.BestBlock == chain.BestBlockHash {
+					row["state"] = "ok"
+					if !example {
+						scanCount++
+						for _, output := range cache.Outpoints {
+							key := output.TxID + ":" + stringValue(output.Vout)
+							if previous, exists := scanOutpoints[key]; exists && previous != output.Sats {
+								totalReason = "conflicting_outpoints"
+							} else {
+								scanOutpoints[key] = output.Sats
+							}
+						}
+					}
+				} else {
+					row["state"] = "stale"
+					if scanState == "scanning" {
+						row["refreshing"] = true
+					}
+				}
+			} else if scanUnavailable && chain.Pruned {
+				row["state"] = "error"
+			} else if scanState == "scanning" {
+				row["state"] = "scanning"
+			} else if isPending {
 				row["state"] = "pending"
 			} else {
 				row["state"] = "error"
@@ -97,7 +177,8 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 				continue
 			}
 			if !example {
-				total += btc
+				coreTotal += btc
+				coreCount++
 			}
 			row["state"] = "ok"
 			row["btc"] = formatBTC(btc)
@@ -107,7 +188,16 @@ func (s *WatchStore) walletBalances(walletRPC WalletRPCFunc, entries []WatchEntr
 		}
 		rows = append(rows, row)
 	}
-	return rows, total
+	if coreCount > 0 && scanCount > 0 {
+		totalReason = "mixed_sources"
+	}
+	total := coreTotal
+	if coreCount == 0 {
+		for _, sats := range scanOutpoints {
+			total += float64(sats) / 1e8
+		}
+	}
+	return rows, total, totalReason
 }
 func mapValue(value any) map[string]any {
 	result, _ := value.(map[string]any)

@@ -6,10 +6,12 @@ import {
   genesisNote,
   isBareExtendedPublicKey,
   publicExampleNote,
+  scanNote,
   shortKey,
   totalLabel,
   walletKeyForPost,
   walletView,
+  watchHint,
 } from "./watch.js";
 
 test("balanceLabel shows the balance when ready", () => {
@@ -20,6 +22,26 @@ test("balanceLabel shows the balance when ready", () => {
 test("balanceLabel shows pending history while a rescan runs", () => {
   assert.equal(balanceLabel({ state: "pending", btc: null }), "Pending history…");
   assert.equal(balanceLabel({ state: "scanning", btc: null }), "Pending history…");
+});
+
+test("pruned balances distinguish a pending UTXO scan from transaction history", () => {
+  assert.equal(balanceLabel({ state: "pending", balance_kind: "confirmed" }), "Pending balance…");
+  assert.equal(balanceLabel({ state: "scanning", balance_kind: "confirmed" }), "Pending balance…");
+  assert.equal(totalLabel({ total_state: "pending", wallets: [{ balance_kind: "confirmed" }] }), "Pending balance…");
+  assert.match(watchHint(true), /confirmed funds in the scanned range/);
+  assert.match(watchHint(true), /without mempool transactions or full transaction history/);
+  assert.match(watchHint(false), /birthday/);
+});
+
+test("scan freshness and derived coverage stay visible for cached balances", () => {
+  const row = { balance_kind: "confirmed", state: "ok", range: { start: 0, end: 999 }, scan_height: 973634, scan_time: "2026-10-29T03:00:00Z" };
+  assert.match(scanNote(row), /Confirmed balance/);
+  assert.match(scanNote(row), /derived indexes 0–999/);
+  assert.match(scanNote(row), /block 973634/);
+  assert.match(scanNote(row), /scanned/);
+  assert.match(scanNote({ ...row, state: "stale" }), /Last confirmed scan · updating/);
+  assert.equal(scanNote({ state: "ok", btc: "1" }), "");
+  assert.doesNotMatch(scanNote({ balance_kind: "confirmed", scan_time: "bad" }), /Invalid Date/);
 });
 
 test("balanceLabel keeps an accurate zero after rescan without history", () => {

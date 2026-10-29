@@ -1,20 +1,17 @@
 # Hardware Requirements
 
-Reference deployment: a 4-core mini PC with 8 GB RAM and a 2 TB NVMe SSD
-running Ubuntu Server 24.04. It syncs and serves the full chain
-comfortably.
+Reference deployment: a 4-core mini PC with 8 GB RAM and an NVMe SSD
+running Ubuntu Server 24.04.
 
 ## Disk
 
-The single number that matters most. As of mid-2026 the full chain is
-**~800 GB** and grows roughly 50–100 GB per year.
+The default keeps 10 GB of recent block files after validating the whole chain.
+That target does not include chainstate, indexes, wallet data, logs, or headroom.
 
-- **Minimum:** 1 TB free — works today, forces a resize within a year or two.
-- **Recommended:** 2 TB — years of headroom.
-- **Pruned alternative:** ~30 GB total. Set `prune_mb` in `config.json`
-  ([Configuration → Pruned node](configuration.md#pruned-node)) — full
-  validation, a fraction of the disk, at the cost of not serving
-  historical blocks.
+- **Default pruned node:** plan for 30–60 GB total. The live chainstate is
+  currently about 12 GB, in addition to the 10 GB block-retention target.
+- **Archival node:** roughly 900 GB today; 1 TB is tight and 2 TB provides
+  practical growth room. Enable it manually with `prune_mb: 0`.
 - **SSD required.** Chainstate access is random-I/O heavy; initial sync on a
   spinning disk takes weeks instead of days.
 
@@ -45,7 +42,8 @@ idles.
 
 ## Network
 
-Initial sync pulls ~800 GB through Tor. Steady state is a few GB per day.
-Bitcoin P2P needs no inbound host port — inbound arrives over the Tor onion
-service (`inbound_onion`, on by default). The dashboard binds port 80 to
+Initial sync still pulls the whole historical chain, currently roughly 900 GB,
+through Tor and can take days. Steady state is a few GB per day. Bitcoin P2P
+needs no inbound host port; the optional inbound onion service is disabled by
+default. The dashboard binds port 80 to
 loopback by default, or to an explicit private address for LAN access.

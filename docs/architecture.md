@@ -44,13 +44,13 @@ that makes `tor_egress` Tor's deterministic default route.
   [docker-compose.yml](../docker-compose.yml), plus **`listen=0`** in
   [bitcoin.conf](../build/bitcoin/bitcoin.conf): every P2P connection is
   routed to onion peers through the Tor container. The node never dials
-  clearnet; inbound peers use the optional onion service, enabled by default.
+  clearnet; inbound peers use the optional onion service, disabled by default.
 - **The application network is internal.** Bitcoin and dashboard have no
   external route and use loopback-only DNS, so a proxy bug fails closed.
   Tor alone joins `tor_egress`; its gateway has explicit priority. The host
   dashboard and optional LAN RPC ports terminate in Tor's container and forward
   only to fixed internal addresses.
-- **Inbound onion service** (`inbound_onion` in `config.json`, on by default):
+- **Inbound onion service** (`inbound_onion` in `config.json`, opt-in):
   bitcoind registers an onion address over tor's cookie-authed control
   port and serves blocks to the network — still no clearnet, no host port,
   no IP exposure. The tor data volume is mounted read-only into the
@@ -77,8 +77,8 @@ that makes `tor_egress` Tor's deterministic default route.
 
 ## Trust boundaries — and non-boundaries
 
-- The dashboard has **no authentication by default** (`dashboard.password`
-  adds basic auth). Its default host bind is loopback; set a private
+- Fresh installs share one generated RPC/dashboard password. Existing deployments
+  may keep an empty or separate `dashboard.password`. The default host bind is loopback; set a private
   `dashboard.bind_ip` to make LAN exposure intentional. See
   [SECURITY.md](../SECURITY.md).
   Personal wallet views and all wallet/upgrade mutations require a configured

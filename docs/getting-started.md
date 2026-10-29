@@ -13,7 +13,8 @@
   so your user can run `docker` without sudo.
 - **`jq`, `openssl`, and `curl`** — configuration and verified Tor downloads.
 - Hardware per [Hardware Requirements](hardware.md) — the short version:
-  4 cores, 8 GB RAM, and ~1 TB free on an SSD.
+  4 cores, 8 GB RAM, and 30–60 GB free on an SSD for the default pruned node.
+  An archival node needs about 1 TB free today.
 
 Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
@@ -41,9 +42,13 @@ build implicitly.
 
 `./stack up` runs `configure.sh` on first launch, which renders a gitignored
 `.env` and creates the data directory. With no `config.json` it uses sensible
-defaults (a full archival node over Tor) and **auto-generates** the internal RPC
-password (username defaults to `bitcoin`) — the dashboard and bitcoind use them
-over a private network; you never type or see them.
+defaults (10 GB of recent blocks, about 30–60 GB total disk) and **auto-generates**
+the internal RPC password (username defaults to `admin`) shared by the dashboard
+and bitcoind.
+
+If you skip the wizard, read the generated dashboard login locally after first
+start with `sed -n 's/^DASHBOARD_PASSWORD=/Password: /p' .env`; the username is
+`admin`. The wizard instead prints its newly created login once at the end.
 
 The `tor` and `dashboard` images are published prebuilt on GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
@@ -53,14 +58,33 @@ environment.
 
 Everything is optional. Two ways to customize:
 
-- **`./stack init`** — an interactive wizard that asks about a dashboard password
-  (Enter generates a strong one, shown once), a Tor onion, one-click upgrades
-  from the dashboard, inbound Tor connections, optional private-LAN wallet RPC,
-  and pruning. Every prompt has a default you accept by pressing Enter.
+- **`./stack init`** — an interactive wizard that asks for a shared RPC/dashboard
+  password (Enter generates a strong one and prints it once at the end), the data
+  directory, a loopback or private-LAN dashboard address, one-click upgrades,
+  optional private-LAN wallet RPC, and recent-block retention. Every prompt has a
+  default you accept by pressing Enter.
 - Or edit `config.json` by hand (copy `config.example.json`) and run
   `./stack apply`. Stick to letters and numbers in any credentials you set.
 
 The full key reference is in [Configuration](configuration.md).
+
+A default source-install wizard run includes these choices:
+
+```text
+Shared RPC and dashboard password (letters/numbers) [Enter = strong random]:
+Bitcoin data directory [./data/bitcoin]:
+Dashboard bind address (loopback or private LAN) [127.0.0.1]:
+One-click upgrades from the dashboard (Upgrade button)? [y/N]
+Expose Bitcoin RPC to trusted LAN wallet apps? [y/N]
+Recent-block retention in GB [10]:
+Dashboard login (shown once):
+  Username: admin
+  Password: <the password you entered or the generated password>
+```
+
+Package installation is deliberately noninteractive and does not start setup.
+After installing a future Debian/APT package, run `sudo bitcoin-stack init`
+explicitly. The project does not currently publish an APT feed.
 
 ## First start: what to expect
 
@@ -82,9 +106,10 @@ The full key reference is in [Configuration](configuration.md).
 To open it to your private LAN, set `dashboard.bind_ip` to this host's RFC1918
 address and run `./stack apply`. Wildcard and public binds are rejected.
 
-The initial block download is ~800 GB **over Tor** — expect it to take
-days, not hours. The node is usable (and the dashboard informative) the
-whole time. Container health is visible in `docker ps` — all three
+The node downloads and validates the whole historical chain, currently hundreds
+of GB (roughly 900 GB), even though it later retains only 10 GB of block files.
+Over Tor, expect the first sync to take days. The dashboard remains informative
+during sync. Container health is visible in `docker ps` — all three
 services define health checks, though `bitcoin` only reports healthy once
 its RPC is warmed up.
 

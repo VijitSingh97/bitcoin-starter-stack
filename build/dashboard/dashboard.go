@@ -20,6 +20,7 @@ const maxFees = 1440
 type blockchainInfo struct {
 	Blocks               int64   `json:"blocks"`
 	Headers              int64   `json:"headers"`
+	BestBlockHash        string  `json:"bestblockhash"`
 	VerificationProgress float64 `json:"verificationprogress"`
 	InitialBlockDownload bool    `json:"initialblockdownload"`
 	Pruned               bool    `json:"pruned"`
@@ -51,31 +52,32 @@ type diskInfo struct {
 }
 
 type pageData struct {
-	Loading       bool
-	Version       string
-	CoreVersion   string
-	Uptime        string
-	Blocks        int64
-	Headers       int64
-	Progress      float64
-	TotalPeers    int64
-	Inbound       int
-	Outbound      int
-	Pruned        bool
-	PruneTargetGB float64
-	NodeGB        float64
-	TotalGB       float64
-	FreeGB        float64
-	DiskWarn      bool
-	DiskPercent   float64
-	ShowMempool   bool
-	MempoolTxs    int64
-	MempoolMB     float64
-	FeeNext       string
-	Fee30m        string
-	FeeHour       string
-	NextBlock     int64
-	LastUpdate    string
+	Loading              bool
+	InitialBlockDownload bool
+	Version              string
+	CoreVersion          string
+	Uptime               string
+	Blocks               int64
+	Headers              int64
+	Progress             float64
+	TotalPeers           int64
+	Inbound              int
+	Outbound             int
+	Pruned               bool
+	PruneTargetGB        float64
+	NodeGB               float64
+	TotalGB              float64
+	FreeGB               float64
+	DiskWarn             bool
+	DiskPercent          float64
+	ShowMempool          bool
+	MempoolTxs           int64
+	MempoolMB            float64
+	FeeNext              string
+	Fee30m               string
+	FeeHour              string
+	NextBlock            int64
+	LastUpdate           string
 }
 
 type app struct {
@@ -89,6 +91,7 @@ type app struct {
 	watch    *WatchStore
 	monitor  *Monitor
 	prices   *PriceCache
+	scanner  *prunedScanner
 	ctx      context.Context
 }
 
@@ -99,6 +102,10 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	}
 	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger}
 	a.watch = NewWatchStore(cfg.stateDir)
+	if a.watch.ScanErr() != nil {
+		a.log.Print("watch balance cache unavailable; pruned balance scans disabled until the cache is repaired and the dashboard restarts")
+	}
+	a.scanner = newPrunedScanner(a)
 	a.monitor = NewMonitor(cfg.version, cfg.dataDir, cfg.stateDir)
 	if a.monitor.settingsErr != nil {
 		a.log.Print("notification settings unavailable; alerts disabled until the state file is repaired and the dashboard restarts")
@@ -142,7 +149,8 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	}
 	disk := diskUsage(a.cfg.dataDir)
 	data := pageData{
-		Version: versionLabel(a.cfg.version), CoreVersion: network.Subversion, Uptime: uptimeLabel,
+		InitialBlockDownload: chain.InitialBlockDownload,
+		Version:              versionLabel(a.cfg.version), CoreVersion: network.Subversion, Uptime: uptimeLabel,
 		Blocks: chain.Blocks, Headers: chain.Headers, Progress: chain.VerificationProgress * 100,
 		TotalPeers: network.Connections, Inbound: inbound, Outbound: len(peers) - inbound,
 		Pruned: chain.Pruned, PruneTargetGB: gib(chain.PruneTargetSize), NodeGB: gib(chain.SizeOnDisk),
