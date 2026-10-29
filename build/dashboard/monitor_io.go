@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,33 +14,53 @@ import (
 	"time"
 )
 
-func (m *Monitor) sendTelegram(text string) {
+func (m *Monitor) sendTelegram(text string) bool {
 	m.logEvent(text)
 	settings := m.notificationSettings()
 	if !settings.TelegramEnabled || settings.TelegramBotToken == "" || settings.TelegramChatID == "" {
-		return
+		return false
 	}
 	payload, err := json.Marshal(map[string]string{
 		"chat_id": settings.TelegramChatID,
 		"text":    "[" + m.nodeName + "] " + text,
 	})
 	if err != nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+settings.TelegramBotToken+"/sendMessage", bytes.NewReader(payload))
 	if err != nil {
 		m.writeOutput("Telegram send failed")
-		return
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.writeOutput("Telegram send failed")
-		return
+		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		m.writeOutput("Telegram send failed")
+		return false
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result) != nil || !result.OK {
+		m.writeOutput("Telegram send failed")
+		return false
+	}
+	return true
+}
+
+func (m *Monitor) sendOperationalTelegram(text string) bool {
+	if !m.notificationSettings().TelegramEnabled {
+		m.logEvent(text)
+		return true
+	}
+	return m.sendTelegram(text)
 }
 
 func (m *Monitor) pingHealthchecks(healthy bool) bool {
@@ -52,13 +73,12 @@ func (m *Monitor) pingHealthchecks(healthy bool) bool {
 		m.logEvent("healthchecks ping failed: HTTPS URL required")
 		return false
 	}
-	url := settings.HealthchecksURL
 	if !healthy {
-		url += "/fail"
+		endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/fail"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		m.logEvent("healthchecks ping failed: request failed")
 		return false

@@ -549,6 +549,33 @@ func TestWatchAddWriteFailureDoesNotProvisionOrClaimSuccess(t *testing.T) {
 	}
 }
 
+func TestWatchAddRejectsFutureBirthdayWithoutChangingWallets(t *testing.T) {
+	fixture := newLifecycleRPC()
+	server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer server.Close()
+	cfg := config{dashboardPassword: "dashboard-secret", stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: server.URL, client: server.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/watch", strings.NewReader(`{"name":"Future","key":"`+genesisAddress+`","birthday":"2999-01-01"}`))
+	req.SetBasicAuth("x", "dashboard-secret")
+	req.Header.Set("X-Requested-With", "fetch")
+	response := httptest.NewRecorder()
+	a.routes().ServeHTTP(response, req)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Birthday cannot be in the future") {
+		t.Fatalf("future birthday response = %d %q", response.Code, response.Body.String())
+	}
+	if len(a.watch.Entries()) != 0 {
+		t.Fatal("future birthday changed the wallet roster")
+	}
+	for _, method := range []string{"createwallet", "loadwallet", "importdescriptors"} {
+		if fixture.countMethod(method) != 0 {
+			t.Fatalf("future birthday called mutating RPC %s", method)
+		}
+	}
+}
+
 func TestWatchRemoveWriteFailureDoesNotUnloadOrClaimSuccess(t *testing.T) {
 	fixture := newLifecycleRPC()
 	server := httptest.NewServer(http.HandlerFunc(fixture.handler))

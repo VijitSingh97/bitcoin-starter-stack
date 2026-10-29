@@ -339,7 +339,7 @@ func TestSettingsLiveReadsAreRaceSafe(t *testing.T) {
 	m := NewMonitor("dev", t.TempDir(), t.TempDir())
 	m.output = io.Discard
 	m.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, ""), nil
+		return response(http.StatusOK, `{"ok":true}`), nil
 	})}
 	var wg sync.WaitGroup
 	for i := range 20 {
