@@ -14,6 +14,7 @@ import (
 
 const (
 	coinGeckoPriceURL     = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true"
+	priceUserAgent        = "bitcoin-starter-stack-dashboard (+https://github.com/VijitSingh97/bitcoin-starter-stack)"
 	priceRefreshEvery     = 5 * time.Minute
 	priceStaleAfter       = 15 * time.Minute
 	maxPriceResponseBytes = 64 << 10
@@ -86,6 +87,7 @@ func (c *PriceCache) refresh(ctx context.Context) error {
 	if err != nil {
 		return c.fail(errors.New("price provider request failed"))
 	}
+	req.Header.Set("User-Agent", priceUserAgent)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return c.fail(errors.New("price provider request failed"))
