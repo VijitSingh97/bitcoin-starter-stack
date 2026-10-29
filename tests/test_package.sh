@@ -113,6 +113,17 @@ out=$("$wrapper" upgrade)
 printf '%s' "$out" | grep -q 'sudo apt install --only-upgrade bitcoin-starter-stack' || fail "upgrade omitted APT instructions"
 [ ! -e "$log" ] || fail "package upgrade invoked Docker"
 
+wizard_out=$(printf 'packagepassword1234567890\n\n\nn\n\nn\n' | "$wrapper" init)
+printf '%s' "$wizard_out" | grep -q 'Publish the dashboard' && fail "package wizard still prompts for dashboard onion publishing"
+printf '%s' "$wizard_out" | grep -q 'Accept inbound Bitcoin' && fail "package wizard still prompts for inbound onion connections"
+printf '%s' "$wizard_out" | grep -q 'One-click upgrades' && fail "package wizard offered unsupported dashboard upgrades"
+[ "$(jq -r '.bitcoin.node_password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the shared password"
+[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not share the dashboard password"
+[ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
+[ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
+[ "$(printf '%s' "$wizard_out" | grep -c 'Password: packagepassword1234567890')" = 1 ] || fail "package wizard did not print the new login exactly once"
+rm -f "$config_dir/config.json"
+
 "$wrapper" apply >/dev/null
 env_file=$state_dir/.env
 [ -f "$env_file" ] || fail "generated state is outside the package state directory"

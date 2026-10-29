@@ -15,16 +15,24 @@ The dashboard has a **Watch-only balances** card with an add form:
 1. **Label** — any name you like (e.g. "Cold storage").
 2. **Key** — an extended public key, public output descriptor, or address (see below).
    For a bare `xpub`, choose the address type your wallet uses.
-3. **Birthday** (optional) — the date the wallet was first used; it bounds the
-   one-time rescan.
+3. **Birthday** (optional) — retained for existing Core-wallet imports. It does
+   not make the default pruned UTXO-set scan faster.
 
-Click **Add**. The node imports the key and rescans the chain for its history —
-the row shows `Pending history…` or `scanning…` while that runs, then the balance appears and stays
-live. Remove a wallet with the **✕** next to it.
+Click **Add**. On the default pruned node, the row stays pending while Bitcoin
+Core's `scantxoutset` checks the live UTXO set, then shows the confirmed balance
+and caches it with the scan height and time. A first scan commonly takes minutes,
+but its time depends on hardware and current workload. Later reads use the cache
+and are fast; the displayed height and time show how fresh the result is. Remove
+a wallet with the **✕** next to it.
 
-Wallets are **saved to the stack**: they persist across restarts (held in Bitcoin
-Core, with the list stored on a small `dashboard_state` volume). No file editing
-required.
+The public wallet list, confirmed scan cache, and balance snapshots persist across
+restarts in the private `dashboard_state` volume. Existing Core watch-only wallets
+remain supported. No file editing is required.
+
+The chart shows our saved balance observations, not historical transactions.
+Overlapping confirmed UTXOs are counted once in a combined total. When Core
+wallets and scan results are mixed, the dashboard withholds the combined total
+because it cannot establish whether they overlap.
 
 The same public key cannot be added twice under different labels. If an older
 saved list contains exact duplicate keys, only its first entry is used, keeping
@@ -35,6 +43,13 @@ Wallet changes are confirmed only after the roster is saved. If the state volume
 cannot be written or the roster cannot be read, the manager reports an error and
 preserves the existing file. A damaged roster is never reset to an empty list.
 Restart the dashboard after correcting the file or state-volume problem.
+
+If the saved scan cache is corrupt, unreadable, or unwritable, the dashboard
+reports it as unavailable and stops expensive scans until storage is repaired
+and the dashboard restarts. The wallet list and snapshot history stay intact.
+The rebuildable `watch_scan_cache.json` can be backed up and removed from the
+state volume to request a new scan; keep `wallets.json` and
+`balance_history.json` intact.
 
 Set `dashboard.password` in `config.json` to view personal wallets and add or remove
 entries. Fresh installs include one clearly marked public example; see
@@ -69,9 +84,14 @@ script type: for a SegWit account, select **Native SegWit** (`bc1q…`) or **Nes
 SegWit** (`3…`) in the form. Legacy remains the default. A wallet-exported public
 descriptor is more precise, and is required for Taproot.
 
+Pruned-node scans derive receive and change indexes 0–999 from an account xpub.
+Coins outside that bounded range need a more precise descriptor or a later wider
+scan. Extended public keys are privacy-sensitive: anyone with one can follow the
+derived addresses and balances.
+
 **A full output descriptor** — the exact option. This is what "export" gives you
 in Sparrow, Coldcard, Ledger Live, etc. It names the script type and derivation
-explicitly, so the balance is always right:
+explicitly; the result still covers only the supplied descriptor and scan range:
 
 ```
 wpkh([a1b2c3d4/84h/0h/0h]xpub6CUGRUo.../<0;1>/*)
@@ -83,7 +103,7 @@ is fine to leave on or off.
 **A single address** — paste an address (`bc1…`, `1…`, or `3…`) to watch just
 that one address. Useful for a specific receive address, a donation address, or a
 paper wallet. Note it tracks only that address, not a whole wallet — for your
-full balance, use the account's xpub instead.
+account balance within the scanned range, use its xpub instead.
 
 ## Exchange / custodial accounts (Coinbase, River, Cash App…)
 
@@ -95,38 +115,29 @@ wallet, or a self-custody app like Sparrow/Electrum/BlueWallet). To make an
 exchange balance watchable, withdraw it to your own wallet and add that wallet's
 xpub.
 
-## Requirements & the first rescan
+## Requirements and scan limits
 
-- A **full node** (`prune_mb: 0`). Finding an existing balance means rescanning
-  historical blocks, which a pruned node has thrown away — so a new import is
-  skipped on a pruned node.
-- The first import **rescans the chain**. A tight `birthday` keeps it to minutes;
-  no birthday means a full-chain scan (tens of minutes on a full node). Once
-  done, the balance stays live and there's no rescan on restart. Reusing a label
-  for a different key creates a separate Core wallet; old wallet files are retained.
-- A birthday must be on or before the first payment. Leave it blank to check the
-  whole chain if you are unsure. Receiving without ever sending still creates a
-  balance; spending is not required for discovery.
-
-### Speeding up the first scan
-
-- **Set a birthday.** The single biggest lever — it bounds the rescan to blocks
-  after that date instead of scanning from 2009.
-- **Enable `blockfilterindex`.** Set `"blockfilterindex": true` in `config.json`
-  (full node only). Bitcoin Core builds a compact filter of every block once,
-  then *every* rescan — this wallet and every future one — uses the filters to
-  skip blocks that can't match, turning a multi-hour scan into minutes. It's a
-  shared, one-time-built cache: ~a few GB of extra disk and a one-time
-  background build (the node keeps serving meanwhile). After `configure.sh`,
-  apply the change with `./stack apply`.
+- The default pruned node needs no external address indexer. It asks Bitcoin Core
+  to scan the current UTXO set, so it can find confirmed unspent balances without
+  historical block files.
+- The scan does not provide transaction history, spent outputs, or mempool activity.
+  It reports confirmed unspent balance as of the displayed scan height.
+- A new scan is asynchronous. Pending means no balance result has been confirmed
+  yet; it never means zero. There is no guaranteed completion time.
+- Wallets already imported into a synced Bitcoin Core wallet keep their normal,
+  accurate cached balance and are fast to read.
+- Only public addresses, public descriptors, and extended public keys are accepted.
+  Never paste a seed phrase or private key; the dashboard rejects them.
+- `blockfilterindex` and `prune_mb: 0` remain manual compatibility settings for
+  advanced archival setups. They are not required for the default UTXO-set scan.
 
 ## Public example and seeding from config.json
 
 Fresh installs start with one public example address disclosed by Binance in
 2022. It is labeled **Public example** and excluded from personal totals, so its
 balance cannot be mistaken for yours or for Binance's total reserves. It is one
-address, not proof of the exchange's solvency. The first scan starts at Bitcoin's
-genesis block and can take time. You can remove it after setting a dashboard
+address, not proof of the exchange's solvency. Its first UTXO-set scan stays
+pending until complete. You can remove it after setting a dashboard
 password, or opt out before first start with `"wallets": []`. See Binance's
 [original address disclosure](https://www.binance.com/en-IN/blog/community/2895840147147652626).
 
@@ -144,11 +155,12 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 
-- **No spend risk.** Watch-only wallets have no private keys.
-- **An xpub is still sensitive.** Anyone who has it can see every address and
-  balance you'll ever use under it. It's stored on the node (the wallet list and
-  Bitcoin Core's wallet files) — keep access to the box and the dashboard
+- **No signing keys.** Watch-only wallets have no private keys, and the add form
+  rejects private keys and seed phrases.
+- **An xpub is still sensitive.** Anyone who has it can follow the addresses and
+  balances derived from that account. It's stored in the private wallet list;
+  existing Core watch-wallet files can also contain it. Keep access to the box and dashboard
   controlled, and set a dashboard password if it's reachable beyond your LAN.
-- **Wallet data stays on the box.** Balances come from your node's own index;
+- **Wallet data stays on the box.** Balances come directly from your node;
   wallet keys and addresses are never sent to external services. The separate BTC
   price lookup sends only Bitcoin and currency names to CoinGecko through Tor.

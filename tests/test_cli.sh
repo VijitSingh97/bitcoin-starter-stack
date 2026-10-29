@@ -45,41 +45,60 @@ echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded w
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y control=y inbound=n RPC=y bind/port prune=10 start=n
-out=$(printf '\n\nhunter2\ny\ny\nn\ny\n192.168.1.117\n18332\n10\nn\n' | ./stack init)
+printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric shared password"
+[ ! -f config.json ] || fail "failed init wrote config.json"
+# shared password, data dir, dashboard bind, control, LAN RPC, prune, start
+out=$(printf 'hunter2hunter2hunter2hunter2\n%s\n192.168.1.116\ny\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
-printf '%s' "$out" | grep -q 'hunter2' && fail "init printed a dashboard credential"
+[ "$(printf '%s' "$out" | grep -c 'Password: hunter2hunter2hunter2hunter2')" = "1" ] || fail "init did not print the new login exactly once"
+[ "$(printf '%s' "$out" | grep -c 'Username: admin')" = "1" ] || fail "init did not print the username exactly once"
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l config.json | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail "init config.json is not mode 600"
-[ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
-[ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
+[ "$(jq -r '.dashboard.password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: dashboard password"
+[ "$(jq -r '.bitcoin.node_password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: shared RPC password"
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
-[ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "false" ] || fail "init: declining inbound records false (default is on)"
+[ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: data directory"
+[ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: dashboard bind address"
+[ "$(jq -r '.dashboard.onion // false' config.json)" = "false" ] || fail "init: dashboard onion must default off"
+[ "$(jq -r '.bitcoin.inbound_onion // false' config.json)" = "false" ] || fail "init: inbound onion must default off"
 [ "$(jq -r '.bitcoin.rpc_expose' config.json)" = "true" ] || fail "init: RPC exposure"
 [ "$(jq -r '.bitcoin.rpc_bind_ip' config.json)" = "192.168.1.117" ] || fail "init: RPC bind address"
 [ "$(jq -r '.bitcoin.rpc_port' config.json)" = "18332" ] || fail "init: RPC host port"
 [ "$(jq -r 'has("sync_over_clearnet") or (.bitcoin | has("sync_over_clearnet"))' config.json)" = "false" ] || fail "init: clearnet setting should be absent"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
-[ "$(jq -r '.bitcoin.node_password // "unset"' config.json)" = "unset" ] || fail "init: random password should be omitted"
 # the generated config must feed configure.sh cleanly (creds auto-generated)
 ./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
-grep -q '^BITCOIN_RPC_USER=bitcoin$' .env || fail "wizard config: username default not applied"
-grep -q '^DASHBOARD_PASSWORD=hunter2$' .env || fail "wizard config: dashboard password not rendered"
+grep -q '^BITCOIN_RPC_USER=admin$' .env || fail "wizard config: username default not applied"
+grep -q '^BITCOIN_RPC_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: shared RPC password not rendered"
+grep -q '^DASHBOARD_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: dashboard password not rendered"
 grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail "wizard config: RPC override not enabled"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
-# overwrite=y user pass dashpass[Enter=generate] onion=n control=n inbound=n RPC=n prune start=n
-out=$(printf 'y\n\n\n\nn\nn\nn\nn\n\nn\n' | ./stack init)
-printf '%s' "$out" | grep -qE 'generated dashboard password:|[0-9a-f]{32}' &&
-  fail "init printed a generated dashboard credential"
-jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
-  fail "init: empty dashboard password should generate a 32-hex one"
+# Existing archival, path, and bind settings survive a wizard rewrite.
+jq '.bitcoin.prune_mb=0' config.json >config.next && mv config.next config.json
+out=$(printf 'y\n\n\n\n\nn\nn\n\nn\n' | ./stack init)
+generated=$(jq -r '.dashboard.password' config.json)
+printf '%s' "$generated" | grep -qE '^[0-9a-f]{48}$' ||
+  fail "init: empty password should generate a 48-hex one"
+[ "$(jq -r '.bitcoin.node_password' config.json)" = "$generated" ] || fail "init: generated password was not shared"
+[ "$(printf '%s' "$out" | grep -c "Password: $generated")" = "1" ] || fail "init did not print generated login exactly once"
+printf '%s' "$out" | grep -q 'hunter2hunter2hunter2hunter2' && fail "init printed the previous credential"
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
 [ "$(jq -r '.bitcoin.rpc_expose // false' config.json)" = "false" ] ||
   fail "init: RPC exposure must default to off"
+[ "$(jq -r '.bitcoin.prune_mb' config.json)" = "0" ] || fail "init: existing archival setting was not preserved"
+[ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: existing data directory was not preserved"
+[ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: existing dashboard bind was not preserved"
+
+legacy_wizard="$tmp/legacy-wizard"
+mkdir "$legacy_wizard"
+cp stack configure.sh "$legacy_wizard/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\n' >"$legacy_wizard/.env"
+(cd "$legacy_wizard" && printf 'legacywizardpassword1234\n\n\nn\nn\n\nn\n' | ./stack init >/dev/null)
+[ "$(jq -r '.bitcoin.prune_mb' "$legacy_wizard/config.json")" = "0" ] || fail "init converted a pre-prune environment"
 
 # ensure_agent: up/apply must start the agent + install the @reboot cron entry
 # when dashboard.control is on, remove both when off, and defer to systemd.

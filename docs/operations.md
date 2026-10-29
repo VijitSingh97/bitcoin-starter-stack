@@ -152,7 +152,7 @@ A backup holds everything that can't be re-derived — and nothing else:
 
 Losing the onion keys means new `.onion` addresses, so back up after
 enabling either onion feature. The chain itself is re-derivable from the
-network — backing up ~800 GB is only worth it if a multi-day Tor resync
+network — backing up roughly 900 GB is only worth it if a multi-day Tor resync
 hurts more than the storage does. If you do copy it: `./stack down`
 first — a live copy of `chainstate/` is corrupt by construction.
 

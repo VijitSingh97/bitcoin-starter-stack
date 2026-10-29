@@ -1,9 +1,10 @@
 {
     "bitcoin": {
+        "node_username": "admin",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 3000,
-        "prune_mb": 0,
-        "inbound_onion": true,
+        "prune_mb": 10000,
+        "inbound_onion": false,
         "blockfilterindex": false,
         "mem_limit_mb": 0,
         "rpc_expose": false,

@@ -14,13 +14,18 @@ fail() {
 
 # 1. Runs with NO config.json — defaults applied, RPC credentials auto-generated
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
-grep -q '^BITCOIN_RPC_USER=bitcoin$' "$tmp/.env" || fail "RPC user default is not 'bitcoin'"
+grep -q '^BITCOIN_RPC_USER=admin$' "$tmp/.env" || fail "RPC user default is not 'admin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
+rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
+dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
+[ "$rpc_password" = "$dashboard_password" ] || fail "fresh install did not share the generated password"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default is not off"
 grep -q '^BITCOIN_RPC_BIND_IP=$' "$tmp/.env" || fail "LAN RPC bind default is not empty"
 grep -q '^BITCOIN_RPC_PORT=8332$' "$tmp/.env" || fail "LAN RPC port default not applied"
-grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
+grep -q '^BITCOIN_PRUNE=10000$' "$tmp/.env" || fail "fresh install prune default is not 10000 MB"
+grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "fresh install inbound onion default is not off"
+grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "fresh install dashboard onion default is not off"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
 printf '%s' "$watch_json" | jq -e 'length == 1 and .[0].name == "Binance (public)" and .[0].key == "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo" and .[0].birthday == ""' >/dev/null ||
@@ -45,6 +50,36 @@ fi
 if [ "$s1" != "$s2" ] || [ "$h1" != "$h2" ]; then
   fail "rpcauth salt/hash changed on re-run — would recreate bitcoind on every apply/upgrade"
 fi
+
+# Existing rendered settings remain authoritative when a new default is added.
+legacy="$tmp/legacy"
+mkdir "$legacy"
+cp configure.sh "$legacy/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\nDASHBOARD_PASSWORD=olddashboard\nBITCOIN_PRUNE=0\nBITCOIN_INBOUND_ONION=1\nDASHBOARD_ONION=1\n' >"$legacy/.env"
+(cd "$legacy" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_RPC_USER=bitcoin$' "$legacy/.env" || fail "existing RPC username was replaced"
+grep -q '^BITCOIN_RPC_PASSWORD=oldrpc$' "$legacy/.env" || fail "existing RPC password was replaced"
+grep -q '^DASHBOARD_PASSWORD=olddashboard$' "$legacy/.env" || fail "existing dashboard password was forced to match RPC"
+grep -q '^BITCOIN_PRUNE=0$' "$legacy/.env" || fail "existing archival node was converted to pruning"
+grep -q '^BITCOIN_INBOUND_ONION=1$' "$legacy/.env" || fail "existing inbound onion setting was disabled"
+grep -q '^DASHBOARD_ONION=1$' "$legacy/.env" || fail "existing dashboard onion setting was disabled"
+
+legacy_missing="$tmp/legacy-missing-prune"
+mkdir "$legacy_missing"
+cp configure.sh "$legacy_missing/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\n' >"$legacy_missing/.env"
+(cd "$legacy_missing" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_PRUNE=0$' "$legacy_missing/.env" || fail "existing pre-prune environment was converted to pruning"
+
+echo '{"bitcoin":{"prune_mb":0,"inbound_onion":false},"dashboard":{"onion":false}}' >"$legacy/config.json"
+(cd "$legacy" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_PRUNE=0$' "$legacy/.env" || fail "explicit prune_mb=0 was not preserved"
+grep -q '^BITCOIN_INBOUND_ONION=0$' "$legacy/.env" || fail "explicit inbound_onion=false was ignored"
+grep -q '^DASHBOARD_ONION=0$' "$legacy/.env" || fail "explicit dashboard.onion=false was ignored"
+
+echo '{"dashboard":{"password":""}}' >"$legacy/config.json"
+(cd "$legacy" && ./configure.sh) >/dev/null
+grep -q '^DASHBOARD_PASSWORD=$' "$legacy/.env" || fail "explicit empty dashboard password was ignored"
 
 # 3. A config.json without credentials still gets auto-generated ones
 rm -f "$tmp/.env"
@@ -72,18 +107,19 @@ echo '{"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"p
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "myuser", "node_password": "mypass123"}}
 EOF
+rm -f "$tmp/.env"
 (cd "$tmp" && ./configure.sh) >/dev/null
 
 grep -q '^BITCOIN_RPC_USER=myuser$' "$tmp/.env" || fail "username not rendered"
 grep -q '^BITCOIN_RPC_PASSWORD=mypass123$' "$tmp/.env" || fail "password not rendered"
 grep -q '^BITCOIN_DATA_DIR=./data/bitcoin$' "$tmp/.env" || fail "data_dir default not applied"
 grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applied"
-grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
-grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion should default ON"
+grep -q '^BITCOIN_PRUNE=10000$' "$tmp/.env" || fail "prune default not applied"
+grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should default off"
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
-grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
+grep -q '^DASHBOARD_PASSWORD=mypass123$' "$tmp/.env" || fail "fresh explicit password was not shared with dashboard"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
@@ -108,6 +144,16 @@ echo '{"wallets": {"name": "not-an-array"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-array wallets were accepted"
 cmp -s "$tmp/.env" "$tmp/env.before" || fail "invalid wallets changed .env"
 
+for unsafe_key in \
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about' \
+  'xprvPrivateMaterial' \
+  'wpkh(xprvPrivateMaterial/0/*)'; do
+  jq -n --arg key "$unsafe_key" '{wallets:[{name:"Rejected",key:$key}]}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >"$tmp/rejected.log" 2>&1 && fail "private or invalid configured wallet was accepted"
+  cmp -s "$tmp/.env" "$tmp/env.before" || fail "rejected public-only wallet changed .env"
+  grep -Fq "$unsafe_key" "$tmp/rejected.log" && fail "rejected wallet material leaked into output"
+done
+
 # 8. rpcauth is a real salted HMAC of the password (re-derive to check)
 salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 hash=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
@@ -125,7 +171,7 @@ cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
  "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
  "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
- "wallets": [{"name": "Cold storage", "key": "zpub6rFR7", "birthday": "2021-01-01"}]}
+ "wallets": [{"name": "Cold storage", "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "birthday": "2021-01-01"}]}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir not rendered"
@@ -165,9 +211,9 @@ cat >"$tmp/config.json" <<'EOF'
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "HTTP healthchecks_url was accepted"
 
-# blockfilterindex: honored on a full node, rejected on a pruned one
+# blockfilterindex: honored on an explicitly configured archival node, rejected on a pruned one
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin": {"node_username": "u", "node_password": "p", "blockfilterindex": true}}
+{"bitcoin": {"node_username": "u", "node_password": "p", "prune_mb": 0, "blockfilterindex": true}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_BLOCKFILTERINDEX=1$' "$tmp/.env" || fail "blockfilterindex=true not rendered as 1"
@@ -223,10 +269,13 @@ done
 jq -n '{bitcoin:{rpc_expose:true,rpc_bind_ip:"192.168.1.117",rpc_port:80},dashboard:{bind_ip:"192.168.1.117"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "RPC/dashboard host port conflict was accepted"
 
-# inbound_onion defaults ON (encouraged); explicit false opts out
+# inbound_onion defaults off; explicit true opts in
 echo '{"bitcoin": {"inbound_onion": false}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion: false should render 0"
+echo '{"bitcoin": {"inbound_onion": true}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion: true should render 1"
 
 # mem_limit_mb: default 0 -> unlimited; a set value renders as "<n>m"; a value
 # not above dbcache warns; non-numeric is rejected
@@ -243,11 +292,15 @@ echo '{"bitcoin": {"mem_limit_mb": "lots"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric mem_limit_mb was accepted"
 rm -f "$tmp/config.json"
 
-# 12. Warns when the onion dashboard has no password
-cat >"$tmp/config.json" <<'EOF'
-{"bitcoin": {"node_username": "u", "node_password": "p"}, "dashboard": {"onion": true}}
+# 12. Preserved legacy passwordless onion dashboards still warn.
+warn="$tmp/warn"
+mkdir "$warn"
+cp configure.sh "$warn/"
+printf 'BITCOIN_RPC_USER=u\nBITCOIN_RPC_PASSWORD=p\nDASHBOARD_PASSWORD=\n' >"$warn/.env"
+cat >"$warn/config.json" <<'EOF'
+{"dashboard": {"onion": true}}
 EOF
-out=$(cd "$tmp" && ./configure.sh)
+out=$(cd "$warn" && ./configure.sh)
 echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
 
 # 13. Version string: release number for a clean tagged checkout, branch-commit

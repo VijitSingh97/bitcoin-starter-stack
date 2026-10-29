@@ -38,3 +38,9 @@ preserved, hidden from the API, and locked against changes until the operator re
 the private material out of band. Basic status remains available without a password
 for the documented LAN-only setup. Core wallet reuse verifies the imported public
 descriptors; changing a key under the same label cannot read the old key's balance.
+
+The Go runtime also supports public-only balance scans on pruned nodes, where
+the frozen Python reference rejects new wallet entries. The pruned HTTP
+contract checks that intentional difference; the Go path must return a cached,
+confirmed UTXO balance without creating or importing a Core wallet. The other
+contracts continue to cover shared behavior.

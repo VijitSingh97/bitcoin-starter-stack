@@ -18,6 +18,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDRESS = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'
+TIP = 'ab' * 32
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
@@ -32,10 +33,12 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         with self.server.lock:
             state['calls'].append((wallet, method, params, self.headers.get('Authorization')))
             result = None
+            allow_null = False
             if method == 'getblockchaininfo' and not state['down']:
                 result = {'blocks': 123, 'headers': 123, 'verificationprogress': 1,
                           'initialblockdownload': state['ibd'], 'pruned': state['pruned'],
-                          'prune_target_size': 2**30, 'size_on_disk': 10**9}
+                          'prune_target_size': 2**30, 'size_on_disk': 10**9,
+                          'bestblockhash': TIP}
             elif method == 'getnetworkinfo':
                 result = {'subversion': state['version'], 'connections': 3}
             elif method == 'getpeerinfo':
@@ -57,6 +60,17 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                 result = {}
             elif method == 'getdescriptorinfo':
                 result = {'descriptor': params[0] + '#fixture', 'isrange': '/*' in params[0], 'hasprivatekeys': False}
+            elif method == 'deriveaddresses':
+                result = [ADDRESS]
+            elif method == 'scantxoutset' and params == ['status']:
+                allow_null = True
+            elif method == 'scantxoutset' and params[0] == 'start':
+                result = {'success': True, 'txouts': 200_000_000, 'height': 123,
+                          'bestblock': TIP, 'total_amount': 1.23456789,
+                          'unspents': [{'txid': 'cd' * 32, 'vout': 0,
+                                        'scriptPubKey': '76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f188ac',
+                                        'desc': f'addr({ADDRESS})#fixture',
+                                        'amount': 1.23456789, 'height': 100}]}
             elif method == 'getwalletinfo' and wallet in state['wallets']:
                 info = state['wallets'][wallet]
                 if info['loaded'] and info['mode'] != 'error':
@@ -78,8 +92,10 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                 ]}
         if method in state.get('failed_methods', []):
             result = None
-        body = json.dumps({'result': result, 'error': None if result is not None else {'code': -18}, 'id': value.get('id')}).encode()
-        self.send_response(200 if result is not None else 500)
+            allow_null = False
+        success = result is not None or allow_null
+        body = json.dumps({'result': result, 'error': None if success else {'code': -18}, 'id': value.get('id')}).encode()
+        self.send_response(200 if success else 500)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
@@ -223,13 +239,35 @@ class DashboardContracts(unittest.TestCase):
         for value in ['bitcoin_node_up 1', 'bitcoin_blocks 123', 'bitcoin_headers 123', 'bitcoin_connections 3', 'bitcoin_peers{direction="in"} 1', 'bitcoin_peers{direction="out"} 2', 'bitcoin_fee_sat_vb{blocks="1"} 0.4', 'bitcoin_mempool_txs 42']:
             self.assertIn(value, body)
 
-    def test_pruned_rejects_wallet_without_mutation(self):
+    def test_pruned_watch_is_public_only(self):
         self.fixture.state['pruned'] = True
         self.assertIn('Pruned', self.call('/')[1])
         status, body, _ = self.call('/api/watch', 'POST', {'name':'Cold','key':ADDRESS})
-        self.assertEqual(status, 400)
-        self.assertIn('full node', body)
-        self.assertEqual(self.body()['wallets'], [])
+        if not self.go_dashboard:
+            self.assertEqual(status, 400)
+            self.assertIn('full node', body)
+            self.assertEqual(self.body()['wallets'], [])
+            return
+        self.assertEqual((status, json.loads(body)), (200, {'ok': True}))
+        for _ in range(300):
+            view = self.body()
+            if view['wallets'] and view['wallets'][0]['state'] == 'ok':
+                break
+            time.sleep(0.01)
+        row = view['wallets'][0]
+        self.assertTrue(view['pruned'])
+        self.assertEqual(row['state'], 'ok')
+        self.assertEqual(row['btc'], '1.23456789')
+        self.assertEqual(row['balance_kind'], 'confirmed')
+        self.assertEqual(row['scan_height'], 123)
+        self.assertTrue(row['scan_time'])
+        for _ in range(5):
+            self.assertEqual(self.body()['wallets'][0]['btc'], '1.23456789')
+        methods = [call[1] for call in self.fixture.state['calls']]
+        self.assertNotIn('createwallet', methods)
+        self.assertNotIn('importdescriptors', methods)
+        self.assertEqual(sum(method == 'scantxoutset' and params[0] == 'start'
+                             for _, method, params, _ in self.fixture.state['calls']), 1)
 
     def test_wallet_crud_and_restart(self):
         self.add()

@@ -148,7 +148,7 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 	}
 	var chain blockchainInfo
 	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
-	view := a.watch.List(a.walletRPC, chain.InitialBlockDownload)
+	view := a.watch.ListWithChain(a.walletRPC, chain)
 	view["has_password"] = a.cfg.dashboardPassword != ""
 	writeJSON(w, view)
 }
@@ -169,12 +169,6 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	var chain blockchainInfo
-	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
-	if chain.Pruned {
-		http.Error(w, "This node is pruned — a full node is required to add watch-only wallets", 400)
-		return
-	}
 	var entry WatchEntry
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
@@ -186,11 +180,36 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "A valid public key, address, or descriptor is required.", 400)
 		return
 	}
+	type validatedDescriptor struct {
+		desc   string
+		ranged bool
+	}
+	validated := make([]validatedDescriptor, 0, len(descs))
 	for _, desc := range descs {
-		var info map[string]any
-		if err := a.rpc.call(r.Context(), "getdescriptorinfo", []any{desc.Desc}, &info); err != nil || info["hasprivatekeys"] != false {
+		var info struct {
+			Descriptor     string `json:"descriptor"`
+			IsRange        *bool  `json:"isrange"`
+			HasPrivateKeys *bool  `json:"hasprivatekeys"`
+		}
+		if err := a.rpc.call(r.Context(), "getdescriptorinfo", []any{desc.Desc}, &info); err != nil || info.Descriptor == "" || info.IsRange == nil || info.HasPrivateKeys == nil || *info.HasPrivateKeys {
 			http.Error(w, "A valid public key, address, or descriptor is required.", 400)
 			return
+		}
+		validated = append(validated, validatedDescriptor{desc: info.Descriptor, ranged: *info.IsRange})
+	}
+	var chain blockchainInfo
+	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
+	if chain.Pruned {
+		for _, desc := range validated {
+			params := []any{desc.desc}
+			if desc.ranged {
+				params = append(params, []int{0, 999})
+			}
+			var addresses []string
+			if err := a.rpc.call(r.Context(), "deriveaddresses", params, &addresses); err != nil || len(addresses) == 0 {
+				http.Error(w, "A valid public key, address, or descriptor is required.", 400)
+				return
+			}
 		}
 	}
 	saved, err := a.watch.Add(entry.Name, entry.Key, entry.Birthday)
@@ -203,7 +222,7 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.watch.SetPending(saved.Key, true)
-	go a.provision(saved, chain.Pruned)
+	go a.provisionForChain(saved, chain)
 	writeJSON(w, map[string]any{"ok": true})
 }
 

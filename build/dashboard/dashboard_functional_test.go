@@ -18,6 +18,7 @@ type dashboardRPC struct {
 	mu          sync.RWMutex
 	unavailable bool
 	wallets     map[string]float64
+	entries     map[string]WatchEntry
 }
 
 func (f *dashboardRPC) setUnavailable(value bool) {
@@ -29,6 +30,7 @@ func (f *dashboardRPC) setUnavailable(value bool) {
 func (f *dashboardRPC) handler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Method string `json:"method"`
+		Params []any  `json:"params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -37,6 +39,7 @@ func (f *dashboardRPC) handler(w http.ResponseWriter, r *http.Request) {
 	f.mu.RLock()
 	unavailable := f.unavailable
 	balance, knownWallet := f.wallets[strings.TrimPrefix(r.URL.Path, "/wallet/")]
+	entry := f.entries[strings.TrimPrefix(r.URL.Path, "/wallet/")]
 	f.mu.RUnlock()
 	if unavailable && (request.Method == "getblockchaininfo" || strings.HasPrefix(r.URL.Path, "/wallet/")) {
 		http.Error(w, "node unavailable", http.StatusServiceUnavailable)
@@ -65,6 +68,14 @@ func (f *dashboardRPC) handler(w http.ResponseWriter, r *http.Request) {
 		if knownWallet {
 			result = map[string]any{"mine": map[string]any{"trusted": balance}}
 		}
+	case "getdescriptorinfo":
+		if knownWallet {
+			result = descriptorInfo(request.Params)
+		}
+	case "listdescriptors":
+		if knownWallet {
+			result = listedDescriptors(entry)
+		}
 	}
 	if result == nil {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
@@ -84,7 +95,7 @@ func newDashboardFixture(t *testing.T, control bool) *dashboardFixture {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("TELEGRAM_CHAT_ID", "")
 	t.Setenv("HEALTHCHECKS_URL", "")
-	rpcFixture := &dashboardRPC{wallets: make(map[string]float64)}
+	rpcFixture := &dashboardRPC{wallets: make(map[string]float64), entries: make(map[string]WatchEntry)}
 	rpcServer := httptest.NewServer(http.HandlerFunc(rpcFixture.handler))
 	t.Cleanup(rpcServer.Close)
 	root := filepath.Dir(sourceFile(t))
@@ -225,6 +236,7 @@ func TestDashboardWalletViewFormatsBalancesAndPersonalTotal(t *testing.T) {
 		name := coreWalletName(saved)
 		fixture.app.watch.SetCoreWallet(saved.Key, name)
 		fixture.rpc.wallets[name] = balances[i]
+		fixture.rpc.entries[name] = saved
 	}
 	fixture.app.watch.SetPending(entries[1].Key, true)
 

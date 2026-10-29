@@ -11,6 +11,7 @@ config_file=$config_dir/config.json
 env_file=$state_dir/.env
 stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+umask 077
 mkdir -p "$state_dir" "$config_dir"
 cd "$state_dir"
 
@@ -28,16 +29,26 @@ config='{}'
 get() { jq -r "$1 // \"${2:-}\"" <<<"$config"; }
 flag() { jq -r "if $1 == true then 1 else 0 end" <<<"$config"; }
 
-# Internal RPC credentials — used only between the dashboard and bitcoind on the
-# private Docker network; you never type or see these. Honour config.json if set,
-# otherwise reuse whatever is already in .env (so re-running is idempotent),
-# otherwise generate fresh strong random values.
+# Fresh installs share a generated RPC/dashboard password; upgrades reuse each
+# existing value independently.
 rpc_user=$(get '.bitcoin.node_username')
 rpc_password=$(get '.bitcoin.node_password')
+dashboard_password=$(get '.dashboard.password')
+dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
+had_env=0
+[ -f "$env_file" ] && had_env=1
 [ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$env_file" 2>/dev/null || true)
 [ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
-[ -n "$rpc_user" ] || rpc_user="bitcoin"                       # conventional default username
-[ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24) # strong random
+[ "$dashboard_password_set" = "1" ] || dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$env_file" 2>/dev/null || true)
+[ -n "$rpc_user" ] || rpc_user="admin"
+if [ "$had_env" = "0" ]; then
+  [ -n "$rpc_password" ] || rpc_password=$dashboard_password
+  [ -n "$dashboard_password" ] || dashboard_password=$rpc_password
+fi
+if [ -z "$rpc_password" ]; then
+  rpc_password=$(openssl rand -hex 24)
+  [ "$had_env" = "1" ] || dashboard_password=$rpc_password
+fi
 
 data_dir=$(get '.bitcoin.data_dir')
 if [ -z "$data_dir" ]; then
@@ -48,25 +59,23 @@ if [ -z "$data_dir" ]; then
   fi
 fi
 dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
-if jq -e '(.bitcoin? // {}) | has("prune_mb")' >/dev/null <<<"$config"; then
-  prune=$(jq -r '.bitcoin.prune_mb' <<<"$config")
-elif [ "$package_managed" = "1" ]; then
+prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$config")
+[ -n "$prune" ] || {
   prune=$(sed -n 's/^BITCOIN_PRUNE=//p' "$env_file" 2>/dev/null || true)
-  if [ -z "$prune" ]; then
-    prune=10000
-  fi
-else
-  prune=0
-fi
+  [ -n "$prune" ] || [ ! -f "$env_file" ] || prune=0
+}
+[ -n "$prune" ] || prune=10000
 mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
-# default ON (encouraged): accept inbound over Tor unless explicitly disabled
-inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == false then 0 else 1 end' <<<"$config")
+inbound_onion=$(jq -r 'if ((.bitcoin // {}) | has("inbound_onion")) then if .bitcoin.inbound_onion == true then 1 else 0 end else empty end' <<<"$config")
+[ -n "$inbound_onion" ] || inbound_onion=$(sed -n 's/^BITCOIN_INBOUND_ONION=//p' "$env_file" 2>/dev/null || true)
+[ -n "$inbound_onion" ] || inbound_onion=0
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
 rpc_expose=$(flag '.bitcoin.rpc_expose')
 rpc_bind_ip=$(get '.bitcoin.rpc_bind_ip')
 rpc_port=$(jq -r '.bitcoin.rpc_port // 8332' <<<"$config")
-dashboard_password=$(get '.dashboard.password')
-dashboard_onion=$(flag '.dashboard.onion')
+dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$config")
+[ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' "$env_file" 2>/dev/null || true)
+[ -n "$dashboard_onion" ] || dashboard_onion=0
 dashboard_control=$(flag '.dashboard.control')
 dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
@@ -83,7 +92,19 @@ default_wallets='[{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv
 if [ "$package_managed" = "1" ] && [ "$prune" != "0" ]; then
   default_wallets='[]'
 fi
-watch_wallets_b64=$(jq -cej --argjson defaults "$default_wallets" 'if has("wallets") then if (.wallets | type) == "array" then .wallets else error("wallets must be an array") end else $defaults end' <<<"$config" | base64 | tr -d '\n')
+watch_wallets_b64=$(jq -cej --argjson defaults "$default_wallets" '
+  def public_key:
+    type == "string" and
+    (gsub("^\\s+|\\s+$"; "") |
+      (test("^(?:(?:bc1|tb1|bcrt1)[0-9a-z]{20,}|[13][1-9A-HJ-NP-Za-km-z]{25,34}|[xtyuzv]pub[1-9A-HJ-NP-Za-km-z]{107})$") or
+       (test("^(?:addr|pk|pkh|wpkh|sh|wsh|tr|rawtr|combo|raw|multi|sortedmulti)\\(") and
+        (test("\\s") | not) and
+        (test("(^|[^A-Za-z0-9])[xtyuzvXYZUV]prv[A-Za-z0-9]+|(^|[^1-9A-HJ-NP-Za-km-z])[5KL9c][1-9A-HJ-NP-Za-km-z]{50,51}($|[^1-9A-HJ-NP-Za-km-z])") | not))));
+  (if has("wallets") then .wallets else $defaults end) |
+  if type != "array" then error("wallets must be an array")
+  elif all(.[]; type == "object" and (.key | public_key)) then .
+  else error("wallets accept only public addresses, extended public keys, or public descriptors; remove private or invalid material from config.json") end
+' <<<"$config" | base64 | tr -d '\n')
 
 check_alnum() {
   case "$2" in
@@ -254,7 +275,9 @@ else
   stack_version="$version" # release tarball (no .git)
 fi
 
-cat >"$env_file" <<EOF
+env_tmp=$(mktemp "$state_dir/.env.tmp.XXXXXX")
+trap 'rm -f "$env_tmp"' EXIT
+cat >"$env_tmp" <<EOF
 COMPOSE_FILE=$compose_file
 BITCOIN_RPC_USER=$rpc_user
 BITCOIN_RPC_PASSWORD=$rpc_password
@@ -282,7 +305,8 @@ STACK_VERSION=$stack_version
 STACK_ROOT=$stack_root
 WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
-chmod 600 "$env_file"
+chmod 600 "$env_tmp"
+mv -f "$env_tmp" "$env_file"
 
 # Create the data dir up front, or docker creates it root-owned
 # and bitcoind (uid 1000) can't write to it

@@ -20,6 +20,7 @@ const publicExampleName = "Binance (public)"
 const publicExampleAddress = "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo"
 
 var ErrWatchUnavailable = errors.New("watch wallet storage unavailable")
+var ErrScanCacheUnavailable = errors.New("watch scan cache unavailable")
 var chmodExistingFile = os.Chmod
 var writeWatchFile = writePrivateFileAtomic
 
@@ -32,12 +33,16 @@ type WatchEntry struct {
 type WatchStore struct {
 	mu           sync.Mutex
 	path         string
+	scanPath     string
 	entries      []WatchEntry
 	history      *balanceHistory
 	pending      map[string]bool
 	coreNames    map[string]string
+	scans        map[string]prunedScanCache
+	scanStates   map[string]string
 	unsafeRoster bool
 	storeErr     error
+	scanErr      error
 }
 
 func NewWatchStore(stateDir string) *WatchStore {
@@ -52,9 +57,11 @@ func NewWatchStore(stateDir string) *WatchStore {
 	if historyPath == "" {
 		historyPath = filepath.Join(stateDir, "balance_history.json")
 	}
+	scanPath := filepath.Join(stateDir, "watch_scan_cache.json")
 	secureParent(storePath)
-	store := &WatchStore{path: storePath, history: newBalanceHistory(historyPath)}
+	store := &WatchStore{path: storePath, scanPath: scanPath, history: newBalanceHistory(historyPath)}
 	store.load()
+	store.loadScanCache()
 	return store
 }
 
@@ -106,6 +113,14 @@ func loadWatchConfig() ([]WatchEntry, error) {
 	if json.Unmarshal(b, &items) != nil || items == nil {
 		return nil, ErrWatchUnavailable
 	}
+	for _, item := range items {
+		key := strings.TrimSpace(stringValue(item["key"]))
+		if key != "" && !hasPrivateMaterial(key) {
+			if _, err := descriptorsFor(key); err != nil {
+				return nil, ErrWatchUnavailable
+			}
+		}
+	}
 	entries, _ := normalizeEntries(items)
 	return entries, nil
 }
@@ -124,6 +139,12 @@ func normalizeEntries(items []map[string]any) ([]WatchEntry, bool) {
 		if hasPrivateMaterial(key) {
 			privateFound = true
 			continue
+		}
+		if key != "" {
+			if _, err := descriptorsFor(key); err != nil {
+				privateFound = true
+				continue
+			}
 		}
 		identity := watchKeyID(key)
 		if name != "" && key != "" && !seenKeys[identity] {
@@ -153,6 +174,12 @@ func (s *WatchStore) saveLocked() error {
 		return ErrWatchUnavailable
 	}
 	return nil
+}
+
+func (s *WatchStore) ScanErr() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanErr
 }
 
 func secureParent(path string) bool {
@@ -406,5 +433,8 @@ func (s *WatchStore) removeIndexLocked(index int, entry WatchEntry) (bool, error
 	identity := watchKeyID(entry.Key)
 	delete(s.pending, identity)
 	delete(s.coreNames, identity)
+	delete(s.scans, identity)
+	delete(s.scanStates, identity)
+	_ = s.saveScanCacheLocked()
 	return true, nil
 }

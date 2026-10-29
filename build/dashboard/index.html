@@ -25,6 +25,11 @@
   <div class="stack-col">
     <div id="tower-stats" class="tower-stats" hidden></div>
     <div id="live" data-blocks="{{.Blocks}}" data-next-block="{{.NextBlock}}">
+      {{if .InitialBlockDownload}}<section class="card sync-card" aria-label="Initial blockchain synchronization">
+        <h2>Syncing Bitcoin Core</h2>
+        <p class="sync-percentage" role="status">{{printf "%.2f" .Progress}}% synced</p>
+        <p>Downloading and validating the blockchain. Pruning saves disk space as the sync continues.</p>
+      </section>{{end}}
       <div class="card">
         <h2>Bitcoin Node Status<span class="badge">{{if .Pruned}}Pruned · {{printf "%.1f" .PruneTargetGB}} GB{{else}}Full{{end}}</span></h2>
         <div class="row"><span class="label">Bitcoin Core:</span> <span>{{.CoreVersion}}</span></div>
