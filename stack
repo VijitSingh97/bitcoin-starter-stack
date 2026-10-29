@@ -57,7 +57,7 @@ usage() {
 Usage: $stack_command <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
-  pull                       Download images through the configured host Tor proxy
+  pull                       Download container images using host Docker settings
   init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
   events                     Incident history (down/recovered, failed pings) — survives restarts
@@ -74,14 +74,11 @@ EOF
 
 env_get() { sed -n "s/^$1=//p" "$env_file" 2>/dev/null || true; }
 
-# Interactive setup: every prompt has a sensible default — press Enter to skip.
-# Writes config.json (only the values you change), then offers to start. Plain
-# `./stack up` needs none of this; it just uses the defaults.
 init() {
   umask 077
   for tool in jq openssl; do
     command -v "$tool" >/dev/null || {
-      echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
+      echo "$tool is required; install it with your host package manager."
       exit 1
     }
   done
@@ -177,10 +174,14 @@ init() {
   echo
   echo "Wrote private config.json (mode 600)."
   echo
-  printf "Start the stack now? [Y/n] "
+  printf "Download missing containers and start the stack now? [Y/n] "
   read -r reply
-  case "$reply" in n | N) echo "Later: $stack_command up" ;; *)
-    "$stack_root/configure.sh" && offline_up && ensure_agent
+  case "$reply" in n | N) echo "Later: $stack_command pull && $stack_command up" ;; *)
+    "$stack_root/configure.sh"
+    guard_package_containers
+    images_available || pull_images
+    offline_up
+    ensure_agent
     ;;
   esac
   echo
@@ -194,31 +195,16 @@ offline_up() {
   for arg in "$@"; do
     case "$arg" in
       tor | bitcoin | dashboard) ;;
-      *) echo "up accepts service names only; image downloads are separate: ./stack pull (see docs/privacy.md)."; return 1 ;;
+      *) echo "up accepts service names only; image downloads are separate: $stack_command pull."; return 1 ;;
     esac
   done
   compose up -d --pull never --no-build "$@" || {
-    echo "Start failed. Missing images? Configure host Tor, then run ./stack pull. See docs/privacy.md."
+    echo "Start failed. Missing images? Run $stack_command pull, then retry."
     return 1
   }
 }
 
 pull_images() {
-  local proxy='socks5h://172.29.0.25:9050'
-  if ! docker info --format '{{json .}}' | jq -e '
-    (.HttpProxy == "socks5h://172.29.0.25:9050" or .HttpProxy == "socks5://172.29.0.25:9050") and
-    (.HttpsProxy == "socks5h://172.29.0.25:9050" or .HttpsProxy == "socks5://172.29.0.25:9050") and
-    ((.NoProxy // "") == "") and
-    ((.RegistryConfig.Mirrors // []) | length == 0)' >/dev/null; then
-    echo "Image download blocked: Docker must use the stack's Tor SOCKS proxy, with no bypasses or mirrors."
-    echo "See docs/privacy.md; preloaded images can start with ./stack up."
-    return 1
-  fi
-  if ! command -v curl >/dev/null || ! curl --fail --silent --show-error --max-time 60 \
-    --proxy "$proxy" --noproxy '' https://check.torproject.org/api/ip | jq -e '.IsTor == true' >/dev/null; then
-    echo "Image download blocked: the Tor proxy could not be verified."
-    return 1
-  fi
   compose pull
 }
 
@@ -385,7 +371,6 @@ do_upgrade() {
     cat <<EOF
 This installation is managed by APT. Upgrade manually:
   $stack_command backup
-  # First confirm APT uses Tor; see /usr/share/doc/bitcoin-starter-stack/docs/privacy.md
   sudo apt update
   sudo apt install --only-upgrade bitcoin-starter-stack
   $stack_command apply

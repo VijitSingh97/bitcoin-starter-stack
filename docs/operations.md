@@ -3,7 +3,7 @@
 ## Day-to-day commands
 
 Use `./stack` for operations; it prevents implicit image downloads and builds.
-Set up [host Tor downloads](privacy.md) before fetching images.
+The explicit `pull` command uses the host's existing Docker settings.
 
 | Command | What it does |
 |---|---|
@@ -11,7 +11,7 @@ Set up [host Tor downloads](privacy.md) before fetching images.
 | `./stack logs [svc]` | Follow logs (`tor`, `bitcoin`, or `dashboard`). |
 | `./stack events` | Incident history (down/recovered, failed Healthchecks pings, monitor restarts) from `/state/events.log` — survives restarts and reboots. |
 | `./stack apply` | Re-render `.env` from `config.json` and apply the changes. |
-| `./stack pull` | Download prebuilt images after verifying the Docker daemon's Tor proxy. |
+| `./stack pull` | Download prebuilt images using the host's Docker settings. |
 | `./stack status` | Container + health summary; exits non-zero if anything is down. |
 | `./stack doctor` | Read-only health report: deps, config freshness, disk, containers, sync state, tor bootstrap, onion addresses. |
 | `./stack backup` / `restore [-y] <archive>` | See [Backup](#backup). |
@@ -34,8 +34,7 @@ shows recent probe output when diagnosing.
 ## Upgrading
 
 APT installations are upgraded explicitly so package installation never
-restarts containers or changes node data. Configure the host APT proxy as
-described in [Bootstrap and APT](privacy.md#bootstrap-and-apt), then run:
+restarts containers or changes node data. Run:
 
 ```bash
 sudo bitcoin-stack backup
@@ -59,9 +58,9 @@ project's dashboard and Tor volumes. Package installation, upgrade, removal,
 and purge never perform that migration or change those data paths.
 
 - **One command: `./stack upgrade`.** Fetches the latest release tag through Tor, **backs up
-  first**, checks it out, and re-applies — pulling the new prebuilt images and
-  recreating the changed containers. Downloads fail closed without the
-  [host Tor proxy](privacy.md). It only ever moves **forward** (never
+  first**, checks it out, and re-applies — pulling missing prebuilt images with
+  host Docker and recreating changed containers. The Git fetch fails closed when
+  the stack's Tor proxy is unavailable. It only ever moves **forward** (never
   downgrades) and prints a rollback line if you need it. This is the normal way
   to update the stack itself. (Requires a git checkout; for a tarball install,
   unpack the latest release over it and `./stack apply`.)
@@ -93,8 +92,8 @@ entry so it survives reboots (no sudo needed). Setting `control` back to
 `false` and re-applying stops the agent and removes the cron entry.
 `./stack doctor` reports whether the agent is running.
 
-Configure [host Tor downloads](privacy.md) before enabling the button. A failed
-Tor check stops the upgrade without a direct network fallback.
+The source upgrade's Git fetch requires the running Tor proxy. A failed Tor check
+stops the upgrade without a direct Git fallback.
 
 The button appears only when control is on **and** an update is available. It
 writes a request marker to the dashboard's state volume; the agent sees it,

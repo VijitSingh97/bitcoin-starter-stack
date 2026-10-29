@@ -1,4 +1,4 @@
-# Tor-only networking
+# Tor-only runtime networking
 
 Bitcoin and the dashboard have no external network route. Their Docker network is
 internal; only the Tor container also joins an external network. Both applications
@@ -30,64 +30,31 @@ characters, and each host relay accepts at most 32 concurrent connections. See
 
 Starting or applying the stack uses only images already present locally, with
 automatic pulls and builds disabled. Missing images cause a failure. `./stack
-pull` downloads images only after verifying that the Docker daemon uses the
-stack's Tor SOCKS proxy, has no proxy bypasses or registry mirrors, and that the
-proxy is recognized as Tor. `./stack upgrade` fetches an HTTPS Git origin through
-that proxy, then uses the same image-download checks. Absolute local Git origins
-and preloaded images also support offline upgrades. SSH Git origins are rejected.
+pull` is the explicit download command and uses the Docker daemon's existing host
+network settings. The stack neither requires a host proxy nor changes Docker's
+daemon configuration. An operator-configured Docker proxy continues to apply.
 
-Docker Engine on Ubuntu needs this proxy configuration merged into
-`/etc/docker/daemon.json`:
+The setup wizard runs `pull` only when the operator accepts its final download
+and start prompt and one or more images are missing. It then starts with the same
+`--pull never --no-build` policy used by routine `up` and `apply` commands.
 
-```json
-{
-  "proxies": {
-    "http-proxy": "socks5h://172.29.0.25:9050",
-    "https-proxy": "socks5h://172.29.0.25:9050",
-    "no-proxy": ""
-  }
-}
-```
+Source installs keep a separate upgrade rule: `./stack upgrade` fetches an HTTPS
+Git origin through the running stack's Tor proxy before downloading any missing
+container images with host Docker. Absolute local Git origins and preloaded
+images support offline upgrades. SSH Git origins are rejected.
 
-Preserve other daemon settings. Validate the file with `sudo dockerd --validate
---config-file=/etc/docker/daemon.json`, then schedule a Docker restart; restarting
-Docker can interrupt every container on the host. The proxy address is reachable
-from the Ubuntu host once the stack's Tor container is running. If Tor is down,
-registry downloads fail. Docker Desktop uses different proxy settings and is a
-development environment, outside the supported Ubuntu deployment.
+APT, Git clones, browser downloads, and Docker registry pulls are host activity,
+outside the running container boundary. They use the host connection and may
+reveal its public IP unless the operator has independently configured a proxy.
+This does not add an external route to the Bitcoin or dashboard containers.
 
-## Bootstrap and APT
+## Package feed
 
-Tor must already be available before the first network download. Obtain the source
-and initial Tor image through an existing Tor connection, or transfer them from a
-trusted machine using Tor for its downloads. Load the image locally with `docker
-load`, configure the stack, and start only Tor with `./stack up tor`. Once Tor has
-bootstrapped and Docker's proxy settings are active, run `./stack pull` followed by
-`./stack up`. There is no automatic clearnet bootstrap exception.
-
-For an existing Tor connection, clone with remote DNS and no proxy bypass:
-
-```bash
-NO_PROXY= no_proxy= git -c http.proxy=socks5h://127.0.0.1:9050 clone \
-  https://github.com/VijitSingh97/bitcoin-starter-stack.git
-```
-
-APT is a host program. Before adding this project's feed or installing packages,
-route it through an available Tor proxy. With the stack's Tor running on Ubuntu,
-put the following in `/etc/apt/apt.conf.d/80-bitcoin-tor`:
-
-```text
-Acquire::http::Proxy "socks5h://172.29.0.25:9050";
-Acquire::https::Proxy "socks5h://172.29.0.25:9050";
-```
-
-Check existing host/per-repository proxy overrides before relying on this setting.
 The first package feed will be enabled with the next release. Its dedicated
 public-key fingerprint is intentionally unpublished until then. The release
 must replace `UNPUBLISHED` below with the committed 40-hex primary fingerprint.
-The command fails closed while that placeholder remains, downloads the key
-through Tor with remote DNS and no proxy bypass, and installs it only after an
-exact fingerprint match:
+The command fails closed while that placeholder remains and installs the key only
+after an exact fingerprint match:
 
 ```bash
 expected=UNPUBLISHED
@@ -98,7 +65,6 @@ printf '%s\n' "$expected" | grep -Eq '^[0-9A-Fa-f]{40}$' || {
 key=$(mktemp)
 trap 'rm -f "$key"' EXIT
 curl --fail --show-error --silent \
-  --proxy socks5h://172.29.0.25:9050 --noproxy '' \
   https://vijitsingh97.github.io/bitcoin-starter-stack/bitcoin-starter-stack.asc \
   --output "$key"
 actual=$(gpg --batch --show-keys --with-colons "$key" |
@@ -110,23 +76,14 @@ actual=$(gpg --batch --show-keys --with-colons "$key" |
 sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
 ```
 
-Install GnuPG through the configured APT Tor proxy before running this check.
-If the stack is not running yet, use an existing Tor SOCKS proxy such as
-`socks5h://127.0.0.1:9050`, or transfer the verified key and bootstrap bundle
-from a trusted machine whose downloads used Tor. Add the feed only after the
-APT proxy above is active; per-repository proxy rules can override the host
-setting and must be removed or routed through Tor.
-
-Source compilation, maintainer release publishing, CI, direct Docker commands, a browser reading GitHub, and
-unrelated host services are outside the running container boundary. Development
-builds need their own Tor-routed build environment; setting a Docker CLI proxy
-alone does not route daemon pulls or every build step. Release consumers can use
-the prebuilt images without compiling on the node.
+Install GnuPG before running this check. APT installation remains inert: it does
+not launch the wizard, download container images, or start the stack. Run
+`sudo bitcoin-stack init` afterward. Release consumers use prebuilt images and do
+not compile on the node.
 
 This protects the stack's network paths. It cannot guarantee anonymity against
 traffic correlation, a compromised host/Tor daemon, router port forwarding, or
 operator-created alternate networks and proxies.
 
 References: [Docker internal networks](https://docs.docker.com/reference/compose-file/networks/#internal),
-[Docker daemon proxies](https://docs.docker.com/engine/daemon/proxy/),
 [Go SOCKS proxy support](https://go.dev/src/net/http/transport.go).

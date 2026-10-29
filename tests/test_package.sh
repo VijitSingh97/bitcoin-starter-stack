@@ -72,7 +72,8 @@ dpkg-deb -x "$deb" "$root"
 [ "$(cat "$root/usr/lib/bitcoin-starter-stack/VERSION")" = "$PACKAGE_VERSION" ] || fail "payload VERSION does not match package metadata"
 privacy=$root/usr/share/doc/bitcoin-starter-stack/docs/privacy.md
 grep -q '^expected=UNPUBLISHED$' "$privacy" || fail "unreleased feed key is not fail-closed"
-grep -q -- '--proxy socks5h://172.29.0.25:9050 --noproxy' "$privacy" || fail "feed key download is not pinned to the Tor proxy"
+grep -q 'bitcoin-starter-stack.asc' "$privacy" || fail "feed key download is missing"
+grep -q -- '--proxy' "$privacy" && fail "feed key download forces a host proxy"
 grep -q -- 'gpg --batch --show-keys --with-colons' "$privacy" || fail "feed key fingerprint is not verified"
 if [ "$(id -u)" -ne 0 ]; then
   echo "PASS: test_package.sh artifact checks"
@@ -94,6 +95,10 @@ if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
     *) exit 88 ;;
   esac
 fi
+case " $* " in
+  *' config --images '*) printf 'example.invalid/stack:test\n' ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
+esac
 EOF
 chmod +x "$fake/docker"
 
@@ -122,7 +127,15 @@ printf '%s' "$wizard_out" | grep -q 'One-click upgrades' && fail "package wizard
 [ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
 [ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
 [ "$(printf '%s' "$wizard_out" | grep -c 'Password: packagepassword1234567890')" = 1 ] || fail "package wizard did not print the new login exactly once"
+printf '%s' "$wizard_out" | grep -q 'Download missing containers and start the stack now? \[Y/n\]' || fail "package wizard omitted explicit download/start prompt"
+printf '%s' "$wizard_out" | grep -q 'Later: bitcoin-stack pull && bitcoin-stack up' || fail "package wizard deferred-start instructions omit image download"
 rm -f "$config_dir/config.json"
+
+: >"$log"
+printf 'packagepassword1234567890\n\n\nn\n\n\n' |
+  FAKE_IMAGES_MISSING=1 "$wrapper" init >/dev/null
+grep -q -- 'compose .* pull' "$log" || fail "package wizard did not pull missing images"
+grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wizard start allows implicit pulls or builds"
 
 "$wrapper" apply >/dev/null
 env_file=$state_dir/.env

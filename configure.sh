@@ -17,7 +17,7 @@ cd "$state_dir"
 
 for tool in jq openssl; do
   command -v "$tool" >/dev/null || {
-    echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
+    echo "$tool is required; install it with your host package manager."
     exit 1
   }
 done
@@ -316,4 +316,4 @@ if [ "$package_managed" = "1" ] && [ "$data_dir" = "${BITCOIN_STACK_DATA_DIR%/}/
   chmod 700 "$data_dir"
 fi
 
-echo "Done. Start preloaded images with: $stack_command up (downloads: $stack_command pull; see docs/privacy.md)."
+echo "Done. Start local images with: $stack_command up (download missing images: $stack_command pull)."

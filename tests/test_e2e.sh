@@ -56,7 +56,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Setup exactly as a user does it: default paths, upgrade button n, LAN RPC n,
-# prune 1 GB, and don't start yet.
+# prune 1 GB, and don't download or start yet.
 printf 'e2eDashboardSharedPassword123\n\n\nn\nn\n1\nn\n' | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
 # datadir at the temp dir, bind the dashboard to this host's LAN address, and

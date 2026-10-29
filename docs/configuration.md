@@ -85,7 +85,7 @@ shows the overridable settings with their defaults:
 `configure.sh` applies the defaults above for any omitted key, and generates
 strong random RPC credentials on first run (reused on later runs).
 Starting and applying use local images only. See [Tor-only networking](privacy.md)
-for the Tor-verified image download and first-install bootstrap process.
+for the boundary between host downloads and Tor-only runtime traffic.
 
 Fresh headless installs use the same generated value for `BITCOIN_RPC_PASSWORD`
 and `DASHBOARD_PASSWORD`. Read it locally from the mode-600 `.env`; upgrades
