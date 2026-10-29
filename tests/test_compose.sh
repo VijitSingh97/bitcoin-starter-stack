@@ -25,12 +25,14 @@ export WATCH_WALLETS_B64=watchblob
 export DASHBOARD_BIND_IP=127.0.0.1
 
 rendered=$(docker compose --env-file /dev/null config)
+legacy_cache_rendered=$(env -u BITCOIN_DBCACHE docker compose --env-file /dev/null config)
 
 # Settings reach bitcoind's environment
 echo "$rendered" | grep -q 'RPC_USER: testuser' || fail "RPC_USER not interpolated"
 echo "$rendered" | grep -q 'RPCAUTH_SALT: cafe0123cafe0123cafe0123cafe0123' || fail "RPCAUTH_SALT not interpolated"
 echo "$rendered" | grep -q 'RPCAUTH_HASH: deadbeef' || fail "RPCAUTH_HASH not interpolated"
 echo "$rendered" | grep -q 'DBCACHE: "1234"' || fail "DBCACHE not interpolated"
+echo "$legacy_cache_rendered" | grep -q 'DBCACHE: "3000"' || fail "legacy DBCACHE fallback not applied"
 echo "$rendered" | grep -q 'PRUNE: "555"' || fail "PRUNE not interpolated"
 echo "$rendered" | grep -q 'INBOUND_ONION: "0"' || fail "INBOUND_ONION default not applied"
 echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION default not applied"

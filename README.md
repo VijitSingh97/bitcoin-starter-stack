@@ -71,7 +71,9 @@ wallet addresses stay on your node.
 
 **Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
 `jq` and `curl`, an SSD with 30–60 GB free for the default
-[pruned](docs/configuration.md#pruned-node) setup (about 1 TB for archival), and 8 GB+ RAM.
+[pruned](docs/configuration.md#pruned-node) setup (about 1 TB for archival), and a
+comfortable target of 2 CPU cores and 4 GB RAM. A 1 CPU/2 GB configuration is
+still being evaluated and is not yet a validated minimum.
 Details in [Hardware Requirements](docs/hardware.md).
 
 First set up [Tor for downloads](docs/privacy.md#bootstrap-and-apt), including the

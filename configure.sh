@@ -43,7 +43,12 @@ if [ -z "$rpc_password" ]; then
 fi
 
 data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
-dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
+dbcache=$(jq -r '.bitcoin.dbcache_mb // empty' <<<"$config")
+[ -n "$dbcache" ] || {
+  dbcache=$(sed -n 's/^BITCOIN_DBCACHE=//p' .env 2>/dev/null || true)
+  [ -n "$dbcache" ] || [ ! -f .env ] || dbcache=3000
+}
+[ -n "$dbcache" ] || dbcache=128
 prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$config")
 [ -n "$prune" ] || {
   prune=$(sed -n 's/^BITCOIN_PRUNE=//p' .env 2>/dev/null || true)
