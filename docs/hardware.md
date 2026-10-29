@@ -1,11 +1,16 @@
 # Hardware Requirements
 
-Reference deployment: a 4-core mini PC with 8 GB RAM and an NVMe SSD
-running Ubuntu Server 24.04.
+Reference deployment and test host: a mini PC with 4 logical CPUs (2 physical
+cores), 8 GB RAM, and an NVMe SSD running Ubuntu Server 24.04.5.
 
-For current deployment planning, use 2 CPU cores and 4 GB RAM as a comfortable
-target. A 1 CPU/2 GB configuration is being evaluated; benchmark results are
-still pending, so it is not yet a validated minimum.
+For deployment planning, use 2 CPUs and 4 GB RAM as the recommended target. A
+short container-capped trial supports 1 CPU/2 GB as a small-host target: during
+a 10-minute sample after warmup, the stack advanced 1,200 blocks with 15/15 RPC
+checks succeeding, no HTTP failures, and no application-container swap, OOM
+kills, or restarts. This trial did not cover a full initial sync, sustained full
+mempool, or wallet-scan load. See the
+[resource-cap experiment](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/5dc960cb91873bcc09f599805cdc5bf1d6ec103a/experiments/go-dashboard-results/mini-1-resource-caps-2026-10-29/README.md)
+for the method, exact temporary caps, and the 2 CPU/4 GB profile results.
 
 ## Disk
 
@@ -31,21 +36,25 @@ initial sync and reindexing:
 
 | System RAM | `dbcache_mb` guidance |
 |---|---|
-| 2 GB evaluation target | Keep the 128 MiB default while evaluation is in progress. |
-| 4 GB comfortable target | Start with 128 MiB; raise it only if faster initial sync is worth the extra memory. |
+| 2 GB small-host target | Use 128 MiB. Existing users moving to 2 GB must set `bitcoin.dbcache_mb` to `128` explicitly because upgrades preserve older, larger cache settings. |
+| 4 GB recommended target | Start with 128 MiB; raise it only if faster initial sync is worth the extra memory. |
 | 8 GB reference host | 128 MiB remains the default; 3000 MiB is an optional initial-sync tuning value. |
 | 16 GB+ | Larger values such as 6000 MiB are optional initial-sync tuning. |
 
 Don't set the cache near total RAM. Bitcoin Core also uses memory outside the
 UTXO cache, and usage varies by workload; leave room for Tor, the dashboard,
 Docker, and the host operating system. The OOM killer is not a graceful
-shutdown.
+shutdown. Bitcoin Core's pinned
+[memory-reduction guide](https://github.com/bitcoin/bitcoin/blob/v32.1/doc/reduce-memory.md)
+explains the cache tradeoff and other memory controls. The optional container
+memory cap remains disabled by default; the experiment's temporary caps are
+measurements, not deployment recommendations.
 
 ## CPU
 
-Two CPU cores are the comfortable planning target. One CPU is under evaluation
-and is not yet a validated minimum. Signature validation parallelizes across
-cores during initial sync; after that the node mostly idles.
+Two CPUs are the recommended planning target. The short capped trial supports
+one CPU for a small host within the scope described above. Signature validation
+parallelizes across CPUs during initial sync; after that the node mostly idles.
 
 ## Network
 

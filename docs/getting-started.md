@@ -10,10 +10,10 @@
   so your user can run `docker` without sudo.
 - **`jq`, `openssl`, and `curl`** — configuration and downloads.
 - Hardware per [Hardware Requirements](hardware.md) — the short version:
-  2 CPU cores, 4 GB RAM, and 30–60 GB free on an SSD are the comfortable target
-  for the default pruned node. A 1 CPU/2 GB configuration is still being
-  evaluated and is not yet a validated minimum. An archival node needs about
-  1 TB free today.
+  2 CPUs, 4 GB RAM, and 30–60 GB free on an SSD are the recommended target for
+  the default pruned node. A short trial also worked with the containers limited
+  to a 1 CPU/2 GB budget; full initial sync and heavier loads need longer testing.
+  An archival node needs about 1 TB free today.
 
 Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
