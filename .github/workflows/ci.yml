@@ -90,11 +90,13 @@ jobs:
         run: |
           printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
           chmod 755 /usr/sbin/policy-rc.d
-          apt-get install -y --no-install-recommends ./dist/*.deb
+          package="./dist/bitcoin-starter-stack_$(cat VERSION)_all.deb"
+          apt-get install -y --no-install-recommends "$package"
+          test "$(dpkg-query -W -f='${Version}' bitcoin-starter-stack)" = "$(cat VERSION)"
           test ! -e /etc/bitcoin-starter-stack
           test ! -e /var/lib/bitcoin-starter-stack
           mkdir -p /var/lib/bitcoin-starter-stack
           touch /var/lib/bitcoin-starter-stack/keep
-          apt-get install -y --reinstall ./dist/*.deb
+          apt-get install -y --reinstall "$package"
           apt-get purge -y bitcoin-starter-stack
           test -f /var/lib/bitcoin-starter-stack/keep
