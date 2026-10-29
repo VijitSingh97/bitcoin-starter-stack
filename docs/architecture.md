@@ -18,6 +18,8 @@ flowchart LR
 
     You ==>|"HTTP :80 · loopback or private LAN"| Tor
     Tor ==>|"fixed TCP forward · :8000"| Dashboard
+    You -.->|"optional authenticated RPC · private LAN"| Tor
+    Tor -.->|"fixed TCP relay · :8332"| Bitcoin
     Dashboard -.->|"RPC :8332 (internal)"| Bitcoin
     Bitcoin ==>|"SOCKS5 :9050 (internal)"| Tor
     Tor <==> Net
@@ -46,8 +48,8 @@ that makes `tor_egress` Tor's deterministic default route.
 - **The application network is internal.** Bitcoin and dashboard have no
   external route and use loopback-only DNS, so a proxy bug fails closed.
   Tor alone joins `tor_egress`; its gateway has explicit priority. The host
-  dashboard port terminates in Tor's container and forwards only to the fixed
-  internal dashboard address.
+  dashboard and optional LAN RPC ports terminate in Tor's container and forward
+  only to fixed internal addresses.
 - **Inbound onion service** (`inbound_onion` in `config.json`, on by default):
   bitcoind registers an onion address over tor's cookie-authed control
   port and serves blocks to the network — still no clearnet, no host port,
@@ -57,13 +59,13 @@ that makes `tor_egress` Tor's deterministic default route.
 - **RPC auth is a salted hash.** bitcoind is started with `rpcauth=`; the
   plaintext password exists only in the dashboard container and `.env`.
   The bitcoin health check authenticates with Core's `.cookie` file.
-- **The only published port is the dashboard's `80`.** It binds to
+- **The only published port by default is the dashboard's `80`.** It binds to
   `127.0.0.1` by default; `dashboard.bind_ip` accepts only loopback or RFC1918
-  host addresses for intentional LAN access. RPC (`8332`),
-  SOCKS (`9050`), and the Tor control port (`9051`) are not published to the
-  host; `rpcallowip` restricts RPC to Docker's address space
-  as a second layer. The optional dashboard onion service adds reachability
-  through Tor without another host port.
+  host addresses for intentional LAN access. `bitcoin.rpc_expose` can publish
+  authenticated RPC on a private host address through Tor's TCP relay;
+  `rpcallowip` still restricts Core to Docker's address space. SOCKS (`9050`)
+  and the Tor control port (`9051`) are not published to the host. The optional
+  dashboard onion service adds reachability through Tor without another host port.
 - **Notification egress rides Tor too.** Telegram messages and
   Healthchecks.io pings (both opt-in) go through the tor container's SOCKS
   proxy (`socks5h`, so even DNS resolves through Tor) — enabling alerts

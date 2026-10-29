@@ -21,16 +21,22 @@ All notable changes to this project are documented here. Format follows
   sync setting is removed. Dashboard access binds to loopback or a private IPv4.
 - Starts use preloaded images. Downloads and upgrades require Tor-routed Git
   and Docker; an unavailable or unverified proxy blocks image downloads.
+- Updated the digest-pinned Bitcoin Core image to 32.1, retaining the existing
+  connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
+- Update notices and Telegram release alerts track stack releases only, with
+  notification state preserved across dashboard restarts.
 
 ### Added
 
-- A password-protected notification settings menu with persistent JSON overrides,
-  live updates, masked secrets, and an encrypted onion/localhost management path.
+- A notification settings menu with persistent JSON overrides, live updates,
+  masked secrets, and the dashboard's optional password on LAN or onion access.
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.
 - A public Binance address example for fresh installs, excluded from personal
   totals, with persistent removal and an explicit empty-list opt-out.
+- Opt-in authenticated LAN RPC access for wallet applications, disabled by default.
+- A repository-scoped GitHub App helper for bot-authored commits and pull requests.
 
 ### Fixed
 

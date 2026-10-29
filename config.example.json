@@ -5,7 +5,10 @@
         "prune_mb": 0,
         "inbound_onion": true,
         "blockfilterindex": false,
-        "mem_limit_mb": 0
+        "mem_limit_mb": 0,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 8332
     },
     "dashboard": {
         "password": "",

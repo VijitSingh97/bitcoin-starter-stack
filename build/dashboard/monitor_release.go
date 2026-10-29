@@ -1,0 +1,101 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func (m *Monitor) checkUpdates() {
+	note := ""
+	latestStack := m.latestReleaseTag(stackReleasesURL)
+	if releaseVersion.MatchString(m.releaseBaseline) && latestStack != "" && newer(latestStack, m.releaseBaseline) {
+		note = fmt.Sprintf("stack v%s available (running v%s)", latestStack, m.releaseBaseline)
+		if m.state.notifiedStack != latestStack {
+			m.state.notifiedStack = latestStack
+			m.saveState()
+			m.sendTelegram("🆕 " + note)
+		}
+	}
+
+	m.mu.Lock()
+	m.updateNote = note
+	m.mu.Unlock()
+}
+
+func (m *Monitor) loadState() {
+	b, err := os.ReadFile(m.statePath)
+	if err != nil {
+		return
+	}
+	var state persistedMonitorState
+	if json.Unmarshal(b, &state) == nil && (state.NotifiedStack == "" || releaseVersion.MatchString(state.NotifiedStack)) {
+		m.state.notifiedStack = state.NotifiedStack
+	}
+}
+
+func (m *Monitor) saveState() {
+	b, err := json.Marshal(persistedMonitorState{NotifiedStack: m.state.notifiedStack})
+	if err != nil || writePrivateFileAtomic(m.statePath, append(b, '\n')) != nil {
+		m.writeOutput("Monitor state write failed")
+	}
+}
+
+func (m *Monitor) latestReleaseTag(url string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := m.client.Do(req)
+	if err != nil {
+		m.writeOutput("Release check failed")
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var release struct {
+		Tag string `json:"tag_name"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release) != nil {
+		return ""
+	}
+	return strings.TrimLeft(release.Tag, "v")
+}
+
+func newer(latest, current string) bool {
+	a := numericParts(latest)
+	b := numericParts(current)
+	if len(a) == 0 {
+		return false
+	}
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			return a[i] > b[i]
+		}
+	}
+	return len(a) > len(b)
+}
+
+func numericParts(version string) []uint64 {
+	parts := versionNumber.FindAllString(version, -1)
+	result := make([]uint64, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.ParseUint(part, 10, 64)
+		if err != nil {
+			return nil
+		}
+		result = append(result, n)
+	}
+	return result
+}

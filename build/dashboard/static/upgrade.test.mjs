@@ -44,6 +44,7 @@ test("upgrade control survives live dashboard replacement and keeps pending stat
     createTextNode(text) { return { textContent: text }; },
   };
   let pending = false;
+  let enabled = true;
   const fetch = async (_url, options = {}) => {
     if (options.method === "POST") {
       pending = true;
@@ -51,7 +52,7 @@ test("upgrade control survives live dashboard replacement and keeps pending stat
     }
     return {
       json: async () => ({
-        enabled: true,
+        enabled,
         update: "stack v1.3.0 available (running v1.2.0)",
         pending,
       }),
@@ -84,4 +85,11 @@ test("upgrade control survives live dashboard replacement and keeps pending stat
   await nextTurn();
   assert.match(document.box.textContent, /Upgrade requested/);
   assert.equal(document.box.children.length, 0);
+
+  pending = false;
+  enabled = false;
+  window.dispatchEvent(new Event("live-updated"));
+  await nextTurn();
+  assert.match(document.box.textContent, /stack v1\.3\.0 available/);
+  assert.equal(document.box.children.some((child) => child.tagName === "button"), false);
 });

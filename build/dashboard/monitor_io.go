@@ -1,0 +1,130 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+)
+
+func (m *Monitor) sendTelegram(text string) {
+	m.logEvent(text)
+	settings := m.notificationSettings()
+	if !settings.TelegramEnabled || settings.TelegramBotToken == "" || settings.TelegramChatID == "" {
+		return
+	}
+	payload, err := json.Marshal(map[string]string{
+		"chat_id": settings.TelegramChatID,
+		"text":    "[" + m.nodeName + "] " + text,
+	})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+settings.TelegramBotToken+"/sendMessage", bytes.NewReader(payload))
+	if err != nil {
+		m.writeOutput("Telegram send failed")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := m.client.Do(req)
+	if err != nil {
+		m.writeOutput("Telegram send failed")
+		return
+	}
+	resp.Body.Close()
+}
+
+func (m *Monitor) pingHealthchecks(healthy bool) bool {
+	settings := m.notificationSettings()
+	if !settings.HealthchecksEnabled || settings.HealthchecksURL == "" {
+		return true
+	}
+	endpoint, err := url.Parse(settings.HealthchecksURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil {
+		m.logEvent("healthchecks ping failed: HTTPS URL required")
+		return false
+	}
+	url := settings.HealthchecksURL
+	if !healthy {
+		url += "/fail"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		m.logEvent("healthchecks ping failed: request failed")
+		return false
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		m.logEvent("healthchecks ping failed: request failed")
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		m.logEvent(fmt.Sprintf("healthchecks ping failed: HTTP %d", resp.StatusCode))
+		return false
+	}
+	return true
+}
+func (m *Monitor) logEvent(text string) {
+	m.logMu.Lock()
+	defer m.logMu.Unlock()
+	m.writeOutput(text)
+	if stat, err := os.Stat(m.eventsLog); err == nil && stat.Size() > eventLogCap {
+		if err := rotateEventLog(m.eventsLog); err != nil {
+			m.writeOutput("Event log write failed")
+			return
+		}
+	}
+	f, err := os.OpenFile(m.eventsLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		m.writeOutput("Event log write failed")
+		return
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "%s %s\n", m.now().UTC().Format(time.RFC3339), text); err != nil {
+		m.writeOutput("Event log write failed")
+	}
+}
+
+func rotateEventLog(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), eventLogCap+1)
+	lines := make([]string, 0, 65536)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	closeErr := f.Close()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	lines = lines[len(lines)/2:]
+	var content strings.Builder
+	for _, line := range lines {
+		content.WriteString(line)
+		content.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(content.String()), 0o600)
+}
+
+func (m *Monitor) writeOutput(text string) {
+	if m.output != nil {
+		fmt.Fprintln(m.output, text)
+	}
+}

@@ -34,6 +34,7 @@ echo "$rendered" | grep -q 'DBCACHE: "1234"' || fail "DBCACHE not interpolated"
 echo "$rendered" | grep -q 'PRUNE: "555"' || fail "PRUNE not interpolated"
 echo "$rendered" | grep -q 'INBOUND_ONION: "0"' || fail "INBOUND_ONION default not applied"
 echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION default not applied"
+echo "$rendered" | grep -q 'BITCOIN_RPC_EXPOSE: "0"' || fail "LAN RPC exposure default not applied"
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
@@ -50,7 +51,7 @@ count=$(echo "$rendered" | grep -c 'testpass' || true)
 # All flags must sit on ONE line with the exec: a YAML-induced line break
 # after -conf silently drops them (found the hard way; see tests/test_e2e.sh).
 # shellcheck disable=SC2016 # matching the literal $$-escaped text is the point
-echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS' ||
+echo "$rendered" | grep -qF -- 'exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" -maxconnections=125 -inboundrelaypercent=100 $$NET_ARGS $$ONION_ARGS' ||
   fail "bitcoind exec line is missing runtime-env flags (or they were split onto another line)"
 echo "$rendered" | grep -q -- "-rpcauth=testuser" && fail "credentials baked into rendered command line"
 # Outbound routing is always Tor-only.
@@ -77,6 +78,7 @@ ports=$(echo "$rendered" | grep -c 'published: "80"' || true)
 published=$(echo "$rendered" | grep -c 'published:' || true)
 [ "$ports" = "1" ] || fail "expected dashboard published on 80, got $ports"
 [ "$published" = "1" ] || fail "expected exactly 1 published port, got $published"
+echo "$rendered" | grep -q 'published: "8332"' && fail "default config publishes Bitcoin RPC"
 echo "$rendered" | grep -q 'host_ip: 127.0.0.1' || fail "dashboard does not bind loopback by default"
 tor_port=$(echo "$rendered" | sed -n '/^  tor:$/,/^networks:$/p' | awk '$1 == "host_ip:" { print $2 }')
 [ "$tor_port" = "127.0.0.1" ] || fail "dashboard forwarder port is not owned by Tor"
@@ -84,11 +86,24 @@ echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'host_ip:' &&
   fail "internal dashboard container still publishes a host port"
 echo "$rendered" | sed -n '/^  tor:$/,/^networks:$/p' | grep -q 'nc -z 127.0.0.1 8000' ||
   fail "Tor healthcheck does not cover the dashboard forwarder"
-grep -qF 'socat TCP4-LISTEN:8000,reuseaddr,fork TCP4:172.29.0.27:8000' build/tor/entrypoint.sh ||
+echo "$rendered" | sed -n '/^  tor:$/,/^  bitcoin:$/p' | grep -q 'pids_limit: 100' ||
+  fail "Tor container process limit missing"
+grep -qF 'socat TCP4-LISTEN:8000,reuseaddr,fork,max-children=32 TCP4:172.29.0.27:8000' build/tor/entrypoint.sh ||
   fail "Tor entrypoint does not forward the published port to the fixed dashboard address"
+grep -qF 'socat TCP4-LISTEN:8332,reuseaddr,fork,max-children=32 TCP4:172.29.0.26:8332' build/tor/entrypoint.sh ||
+  fail "Tor entrypoint does not relay opt-in LAN RPC to Core"
 
 lan_rendered=$(DASHBOARD_BIND_IP=192.168.1.117 docker compose --env-file /dev/null config)
 echo "$lan_rendered" | grep -q 'host_ip: 192.168.1.117' || fail "private-LAN dashboard bind was not rendered"
+
+rpc_rendered=$(BITCOIN_RPC_EXPOSE=1 BITCOIN_RPC_BIND_IP=192.168.1.118 BITCOIN_RPC_PORT=18332 \
+  COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml docker compose --env-file /dev/null config)
+echo "$rpc_rendered" | grep -q 'BITCOIN_RPC_EXPOSE: "1"' || fail "RPC relay was not enabled"
+echo "$rpc_rendered" | grep -A5 'target: 8332' | grep -q 'published: "18332"' || fail "custom RPC host port was not rendered"
+echo "$rpc_rendered" | grep -B2 -A5 'target: 8332' | grep -q 'host_ip: 192.168.1.118' || fail "private RPC host bind was not rendered"
+[ "$(echo "$rpc_rendered" | grep -c 'published:' || true)" = "2" ] || fail "RPC override published an unexpected port"
+echo "$rpc_rendered" | sed -n '/^  bitcoin:$/,/^  dashboard:$/p' | grep -q 'published:' &&
+  fail "Bitcoin container publishes RPC directly instead of using the Tor relay"
 
 # Without credentials the stack refuses to start
 if env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD docker compose --env-file /dev/null config >/dev/null 2>&1; then

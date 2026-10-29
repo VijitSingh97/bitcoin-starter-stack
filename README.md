@@ -26,7 +26,7 @@ wallet addresses stay on your node.
   runtime dependencies. The full dashboard used about **8 MiB of working memory**
   in our [mini-1 benchmark](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/c9cdd75/experiments/go-dashboard-results/mini-1-full-port-2026-10-27/README.md).
   Bitcoin Core's memory and chain storage are separate.
-- 🟠 **Full Bitcoin node.** The official Bitcoin Core image (digest-pinned, Dependabot-updated)
+- 🟠 **Full Bitcoin node.** Bitcoin Core in a digest-pinned, Dependabot-updated image,
   validating the full chain, health-checked by Docker — or a **pruned node** in ~30 GB via one
   config key.
 - 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
@@ -35,7 +35,8 @@ wallet addresses stay on your node.
   service by default. See the [privacy model and Tor bootstrap](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
-  add a password and an onion address for remote access. RPC stays inside Docker.
+  add a password and an onion address for remote access. RPC is private by default,
+  with optional authenticated access for wallets on your LAN.
 - 🔑 **Credentials handled properly.** Config renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
   `rpcauth` hash, never the plaintext.
@@ -58,8 +59,8 @@ wallet addresses stay on your node.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
   applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
   with a button from the dashboard; the stack runs the host-side agent for you.
-- 🔭 **Knows when it's stale.** A daily update check (over Tor) surfaces new Bitcoin Core and
-  stack releases on the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
+- 🔭 **Knows when it's stale.** A daily update check (over Tor) surfaces new stack releases on
+  the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
   monitoring you already run.
 
 ## 🚀 Quick Start

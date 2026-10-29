@@ -55,8 +55,8 @@ Everything is optional. Two ways to customize:
 
 - **`./stack init`** — an interactive wizard that asks about a dashboard password
   (Enter generates a strong one, shown once), a Tor onion, one-click upgrades
-  from the dashboard, inbound Tor connections, and pruning. Every prompt has a
-  default you accept by pressing Enter.
+  from the dashboard, inbound Tor connections, optional private-LAN wallet RPC,
+  and pruning. Every prompt has a default you accept by pressing Enter.
 - Or edit `config.json` by hand (copy `config.example.json`) and run
   `./stack apply`. Stick to letters and numbers in any credentials you set.
 

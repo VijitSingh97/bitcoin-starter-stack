@@ -57,9 +57,9 @@ trap cleanup EXIT
 
 # Setup exactly as a user does it. Wizard answers: RPC user/pass Enter
 # (auto-generate), dashboard password e2edash, dashboard onion y, upgrade
-# button n (agent covered by test_upgrade.sh), inbound onion y, prune 1 GB,
+# button n (agent covered by test_upgrade.sh), inbound onion y, LAN RPC n, prune 1 GB,
 # don't start yet.
-printf '\n\ne2edash\ny\nn\ny\n1\nn\n' | ./stack init >/dev/null
+printf '\n\ne2edash\ny\nn\ny\nn\n1\nn\n' | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
 # datadir at the temp dir, bind the dashboard to this host's LAN address, and
 # shrink dbcache for CI-sized runners.
@@ -72,7 +72,7 @@ s.close()
 PY
 )
 jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$lan_ip" \
-  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .dashboard.bind_ip = $ip' \
+  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 | .dashboard.bind_ip = $ip' \
   config.json >config.json.tmp && mv config.json.tmp config.json
 ./configure.sh >/dev/null
 dashboard_url="http://$lan_ip:80"
@@ -93,6 +93,10 @@ docker exec dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*
 # rpcauth accepts the generated plaintext password end to end
 docker exec bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" getblockchaininfo |
   grep -q '"chain"' || fail "RPC rejected the generated password against the rpcauth hash"
+curl --noproxy '*' -fsS --user "$rpc_user:$rpc_pass" -H 'content-type: application/json' \
+  --data-binary '{"jsonrpc":"1.0","id":"e2e","method":"getblockchaininfo","params":[]}' \
+  "http://$lan_ip:18332" | jq -e '.result.chain != null and .error == null' >/dev/null ||
+  fail "LAN RPC relay did not authenticate to Core"
 
 # ...but the plaintext password is nowhere in the bitcoin container's config
 docker inspect bitcoin | grep -q "$rpc_pass" && fail "plaintext RPC password leaked into the bitcoin container"

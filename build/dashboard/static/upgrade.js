@@ -11,7 +11,7 @@ async function refresh() {
   } catch {
     return; // node/dashboard busy — try again next tick
   }
-  if (!s.enabled || (!s.update && !s.pending)) {
+  if (!s.update && !s.pending) {
     box.hidden = true;
     return;
   }
@@ -24,6 +24,7 @@ async function refresh() {
   // an update is available and nothing is pending → offer the button
   box.textContent = "";
   box.appendChild(document.createTextNode(`🆕 ${s.update} `));
+  if (!s.enabled) return;
   const btn = document.createElement("button");
   btn.textContent = "Upgrade now";
   btn.className = "upgrade-btn";

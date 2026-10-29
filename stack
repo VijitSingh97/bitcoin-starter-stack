@@ -29,6 +29,7 @@ env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
 # Writes config.json (only the values you change), then offers to start. Plain
 # `./stack up` needs none of this; it just uses the defaults.
 init() {
+  umask 077
   for tool in jq openssl; do
     command -v "$tool" >/dev/null || {
       echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
@@ -48,25 +49,36 @@ init() {
 
   echo "Setup — press Enter to accept the [default]. Nothing here is required."
   echo
+  yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
   read -r -p "RPC username [bitcoin]: " w_user
   read -rsp "RPC password [Enter = strong random]: " w_pass; echo
   read -rsp "Dashboard web password [Enter = strong random]: " w_dashpass; echo
   if [ -z "$w_dashpass" ]; then
     w_dashpass=$(openssl rand -hex 16)
-    echo "  generated dashboard password: $w_dashpass  (log in with any username — save it)"
+    echo "  generated dashboard password saved in private config.json"
   fi
   read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
   read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
   read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
+  read -r -p "Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] " w_rpc_expose
+  w_rpc_bind_ip=
+  w_rpc_port=
+  if yes "$w_rpc_expose"; then
+    read -r -p "Private LAN address assigned to this host [required]: " w_rpc_bind_ip
+    read -r -p "Host RPC port [8332]: " w_rpc_port
+  fi
   read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
 
-  yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
   cfg=$(jq -n '{}')
   [ -n "$w_user" ] && [ "$w_user" != "bitcoin" ] && cfg=$(jq --arg v "$w_user" '.bitcoin.node_username=$v' <<<"$cfg")
   [ -n "$w_pass" ] && cfg=$(jq --arg v "$w_pass" '.bitcoin.node_password=$v' <<<"$cfg")
   [ -n "$w_dashpass" ] && cfg=$(jq --arg v "$w_dashpass" '.dashboard.password=$v' <<<"$cfg")
   yes "$w_dashonion" && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
   yes "$w_control" && cfg=$(jq '.dashboard.control=true' <<<"$cfg")
+  if yes "$w_rpc_expose"; then
+    cfg=$(jq --arg ip "$w_rpc_bind_ip" '.bitcoin.rpc_expose=true | .bitcoin.rpc_bind_ip=$ip' <<<"$cfg")
+    [ -n "$w_rpc_port" ] && cfg=$(jq --argjson port "$w_rpc_port" '.bitcoin.rpc_port=$port' <<<"$cfg")
+  fi
   # inbound is default-on; only record a deviation when the user declines
   case "$w_inbound" in n | N | no | NO) cfg=$(jq '.bitcoin.inbound_onion=false' <<<"$cfg") ;; esac
   if [ -n "$w_prune_gb" ]; then
@@ -76,10 +88,10 @@ init() {
     esac
   fi
 
-  echo "$cfg" | jq . >config.json
+  printf '%s\n' "$cfg" | jq . >config.json
+  chmod 600 config.json
   echo
-  echo "Wrote config.json:"
-  sed 's/^/  /' config.json
+  echo "Wrote private config.json (credentials hidden; mode 600)."
   echo
   printf "Start the stack now? [Y/n] "
   read -r reply
@@ -218,6 +230,7 @@ do_backup() {
 }
 
 do_restore() {
+  umask 077
   yes=0
   if [ "${1:-}" = "-y" ]; then
     yes=1
@@ -240,8 +253,14 @@ do_restore() {
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   tar xzf "$archive" -C "$tmp"
-  [ -f "$tmp/config.json" ] && cp "$tmp/config.json" config.json && echo "Restored config.json"
+  if [ -f "$tmp/config.json" ]; then
+    chmod 600 config.json 2>/dev/null || true
+    cp "$tmp/config.json" config.json
+    chmod 600 config.json
+    echo "Restored config.json"
+  fi
   if [ -f "$tmp/.env" ]; then
+    chmod 600 .env 2>/dev/null || true
     cp "$tmp/.env" .env && chmod 600 .env && echo "Restored .env"
   fi
   data_dir=$(env_get BITCOIN_DATA_DIR)

@@ -16,6 +16,10 @@ fail() {
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
 grep -q '^BITCOIN_RPC_USER=bitcoin$' "$tmp/.env" || fail "RPC user default is not 'bitcoin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
+grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
+grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default is not off"
+grep -q '^BITCOIN_RPC_BIND_IP=$' "$tmp/.env" || fail "LAN RPC bind default is not empty"
+grep -q '^BITCOIN_RPC_PORT=8332$' "$tmp/.env" || fail "LAN RPC port default not applied"
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied without config"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
@@ -77,6 +81,8 @@ grep -q '^BITCOIN_DBCACHE=3000$' "$tmp/.env" || fail "dbcache default not applie
 grep -q '^BITCOIN_PRUNE=0$' "$tmp/.env" || fail "prune default not applied"
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion should default ON"
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
+grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
+grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
@@ -116,7 +122,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 
 # 10. Custom values are honored
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin": {"node_username": "u", "node_password": "p", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true},
+{"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
  "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
  "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
  "wallets": [{"name": "Cold storage", "key": "zpub6rFR7", "birthday": "2021-01-01"}]}
@@ -126,6 +132,10 @@ grep -q '^BITCOIN_DATA_DIR=./elsewhere$' "$tmp/.env" || fail "custom data_dir no
 grep -q '^BITCOIN_DBCACHE=512$' "$tmp/.env" || fail "custom dbcache not rendered"
 grep -q '^BITCOIN_PRUNE=550$' "$tmp/.env" || fail "custom prune not rendered"
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$tmp/.env" || fail "inbound_onion=true not rendered as 1"
+grep -q '^BITCOIN_RPC_EXPOSE=1$' "$tmp/.env" || fail "rpc_expose=true not rendered as 1"
+grep -q '^BITCOIN_RPC_BIND_IP=192.168.1.118$' "$tmp/.env" || fail "RPC LAN bind not rendered"
+grep -q '^BITCOIN_RPC_PORT=18332$' "$tmp/.env" || fail "RPC host port not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' "$tmp/.env" || fail "RPC compose override not enabled"
 grep -q '^DASHBOARD_PASSWORD=dashpass1$' "$tmp/.env" || fail "dashboard password not rendered"
 grep -q '^DASHBOARD_ONION=1$' "$tmp/.env" || fail "dashboard onion not rendered"
 grep -q '^DASHBOARD_BIND_IP=192.168.1.117$' "$tmp/.env" || fail "dashboard LAN bind not rendered"
@@ -188,6 +198,30 @@ for bind_ip in 0.0.0.0 8.8.8.8 172.15.0.1 172.32.0.1 192.169.1.1 ::1 127.0.0.1/2
 done
 printf '{"dashboard":{"bind_ip":"127.0.0.1\\nDASHBOARD_PASSWORD=x"}}\n' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "newline dashboard bind was accepted"
+
+echo '{"bitcoin":{"rpc_expose":true}}' >"$tmp/config.json"
+cp "$tmp/.env" "$tmp/env.before"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "RPC exposure without a bind address was accepted"
+cmp -s "$tmp/.env" "$tmp/env.before" || fail "invalid RPC exposure changed .env"
+echo '{"bitcoin":{"node_password":"short","rpc_expose":true,"rpc_bind_ip":"192.168.1.117"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "short password was accepted for exposed RPC"
+echo '{"bitcoin":{"node_password":"short"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null || fail "short internal-only RPC password was rejected"
+rm -f "$tmp/.env"
+for bind_ip in 10.1.2.3 172.16.0.1 172.31.255.254 192.168.50.4; do
+  jq -n --arg ip "$bind_ip" '{bitcoin:{rpc_expose:true,rpc_bind_ip:$ip}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null || fail "private RPC bind $bind_ip was rejected"
+done
+for bind_ip in '' 0.0.0.0 127.0.0.1 8.8.8.8 172.15.0.1 172.32.0.1 192.169.1.1 ::1 999.1.1.1 010.0.0.1; do
+  jq -n --arg ip "$bind_ip" '{bitcoin:{rpc_expose:true,rpc_bind_ip:$ip}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unsafe RPC bind $bind_ip was accepted"
+done
+for rpc_port in 0 65536 -1 '"8332x"'; do
+  printf '{"bitcoin":{"rpc_expose":true,"rpc_bind_ip":"192.168.1.117","rpc_port":%s}}\n' "$rpc_port" >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unsafe RPC port $rpc_port was accepted"
+done
+jq -n '{bitcoin:{rpc_expose:true,rpc_bind_ip:"192.168.1.117",rpc_port:80},dashboard:{bind_ip:"192.168.1.117"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "RPC/dashboard host port conflict was accepted"
 
 # inbound_onion defaults ON (encouraged); explicit false opts out
 echo '{"bitcoin": {"inbound_onion": false}}' >"$tmp/config.json"
@@ -263,6 +297,11 @@ if command -v docker >/dev/null; then
   (cd "$tmp" && ./configure.sh) >/dev/null
   docker compose --env-file "$tmp/.env" config >/dev/null 2>&1 ||
     fail "zero-config .env does not render a valid compose config"
+  echo '{"bitcoin":{"node_password":"longrpcpassword1234567890","rpc_expose":true,"rpc_bind_ip":"192.168.1.117","rpc_port":18332}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null
+  rpc_rendered=$(docker compose --env-file "$tmp/.env" config)
+  echo "$rpc_rendered" | grep -A5 'target: 8332' | grep -q 'published: "18332"' ||
+    fail "rendered COMPOSE_FILE did not select the RPC override"
 fi
 
 echo "PASS: test_configure.sh"

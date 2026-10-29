@@ -16,8 +16,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    pids_limit: 100
     environment:
       DASHBOARD_ONION: ${DASHBOARD_ONION:-0}
+      BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
@@ -38,7 +40,7 @@ services:
       - "${DASHBOARD_BIND_IP:-127.0.0.1}:80:8000"
 
   bitcoin:
-    image: bitcoin/bitcoin:31.1@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63
+    image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
     container_name: bitcoin
     user: "1000:1000"
     security_opt:
@@ -83,7 +85,7 @@ services:
         ONION_ARGS=""
         if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi
         NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" -maxconnections=125 -inboundrelaypercent=100 $$NET_ARGS $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped

@@ -48,7 +48,7 @@ read alerts but never change anything.
 | 🟢 **Node recovered** | RPC answering again after a down alert. |
 | ✅ **Sync complete** | Initial block download finished — handy on first run, when it takes days. |
 | 💾 **Disk low** | Free space fell below 50 GB. Re-arms if space is freed. |
-| 🆕 **Update available** | A new Bitcoin Core or stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
+| 🆕 **Update available** | A new stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
 | 🟧 **New block** | The node accepted a new block (synced only). **Off by default** — a synced node finds ~144 a day. Enable with `notifications.alert_new_block: true`. |
 
 Every message is prefixed with the host's name (`NODE_NAME`, the box's

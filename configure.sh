@@ -38,6 +38,9 @@ mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
 # default ON (encouraged): accept inbound over Tor unless explicitly disabled
 inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == false then 0 else 1 end' <<<"$config")
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
+rpc_expose=$(flag '.bitcoin.rpc_expose')
+rpc_bind_ip=$(get '.bitcoin.rpc_bind_ip')
+rpc_port=$(jq -r '.bitcoin.rpc_port // 8332' <<<"$config")
 dashboard_password=$(get '.dashboard.password')
 dashboard_onion=$(flag '.dashboard.onion')
 dashboard_control=$(flag '.dashboard.control')
@@ -62,25 +65,54 @@ check_alnum "node_username" "$rpc_user"
 check_alnum "node_password" "$rpc_password"
 check_alnum "dashboard password" "$dashboard_password"
 
+if [ "$rpc_expose" = "1" ] && ((${#rpc_password} < 24)); then
+  echo "bitcoin.node_password must be at least 24 characters when bitcoin.rpc_expose is true."
+  exit 1
+fi
+
 check_bind_ip() {
-  local ip=$1 a b c d octet
+  local field=$1 ip=$2 allow_loopback=$3 a b c d octet expected="a private IPv4 address"
+  [ "$allow_loopback" = "1" ] && expected="a loopback or private IPv4 address"
   if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-    echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+    echo "$field must be $expected."
     exit 1
   fi
   IFS=. read -r a b c d <<<"$ip"
   for octet in "$a" "$b" "$c" "$d"; do
     if { ((${#octet} > 1)) && [[ "$octet" == 0* ]]; } || ((10#$octet > 255)); then
-      echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+      echo "$field must be $expected."
       exit 1
     fi
   done
-  if ! ((10#$a == 127 || 10#$a == 10 || (10#$a == 172 && 10#$b >= 16 && 10#$b <= 31) || (10#$a == 192 && 10#$b == 168))); then
-    echo "dashboard.bind_ip must be a loopback or private IPv4 address."
+  if ! (((allow_loopback == 1 && 10#$a == 127) || 10#$a == 10 || (10#$a == 172 && 10#$b >= 16 && 10#$b <= 31) || (10#$a == 192 && 10#$b == 168))); then
+    echo "$field must be $expected."
     exit 1
   fi
 }
-check_bind_ip "$dashboard_bind_ip"
+check_bind_ip dashboard.bind_ip "$dashboard_bind_ip" 1
+
+if [ -n "$rpc_bind_ip" ]; then
+  check_bind_ip bitcoin.rpc_bind_ip "$rpc_bind_ip" 0
+elif [ "$rpc_expose" = "1" ]; then
+  echo "bitcoin.rpc_bind_ip is required when bitcoin.rpc_expose is true."
+  exit 1
+fi
+case "$rpc_port" in '' | *[!0-9]*)
+  echo "bitcoin.rpc_port must be a whole number from 1 to 65535."
+  exit 1
+  ;;
+esac
+if ((10#$rpc_port < 1 || 10#$rpc_port > 65535)); then
+  echo "bitcoin.rpc_port must be a whole number from 1 to 65535."
+  exit 1
+fi
+if [ "$rpc_expose" = "1" ] && [ "$rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$rpc_port" = "80" ]; then
+  echo "bitcoin.rpc_port conflicts with the dashboard on $rpc_bind_ip:80."
+  exit 1
+fi
+
+compose_file=docker-compose.yml
+[ "$rpc_expose" = "1" ] && compose_file=docker-compose.yml:docker-compose.rpc.yml
 
 if jq -e '.bitcoin.sync_over_clearnet == true' >/dev/null <<<"$config"; then
   echo "bitcoin.sync_over_clearnet is no longer supported; all public internet traffic must use Tor."
@@ -191,10 +223,14 @@ else
 fi
 
 cat >.env <<EOF
+COMPOSE_FILE=$compose_file
 BITCOIN_RPC_USER=$rpc_user
 BITCOIN_RPC_PASSWORD=$rpc_password
 BITCOIN_RPCAUTH_SALT=$rpcauth_salt
 BITCOIN_RPCAUTH_HASH=$rpcauth_hash
+BITCOIN_RPC_EXPOSE=$rpc_expose
+BITCOIN_RPC_BIND_IP=$rpc_bind_ip
+BITCOIN_RPC_PORT=$rpc_port
 BITCOIN_DATA_DIR=$data_dir
 BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune

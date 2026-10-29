@@ -36,19 +36,29 @@ grep -q "^BITCOIN_RPC_USER=cliuser$" .env || fail "restore did not bring back .e
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l .env | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail "restored .env is not mode 600"
+# shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
+perms=$(ls -l config.json | cut -c1-10)
+[ "$perms" = "-rw-------" ] || fail "restored config.json is not mode 600"
 
 # restore without -y aborts on anything but yes
 echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded without confirmation"
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y control=y inbound=n prune=10 start=n
-printf '\n\nhunter2\ny\ny\nn\n10\nn\n' | ./stack init >/dev/null
+# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y control=y inbound=n RPC=y bind/port prune=10 start=n
+out=$(printf '\n\nhunter2\ny\ny\nn\ny\n192.168.1.117\n18332\n10\nn\n' | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
+printf '%s' "$out" | grep -q 'hunter2' && fail "init printed a dashboard credential"
+# shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
+perms=$(ls -l config.json | cut -c1-10)
+[ "$perms" = "-rw-------" ] || fail "init config.json is not mode 600"
 [ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
 [ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
 [ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "false" ] || fail "init: declining inbound records false (default is on)"
+[ "$(jq -r '.bitcoin.rpc_expose' config.json)" = "true" ] || fail "init: RPC exposure"
+[ "$(jq -r '.bitcoin.rpc_bind_ip' config.json)" = "192.168.1.117" ] || fail "init: RPC bind address"
+[ "$(jq -r '.bitcoin.rpc_port' config.json)" = "18332" ] || fail "init: RPC host port"
 [ "$(jq -r 'has("sync_over_clearnet") or (.bitcoin | has("sync_over_clearnet"))' config.json)" = "false" ] || fail "init: clearnet setting should be absent"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
@@ -57,14 +67,19 @@ printf '\n\nhunter2\ny\ny\nn\n10\nn\n' | ./stack init >/dev/null
 ./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
 grep -q '^BITCOIN_RPC_USER=bitcoin$' .env || fail "wizard config: username default not applied"
 grep -q '^DASHBOARD_PASSWORD=hunter2$' .env || fail "wizard config: dashboard password not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail "wizard config: RPC override not enabled"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
-# overwrite=y user pass dashpass[Enter=generate] onion=n control=n inbound=n prune start=n
-printf 'y\n\n\n\nn\nn\nn\n\nn\n' | ./stack init >/dev/null
+# overwrite=y user pass dashpass[Enter=generate] onion=n control=n inbound=n RPC=n prune start=n
+out=$(printf 'y\n\n\n\nn\nn\nn\nn\n\nn\n' | ./stack init)
+printf '%s' "$out" | grep -qE 'generated dashboard password:|[0-9a-f]{32}' &&
+  fail "init printed a generated dashboard credential"
 jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
   fail "init: empty dashboard password should generate a 32-hex one"
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
+[ "$(jq -r '.bitcoin.rpc_expose // false' config.json)" = "false" ] ||
+  fail "init: RPC exposure must default to off"
 
 # ensure_agent: up/apply must start the agent + install the @reboot cron entry
 # when dashboard.control is on, remove both when off, and defer to systemd.

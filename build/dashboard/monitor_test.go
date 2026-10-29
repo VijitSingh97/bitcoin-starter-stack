@@ -114,13 +114,15 @@ func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 }
 
 func TestUpdateCheckKeepsBadgeAndDoesNotRepeatAlert(t *testing.T) {
-	var telegrams int
+	var telegrams, stackChecks, coreChecks int
 	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
 		case "api.github.com":
 			if strings.Contains(r.URL.Path, "bitcoin-starter-stack") {
+				stackChecks++
 				return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
 			}
+			coreChecks++
 			return response(http.StatusOK, `{"tag_name":"v32.0"}`), nil
 		case "api.telegram.org":
 			telegrams++
@@ -131,17 +133,71 @@ func TestUpdateCheckKeepsBadgeAndDoesNotRepeatAlert(t *testing.T) {
 		}
 	})
 
-	m.checkUpdates("/Satoshi:31.1.0/")
-	m.checkUpdates("/Satoshi:31.1.0/")
-	want := "stack v1.3.0 available (running v1.2.0); Bitcoin Core 32.0 available (running 31.1.0)"
+	m.checkUpdates()
+	m.checkUpdates()
+	want := "stack v1.3.0 available (running v1.2.0)"
 	if got := m.UpdateNote(); got != want {
 		t.Fatalf("UpdateNote() = %q, want %q", got, want)
 	}
-	if telegrams != 2 {
-		t.Fatalf("telegram sends = %d, want 2", telegrams)
+	if telegrams != 1 {
+		t.Fatalf("telegram sends = %d, want 1", telegrams)
+	}
+	if stackChecks != 2 || coreChecks != 0 {
+		t.Fatalf("release checks = stack %d, Core %d", stackChecks, coreChecks)
 	}
 	if newer("31.1", "31.1.0") || newer("1.12.0", "1.12.1") || !newer("32.0", "31.1.0") {
 		t.Fatal("numeric version ordering changed")
+	}
+}
+
+func TestUpdateCheckUsesBakedBaselineAndPersistsAlert(t *testing.T) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(imageDirectory, "VERSION"), []byte("1.31.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(imageDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(workingDirectory) })
+
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:secret")
+	t.Setenv("TELEGRAM_CHAT_ID", "42")
+	stateDir := t.TempDir()
+	telegrams := 0
+	handler := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host {
+		case "api.github.com":
+			return response(http.StatusOK, `{"tag_name":"v1.32.0"}`), nil
+		case "api.telegram.org":
+			telegrams++
+			return response(http.StatusOK, ""), nil
+		default:
+			t.Fatalf("unexpected host %q", r.URL.Host)
+			return nil, nil
+		}
+	})
+	m := NewMonitor("7101c3a", t.TempDir(), stateDir)
+	m.client = &http.Client{Transport: handler}
+	m.output = io.Discard
+	m.checkUpdates()
+	if got, want := m.UpdateNote(), "stack v1.32.0 available (running v1.31.1)"; got != want {
+		t.Fatalf("UpdateNote() = %q, want %q", got, want)
+	}
+
+	legacy := []byte(`{"notified_stack":"1.32.0","notified_core":"32.0"}`)
+	if err := os.WriteFile(filepath.Join(stateDir, "monitor_state.json"), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewMonitor("7101c3a", t.TempDir(), stateDir)
+	restarted.client = &http.Client{Transport: handler}
+	restarted.output = io.Discard
+	restarted.checkUpdates()
+	if telegrams != 1 {
+		t.Fatalf("telegram sends across restart = %d, want 1", telegrams)
 	}
 }
 

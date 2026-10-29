@@ -17,6 +17,15 @@ Browser. Do not forward the LAN dashboard through a router or reverse proxy.
 The host port is owned by the Tor container and forwarded to the dashboard's
 fixed internal address; the dashboard itself stays on the internal network.
 
+Optional LAN wallet RPC uses the same boundary: a private host address on the
+Tor container relays authenticated TCP to Core's fixed internal address. The
+Bitcoin container keeps no host port or external route. The listener is absent
+unless `bitcoin.rpc_expose` is enabled; public, wildcard, loopback, and IPv6
+binds are rejected. RPC is unencrypted, so keep it on a trusted LAN and do not
+forward it through a router. Exposed RPC requires a password of at least 24
+characters, and each host relay accepts at most 32 concurrent connections. See
+[LAN wallet RPC](configuration.md#lan-wallet-rpc-opt-in).
+
 ## Downloads and upgrades
 
 Starting or applying the stack uses only images already present locally, with
