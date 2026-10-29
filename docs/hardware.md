@@ -3,6 +3,10 @@
 Reference deployment: a 4-core mini PC with 8 GB RAM and an NVMe SSD
 running Ubuntu Server 24.04.
 
+For current deployment planning, use 2 CPU cores and 4 GB RAM as a comfortable
+target. A 1 CPU/2 GB configuration is being evaluated; benchmark results are
+still pending, so it is not yet a validated minimum.
+
 ## Disk
 
 The default keeps 10 GB of recent block files after validating the whole chain.
@@ -20,25 +24,28 @@ headroom shrink.
 
 ## RAM
 
-8 GB is comfortable. The main consumer is Bitcoin Core's UTXO cache,
-controlled by `dbcache_mb` in `config.json` (default **3000**):
+Fresh installs use a conservative **128 MiB** Bitcoin Core UTXO cache, controlled
+by `dbcache_mb` in `config.json`. Existing installs keep their configured or
+previously rendered value. Larger caches are optional tuning that can speed up
+initial sync and reindexing:
 
-| System RAM | Suggested `dbcache_mb` |
+| System RAM | `dbcache_mb` guidance |
 |---|---|
-| 4 GB | 1000 |
-| 8 GB | 3000 (default) |
-| 16 GB+ | 6000 — speeds up initial sync noticeably |
+| 2 GB evaluation target | Keep the 128 MiB default while evaluation is in progress. |
+| 4 GB comfortable target | Start with 128 MiB; raise it only if faster initial sync is worth the extra memory. |
+| 8 GB reference host | 128 MiB remains the default; 3000 MiB is an optional initial-sync tuning value. |
+| 16 GB+ | Larger values such as 6000 MiB are optional initial-sync tuning. |
 
-Larger is only better during initial block download and reindex; once
-synced, steady-state usage is far lower. Don't set it near your total RAM —
-Bitcoin Core needs overhead beyond the cache, and the OOM killer is not a
-graceful shutdown.
+Don't set the cache near total RAM. Bitcoin Core also uses memory outside the
+UTXO cache, and usage varies by workload; leave room for Tor, the dashboard,
+Docker, and the host operating system. The OOM killer is not a graceful
+shutdown.
 
 ## CPU
 
-Anything 4-core from the last decade is fine. Signature validation
-parallelizes across cores during initial sync; after that the node mostly
-idles.
+Two CPU cores are the comfortable planning target. One CPU is under evaluation
+and is not yet a validated minimum. Signature validation parallelizes across
+cores during initial sync; after that the node mostly idles.
 
 ## Network
 

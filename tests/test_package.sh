@@ -141,6 +141,7 @@ grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wi
 env_file=$state_dir/.env
 [ -f "$env_file" ] || fail "generated state is outside the package state directory"
 grep -q "^BITCOIN_DATA_DIR=$data_root/bitcoin$" "$env_file" || fail "data path is outside the package data directory"
+grep -q '^BITCOIN_DBCACHE=128$' "$env_file" || fail "fresh package install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$env_file" || fail "fresh package install is not pruned to 10000 MB"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$env_file" || fail "fresh package install exposed RPC"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$env_file" || fail "fresh package install enabled an optional Compose override"
@@ -157,6 +158,10 @@ grep -q -- "--project-name bitcoin-starter-stack-apt" "$log" || fail "package Co
 grep -q -- "--env-file $env_file" "$log" || fail "Compose did not use package state env"
 grep -q -- "-f $runtime/docker-compose.yml up -d" "$log" || fail "Compose did not use immutable payload"
 grep -q -- "-f $runtime/docker-compose.rpc.yml" "$log" && fail "default package startup loaded the RPC override"
+
+sed -i 's/^BITCOIN_DBCACHE=.*/BITCOIN_DBCACHE=512/' "$env_file"
+"$wrapper" apply >/dev/null
+grep -q '^BITCOIN_DBCACHE=512$' "$env_file" || fail "existing package dbcache was replaced"
 
 rm -f "$env_file"
 printf '%s\n' '{"bitcoin":{"rpc_expose":true,"rpc_bind_ip":"192.168.1.117","rpc_port":18332},"wallets":[{"name":"Configured","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo"}]}' >"$config_dir/config.json"

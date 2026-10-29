@@ -8,6 +8,8 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- Fresh installs default Bitcoin Core's UTXO cache to 128 MiB. Existing installs
+  retain their rendered cache setting when no explicit override is configured.
 - Replaced the Python dashboard runtime with a standard-library Go server while
   retaining the Python reference tests and shared HTTP parity checks.
 - Incomplete wallet imports display pending history above the block tower.

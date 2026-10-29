@@ -2,7 +2,7 @@
     "bitcoin": {
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
-        "dbcache_mb": 3000,
+        "dbcache_mb": 128,
         "prune_mb": 10000,
         "inbound_onion": false,
         "blockfilterindex": false,

@@ -58,7 +58,12 @@ if [ -z "$data_dir" ]; then
     data_dir=./data/bitcoin
   fi
 fi
-dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
+dbcache=$(jq -r '.bitcoin.dbcache_mb // empty' <<<"$config")
+[ -n "$dbcache" ] || {
+  dbcache=$(sed -n 's/^BITCOIN_DBCACHE=//p' "$env_file" 2>/dev/null || true)
+  [ -n "$dbcache" ] || [ ! -f "$env_file" ] || dbcache=3000
+}
+[ -n "$dbcache" ] || dbcache=128
 prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$config")
 [ -n "$prune" ] || {
   prune=$(sed -n 's/^BITCOIN_PRUNE=//p' "$env_file" 2>/dev/null || true)

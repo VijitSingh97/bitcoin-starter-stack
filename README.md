@@ -70,9 +70,11 @@ public internet traffic; your wallet addresses stay on your node.
 ## 🚀 Fresh install
 
 You need Ubuntu Server 24.04, Docker Engine with Compose 2.33.1 or newer,
-`jq`, `openssl`, and `curl`; an SSD with 30–60 GB free; and 8 GB RAM. The
-default node validates the entire chain, keeps 10 GB of recent block files, and
-uses about 30–60 GB in total. See [Hardware Requirements](docs/hardware.md).
+`jq`, `openssl`, and `curl`; an SSD with 30–60 GB free; and a comfortable target
+of 2 CPU cores and 4 GB RAM. A 1 CPU/2 GB configuration is still being evaluated
+and is not yet a validated minimum. The default node validates the entire chain,
+keeps 10 GB of recent block files, and uses about 30–60 GB in total. See
+[Hardware Requirements](docs/hardware.md).
 
 ### 1. Install, then run the wizard
 

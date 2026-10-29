@@ -28,7 +28,7 @@ shows the overridable settings with their defaults:
     "bitcoin": {
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
-        "dbcache_mb": 3000,
+        "dbcache_mb": 128,
         "prune_mb": 10000,
         "inbound_onion": false,
         "blockfilterindex": false,
@@ -64,11 +64,11 @@ shows the overridable settings with their defaults:
 | `bitcoin.node_username` | `admin` | RPC username used by the dashboard and optional LAN wallet connections. Letters and numbers only. |
 | `bitcoin.node_password` | auto-generated | Shared RPC and dashboard password on fresh installs. Existing explicit or rendered credentials remain unchanged. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
 | `bitcoin.data_dir` | `./data/bitcoin` (source), `/var/lib/bitcoin-starter-stack/data/bitcoin` (APT) | Where the blockchain lives on the host. Relative source paths resolve from the repo root. |
-| `bitcoin.dbcache_mb` | `3000` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). |
+| `bitcoin.dbcache_mb` | `128` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). Existing installs keep their rendered cache setting when this key is omitted; the Compose fallback remains 3000 for older `.env` files that predate this setting. |
 | `bitcoin.prune_mb` | `10000` | Keeps about 10 GB of recent block files after full validation. Existing explicit configuration and rendered state remain unchanged. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node accepts inbound connections and serves available blocks with no IP exposure. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | Advanced archival-node compatibility setting. It is incompatible with pruning and is not needed for the default pruned watch-only balance scan. |
-| `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM — worth setting on a RAM-tight box. **Size it above `dbcache_mb`**: leave ~1.5–2 GB of headroom for bitcoind's working set (e.g. on an 8 GB box with `dbcache_mb: 3000`, `5000` is reasonable). Too low and bitcoind gets OOM-killed and restart-loops; `configure.sh` warns if it's not above `dbcache_mb`. |
+| `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM. **Size it above `dbcache_mb`** and leave additional room for Core's workload-dependent memory outside the cache. There is no universal fixed margin; monitor actual usage because a low cap can make bitcoind restart-loop. `configure.sh` warns if the cap is not above `dbcache_mb`. |
 | `bitcoin.rpc_expose` | `false` | `true` exposes authenticated Bitcoin RPC to a trusted private LAN through the Tor container's TCP relay. See [LAN wallet RPC](#lan-wallet-rpc-opt-in). |
 | `bitcoin.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host for the opt-in RPC listener. Required when `rpc_expose` is true. Public, wildcard, loopback, malformed, and IPv6 addresses are rejected. |
 | `bitcoin.rpc_port` | `8332` | Host port for the opt-in RPC listener (`1`–`65535`). The internal Core RPC port remains `8332`. |
