@@ -44,7 +44,7 @@ read alerts but never change anything.
 
 | Alert | When it fires |
 |---|---|
-| 🚀 **Monitor online** | The dashboard started — confirms the bot works after setup. |
+| 🚀 **Monitor online** | The dashboard started with an already-synced node — confirms the bot works after setup. |
 | 🔴 **Node down** | RPC unreachable for 3 consecutive minutes. |
 | 🟢 **Node recovered** | RPC answering again after a down alert. |
 | ✅ **Sync complete** | Initial block download finished — handy on first run, when it takes days. |
@@ -54,6 +54,10 @@ read alerts but never change anything.
 
 Every message is prefixed with the host's name (`NODE_NAME`, the box's
 hostname by default), so several nodes can share one chat.
+
+Automatic Telegram alerts stay quiet during initial sync. When syncing
+finishes, the bot sends the single ✅ sync-complete message; normal node,
+disk, release, and optional new-block alerts begin after that.
 
 ### 1. Create a bot and get its token
 
@@ -77,7 +81,8 @@ is positive.
 }
 ```
 
-`./stack apply`, and you'll get the 🚀 message within a minute.
+`./stack apply`, and an already-synced node sends the 🚀 message within a
+minute. A new node stays quiet until it sends ✅ sync complete.
 
 > NOTE: The bot token can send messages as your bot if leaked, but it can't
 > read other chats or touch the node. Server-configured tokens live in the

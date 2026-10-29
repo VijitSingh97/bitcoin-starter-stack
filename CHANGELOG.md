@@ -25,6 +25,8 @@ All notable changes to this project are documented here. Format follows
   connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
 - Update notices and Telegram release alerts track stack releases only, with
   notification state preserved across dashboard restarts.
+- Automatic Telegram alerts stay quiet during initial sync, then send the
+  existing one-time sync-complete message when the node is ready.
 
 ### Added
 

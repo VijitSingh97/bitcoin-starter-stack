@@ -67,17 +67,51 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 	m.tick(nil, nil)
 	m.tick(nil, nil)
 	m.tick(nil, nil)
+	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(200)}, nil)
 	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(900000)}, nil)
 	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(900001)}, nil)
 
 	want := []string{
-		"[alice] 🔴 node RPC unavailable for 3 minutes while initial sync was in progress",
-		"[alice] 🟢 node recovered — RPC is answering again",
 		"[alice] ✅ initial sync complete at height 900000",
 		"[alice] 🟧 new block 900001",
 	}
 	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("messages:\n%s\nwant:\n%s", strings.Join(messages, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUnknownStartupAndInitialSyncSuppressAutomaticTelegram(t *testing.T) {
+	var telegrams int
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host {
+		case "api.github.com":
+			return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
+		case "api.telegram.org":
+			telegrams++
+			return response(http.StatusOK, `{"ok":true}`), nil
+		default:
+			t.Fatalf("unexpected host %q", r.URL.Host)
+			return nil, nil
+		}
+	})
+	m.diskFreeGB = func(string) (float64, error) { return 40, nil }
+
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.tick(nil, nil)
+	m.state.ticks = 0
+	m.tick(map[string]any{"blocks": float64(1)}, map[string]any{})
+	m.state.ticks = 0
+	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, map[string]any{})
+
+	if telegrams != 0 {
+		t.Fatalf("automatic Telegram sends during unknown startup or sync = %d", telegrams)
+	}
+	if got := m.UpdateNote(); got != "stack v1.3.0 available (running v1.2.0)" {
+		t.Fatalf("silent release note = %q", got)
+	}
+	if m.state.notifiedStack != "" {
+		t.Fatalf("silent release was marked notified: %q", m.state.notifiedStack)
 	}
 }
 
@@ -103,6 +137,7 @@ func TestOperationalAlertsRetryUntilDelivered(t *testing.T) {
 		}
 	})
 
+	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
 	m.tick(nil, nil)
 	m.tick(nil, nil)
 	m.tick(nil, nil)
@@ -172,6 +207,36 @@ func TestSyncAndNewBlockAlertsRetryUntilDelivered(t *testing.T) {
 				t.Fatalf("retry messages = %#v, want two %q", messages, test.want)
 			}
 		})
+	}
+}
+
+func TestSyncCompleteRetryWaitsForConfirmedCompletedState(t *testing.T) {
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages = append(messages, payload.Text)
+		if len(messages) == 1 {
+			return response(http.StatusBadGateway, `{"ok":false}`), nil
+		}
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.settings.AlertNewBlock = false
+
+	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
+	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(200)}, nil)
+	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(201)}, nil)
+	m.tick(map[string]any{"blocks": float64(202)}, nil)
+	if len(messages) != 1 {
+		t.Fatalf("sync completion retried without a confirmed completed state: %#v", messages)
+	}
+	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(203)}, nil)
+
+	want := "[alice] ✅ initial sync complete"
+	if len(messages) != 2 || !strings.Contains(messages[0], want) || !strings.Contains(messages[1], want) {
+		t.Fatalf("sync completion retries = %#v", messages)
 	}
 }
 
@@ -465,6 +530,82 @@ func TestRunSendsOnlineAndStopsWithContext(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Run did not stop after cancellation")
+	}
+}
+
+func TestRunDoesNotSendOnlineDuringInitialSync(t *testing.T) {
+	var telegrams atomic.Int32
+	m := configuredMonitor(t, func(*http.Request) (*http.Response, error) {
+		telegrams.Add(1)
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.tickEvery = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx, func() map[string]any { return map[string]any{"initialblockdownload": true} }, nil)
+		close(done)
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+	if got := telegrams.Load(); got != 0 {
+		t.Fatalf("initial sync Telegram sends = %d", got)
+	}
+}
+
+func TestRunSyncsWithoutOnlineAndSendsOneCompletion(t *testing.T) {
+	messages := make(chan string, 4)
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages <- payload.Text
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.tickEvery = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx, func() map[string]any {
+			switch calls.Add(1) {
+			case 1:
+				return map[string]any{"initialblockdownload": true, "blocks": float64(100)}
+			case 2:
+				return map[string]any{"initialblockdownload": false, "blocks": float64(200)}
+			default:
+				<-ctx.Done()
+				return nil
+			}
+		}, nil)
+		close(done)
+	}()
+
+	select {
+	case got := <-messages:
+		if got != "[alice] ✅ initial sync complete at height 200" {
+			t.Fatalf("sync transition message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("sync completion message was not sent")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+	select {
+	case extra := <-messages:
+		t.Fatalf("unexpected extra sync transition message: %q", extra)
+	default:
 	}
 }
 

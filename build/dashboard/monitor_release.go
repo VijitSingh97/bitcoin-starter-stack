@@ -13,11 +13,15 @@ import (
 )
 
 func (m *Monitor) checkUpdates() {
+	m.checkUpdatesWithNotification(true)
+}
+
+func (m *Monitor) checkUpdatesWithNotification(notify bool) {
 	note := ""
 	latestStack := m.latestReleaseTag(stackReleasesURL)
 	if releaseVersion.MatchString(m.releaseBaseline) && latestStack != "" && newer(latestStack, m.releaseBaseline) {
 		note = fmt.Sprintf("stack v%s available (running v%s)", latestStack, m.releaseBaseline)
-		if m.state.notifiedStack != latestStack {
+		if notify && m.state.notifiedStack != latestStack {
 			if m.sendTelegram("🆕 " + note) {
 				m.state.notifiedStack = latestStack
 				m.saveState()
