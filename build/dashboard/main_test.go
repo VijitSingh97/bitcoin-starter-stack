@@ -402,6 +402,31 @@ func TestServeHTTPServersStopsAllListeners(t *testing.T) {
 	}
 }
 
+func TestDashboardWorkersDrainWhenServerBindFails(t *testing.T) {
+	a, _ := testApp(t, &rpcFixture{}, "")
+	blocked := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	a.rpc.client = blocked
+	a.prices.client = blocked
+	a.monitor.client = blocked
+	a.monitor.output = io.Discard
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runDashboardServers(ctx, cancel, a, []*http.Server{{Addr: "invalid address"}})
+	}()
+	select {
+	case err := <-done:
+		if err == nil || ctx.Err() == nil {
+			t.Fatalf("bind failure did not stop workers: err=%v context=%v", err, ctx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background workers did not drain after bind failure")
+	}
+}
+
 func TestRPCRejectsInvalidResponses(t *testing.T) {
 	cases := []struct {
 		name, body string
@@ -830,8 +855,11 @@ func TestStartupProvisionsCurrentRosterAfterRPCBecomesAvailable(t *testing.T) {
 	})}
 	a.monitor.output = io.Discard
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	a.startBackground(ctx)
+	done := a.startBackground(ctx)
+	defer func() {
+		cancel()
+		<-done
+	}()
 	select {
 	case <-fixture.chainStarted:
 	case <-time.After(time.Second):
@@ -881,12 +909,15 @@ func TestStartupMarksWalletsPendingBeforeWorkers(t *testing.T) {
 	})}
 	a.prices.url = "https://provider.test/prices"
 	ctx, cancel := context.WithCancel(context.Background())
-	a.startBackground(ctx)
+	done := a.startBackground(ctx)
+	defer func() {
+		cancel()
+		<-done
+	}()
 	_, pending := a.watch.snapshot()
 	if !pending[watchKeyID(entry.Key)] {
 		t.Fatal("startup wallet was not marked pending synchronously")
 	}
-	cancel()
 }
 
 func TestPriceCacheStartsWithBackgroundWorkers(t *testing.T) {
@@ -899,13 +930,16 @@ func TestPriceCacheStartsWithBackgroundWorkers(t *testing.T) {
 	})}
 	a.prices.url = "https://provider.test/prices"
 	ctx, cancel := context.WithCancel(context.Background())
-	a.startBackground(ctx)
+	done := a.startBackground(ctx)
+	defer func() {
+		cancel()
+		<-done
+	}()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("price cache did not start")
 	}
-	cancel()
 }
 
 func TestPriceWidgetLivesInsideStatusCard(t *testing.T) {

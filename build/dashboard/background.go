@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"math"
+	"sync"
 	"time"
 )
 
@@ -18,9 +19,17 @@ func (a *app) recordFee(value float64) {
 	}
 }
 
-func (a *app) startBackground(ctx context.Context) {
+func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	a.ctx = ctx
-	go a.scanner.run(ctx)
+	var workers sync.WaitGroup
+	start := func(worker func()) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			worker()
+		}()
+	}
+	start(func() { a.scanner.run(ctx) })
 	entries := a.watch.Entries()
 	for _, entry := range entries {
 		a.watch.SetPending(entry.Key, true)
@@ -30,31 +39,37 @@ func (a *app) startBackground(ctx context.Context) {
 		return result
 	}
 	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
-	go a.prices.Run(ctx)
-	go a.monitor.Run(ctx, chain, network)
-	go a.every(ctx, time.Minute, func(ctx context.Context) {
-		var info blockchainInfo
-		if a.rpc.call(ctx, "getblockchaininfo", nil, &info) != nil || info.InitialBlockDownload {
-			return
-		}
-		var estimate feeEstimate
-		if a.rpc.call(ctx, "estimatesmartfee", []any{1}, &estimate) == nil && estimate.FeeRate != nil {
-			a.recordFee(math.RoundToEven(*estimate.FeeRate*1000000) / 10)
-		}
+	start(func() { a.prices.Run(ctx) })
+	start(func() { a.monitor.Run(ctx, chain, network) })
+	start(func() {
+		a.every(ctx, time.Minute, func(ctx context.Context) {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) != nil || info.InitialBlockDownload {
+				return
+			}
+			var estimate feeEstimate
+			if a.rpc.call(ctx, "estimatesmartfee", []any{1}, &estimate) == nil && estimate.FeeRate != nil {
+				a.recordFee(math.RoundToEven(*estimate.FeeRate*1000000) / 10)
+			}
+		})
 	})
-	go a.every(ctx, 10*time.Minute, func(context.Context) {
-		info := chain()
-		if info != nil && info["initialblockdownload"] != true {
-			a.watch.Sample(a.walletRPC)
-		}
+	start(func() {
+		a.every(ctx, 10*time.Minute, func(context.Context) {
+			info := chain()
+			if info != nil && info["initialblockdownload"] != true {
+				a.watch.Sample(a.walletRPC)
+			}
+		})
 	})
-	go a.every(ctx, 30*time.Second, func(ctx context.Context) {
-		var info blockchainInfo
-		if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
-			a.scanner.refresh(a.watch.Entries(), info)
-		}
+	start(func() {
+		a.every(ctx, 30*time.Second, func(ctx context.Context) {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
+				a.scanner.refresh(a.watch.Entries(), info)
+			}
+		})
 	})
-	go func() {
+	start(func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -72,7 +87,13 @@ func (a *app) startBackground(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
+	})
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
 	}()
+	return done
 }
 
 func (a *app) provision(entry WatchEntry, pruned bool) {

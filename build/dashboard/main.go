@@ -117,6 +117,14 @@ func serveHTTPServers(ctx context.Context, servers []*http.Server) error {
 	return firstErr
 }
 
+func runDashboardServers(ctx context.Context, stop func(), a *app, servers []*http.Server) error {
+	backgroundDone := a.startBackground(ctx)
+	err := serveHTTPServers(ctx, servers)
+	stop()
+	<-backgroundDone
+	return err
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		client := &http.Client{Timeout: 5 * time.Second}
@@ -138,8 +146,6 @@ func main() {
 		log.Fatal(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	a.startBackground(ctx)
 	handler := a.routes()
 	servers := []*http.Server{{Addr: ":" + cfg.port, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second}}
 	if cfg.settingsPort != "" {
@@ -147,7 +153,7 @@ func main() {
 		logger.Printf("onion settings listener enabled on :%s", cfg.settingsPort)
 	}
 	logger.Printf("dashboard listening on :%s", cfg.port)
-	if err := serveHTTPServers(ctx, servers); err != nil {
+	if err := runDashboardServers(ctx, stop, a, servers); err != nil {
 		log.Fatal(err)
 	}
 }

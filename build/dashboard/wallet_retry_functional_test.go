@@ -112,9 +112,13 @@ func TestWatchImportFailureRecoversThroughDashboardAfterRestart(t *testing.T) {
 		dashboard.monitor.client = blocked
 		dashboard.monitor.output = io.Discard
 		ctx, cancel := context.WithCancel(t.Context())
-		dashboard.startBackground(ctx)
-		t.Cleanup(cancel)
-		return dashboard, cancel
+		done := dashboard.startBackground(ctx)
+		stop := func() {
+			cancel()
+			<-done
+		}
+		t.Cleanup(stop)
+		return dashboard, stop
 	}
 	first, stopFirst := newDashboard()
 	req := httptest.NewRequest(http.MethodPost, "/api/watch", strings.NewReader(`{"name":"Cold","key":"`+parityZpub+`","birthday":"2021-01-01"}`))
