@@ -16,10 +16,15 @@ import (
 )
 
 func settingsRequest(handler http.Handler, method, password, body string, csrf bool) *httptest.ResponseRecorder {
+	return settingsRequestHost(handler, method, password, body, csrf, "mini-1.local")
+}
+
+func settingsRequestHost(handler http.Handler, method, password, body string, csrf bool, host string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
 	req.RemoteAddr = "192.0.2.10:12345"
-	req.Host = "spoofed-address.onion"
+	req.Host = host
 	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "mini-1.local")
 	if password != "" {
 		req.SetBasicAuth("dashboard", password)
 	}
@@ -31,16 +36,33 @@ func settingsRequest(handler http.Handler, method, password, body string, csrf b
 	return w
 }
 
-func TestSettingsAPIRequiresPasswordAndNeverReturnsSecrets(t *testing.T) {
+func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
+	onion := strings.Repeat("a", 56) + ".onion"
+	for _, host := range []string{
+		"localhost", "localhost:80", "mini-1", "mini-1.local", "mini-1.local:80", "node.home.arpa",
+		"127.0.0.1", "192.168.1.117", "192.168.1.117:80", "10.0.0.2", "172.16.0.2", "[::1]:80", "[fd00::1]", onion,
+	} {
+		if !passwordlessSettingsHostAllowed(host) {
+			t.Errorf("host %q rejected", host)
+		}
+	}
+	for _, host := range []string{
+		"attacker.example", "8.8.8.8", "8.8.8.8:80", "[2001:4860:4860::8888]:80",
+		"134744072", "0x08080808", "01002004010",
+		"user@localhost", "localhost/path", "localhost?query", "localhost?", "localhost#", "localhost:", "localhost:65536",
+		"-node.local", "node..local", "short.onion", "[::1", "[::1]:",
+	} {
+		if passwordlessSettingsHostAllowed(host) {
+			t.Errorf("host %q allowed", host)
+		}
+	}
+}
+
+func TestSettingsAPINeverReturnsSecretsAndHonorsConfiguredPassword(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:top-secret")
 	t.Setenv("TELEGRAM_CHAT_ID", "-10042")
 	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid")
 	t.Setenv("ALERT_NEW_BLOCK", "1")
-
-	_, noPasswordHandler := testApp(t, &rpcFixture{}, "")
-	if got := settingsRequest(noPasswordHandler, http.MethodGet, "", "", false); got.Code != http.StatusForbidden {
-		t.Fatalf("GET without configured password = %d, want 403", got.Code)
-	}
 
 	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
 	if got := settingsRequest(handler, http.MethodGet, "", "", false); got.Code != http.StatusUnauthorized {
@@ -69,7 +91,56 @@ func TestSettingsAPIRequiresPasswordAndNeverReturnsSecrets(t *testing.T) {
 	}
 }
 
-func TestSettingsLANWriteRequiresAuthAndCSRFPersistsAcrossRestart(t *testing.T) {
+func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *testing.T) {
+	a, handler := testApp(t, &rpcFixture{}, "")
+	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true}`
+	if got := settingsRequest(handler, http.MethodPost, "", body, false); got.Code != http.StatusForbidden {
+		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
+	}
+	if a.monitor.settingsOverridden {
+		t.Fatal("rejected LAN POST changed settings")
+	}
+	post := settingsRequest(handler, http.MethodPost, "", body, true)
+	if post.Code != http.StatusOK {
+		t.Fatalf("passwordless LAN POST = %d: %s", post.Code, post.Body.String())
+	}
+	if strings.Contains(post.Body.String(), "passwordless-secret") {
+		t.Fatalf("passwordless LAN POST leaked a secret: %s", post.Body.String())
+	}
+
+	root := filepath.Dir(sourceFile(t))
+	restarted, err := newApp(a.cfg, a.rpc, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := settingsRequestHost(restarted.routes(), http.MethodGet, "", "", false, "192.168.1.117")
+	var view map[string]any
+	if strings.Contains(get.Body.String(), "passwordless-secret") {
+		t.Fatalf("restarted LAN GET leaked a secret: %s", get.Body.String())
+	}
+	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
+		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
+	}
+	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token_set"] != true || view["alert_new_block"] != true {
+		t.Fatalf("restarted LAN settings view = %#v", view)
+	}
+}
+
+func TestSettingsPasswordlessPublicHostRejected(t *testing.T) {
+	a, handler := testApp(t, &rpcFixture{}, "")
+	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		response := settingsRequestHost(handler, method, "", body, true, "attacker.example")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "local dashboard address") {
+			t.Fatalf("public-host LAN %s = %d: %s", method, response.Code, response.Body.String())
+		}
+	}
+	if a.monitor.settingsOverridden {
+		t.Fatal("forwarded local host bypassed the public-host guard")
+	}
+}
+
+func TestSettingsConfiguredPasswordProtectsLANWrites(t *testing.T) {
 	a, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
 	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
 	if got := settingsRequest(handler, http.MethodPost, "", body, true); got.Code != http.StatusUnauthorized {
@@ -78,29 +149,11 @@ func TestSettingsLANWriteRequiresAuthAndCSRFPersistsAcrossRestart(t *testing.T) 
 	if got := settingsRequest(handler, http.MethodPost, "wrong-password", body, true); got.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong-password LAN POST = %d, want 401", got.Code)
 	}
-	if got := settingsRequest(handler, http.MethodPost, "dashboard-secret", body, false); got.Code != http.StatusForbidden {
-		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
-	}
 	if a.monitor.settingsOverridden {
 		t.Fatal("rejected LAN POST changed settings")
 	}
-	post := settingsRequest(handler, http.MethodPost, "dashboard-secret", body, true)
-	if post.Code != http.StatusOK {
-		t.Fatalf("authenticated LAN POST = %d: %s", post.Code, post.Body.String())
-	}
-
-	root := filepath.Dir(sourceFile(t))
-	restarted, err := newApp(a.cfg, a.rpc, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	get := settingsRequest(restarted.routes(), http.MethodGet, "dashboard-secret", "", false)
-	var view map[string]any
-	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
-		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
-	}
-	if view["can_configure"] != true || view["overridden"] != true || view["alert_new_block"] != true {
-		t.Fatalf("restarted LAN settings view = %#v", view)
+	if got := settingsRequestHost(handler, http.MethodPost, "dashboard-secret", body, true, "dashboard.example.com"); got.Code != http.StatusOK {
+		t.Fatalf("authenticated custom-host LAN POST = %d: %s", got.Code, got.Body.String())
 	}
 }
 

@@ -74,8 +74,9 @@ for the Tor-verified image download and first-install bootstrap process.
 The dashboard gear can change Telegram, Healthchecks, and `alert_new_block`
 without restarting the node. It saves a separate persistent JSON override; see
 [Dashboard settings](notifications.md#dashboard-settings). Personal wallets are
-already managed by the watch-only card. Both require a dashboard password;
-notification changes work from localhost, the private LAN, or the onion dashboard.
+already managed by the watch-only card and require a dashboard password.
+Notification changes follow the dashboard's optional password and work from
+localhost, the private LAN, or the onion dashboard.
 
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials, `inbound_onion`, and dashboard password,

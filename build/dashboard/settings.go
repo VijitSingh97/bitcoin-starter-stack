@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -261,9 +263,84 @@ func (m *Monitor) resetSettings() error {
 	return nil
 }
 
+func validSettingsDNSName(host string) bool {
+	if len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if character != '-' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func passwordlessSettingsHostAllowed(authority string) bool {
+	parsed, err := url.Parse("http://" + authority)
+	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Host != authority || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	if strings.HasSuffix(parsed.Host, ":") {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		for _, character := range port {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return false
+		}
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if address, err := netip.ParseAddr(host); err == nil {
+		address = address.Unmap()
+		return address.IsLoopback() || address.IsPrivate()
+	}
+	allDigits := true
+	for _, character := range host {
+		allDigits = allDigits && character >= '0' && character <= '9'
+	}
+	if allDigits {
+		return false
+	}
+	if _, err := strconv.ParseUint(host, 0, 64); err == nil {
+		return false
+	}
+	if !validSettingsDNSName(host) {
+		return false
+	}
+	if host == "localhost" || !strings.Contains(host, ".") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".home.arpa") {
+		return true
+	}
+	if len(host) != 62 || !strings.HasSuffix(host, ".onion") {
+		return false
+	}
+	for _, character := range strings.TrimSuffix(host, ".onion") {
+		if (character < 'a' || character > 'z') && (character < '2' || character > '7') {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *app) rejectUnsafeSettingsHost(w http.ResponseWriter, r *http.Request) bool {
+	if a.cfg.dashboardPassword != "" || passwordlessSettingsHostAllowed(r.Host) {
+		return false
+	}
+	http.Error(w, "passwordless notification settings require a local dashboard address", http.StatusForbidden)
+	return true
+}
+
 func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.dashboardPassword == "" {
-		http.Error(w, "set dashboard.password to manage notification settings", http.StatusForbidden)
+	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	view, err := a.monitor.settingsView(true)
@@ -275,8 +352,7 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.dashboardPassword == "" {
-		http.Error(w, "set dashboard.password to manage notification settings", http.StatusForbidden)
+	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if rejectCSRF(w, r) {

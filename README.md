@@ -131,9 +131,10 @@ use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
   day is pushed down and a fresh one starts. Driven purely by the clock — no history or node
   lookups. Theme-aware and paused for `prefers-reduced-motion`.
 
-The status page and public example can be viewed without a password. Personal
-wallet views, changes, and upgrades require one. LAN HTTP is unencrypted: use a
-trusted LAN or the onion service, and keep port `80` off the public internet.
+The status page, notification gear, and public example can be used without a
+password; when configured, the password protects the whole dashboard. Personal
+wallet views, wallet changes, and upgrades require one. LAN HTTP is unencrypted:
+use a trusted LAN or the onion service, and keep port `80` off the public internet.
 
 ## 🏗️ How it works
 

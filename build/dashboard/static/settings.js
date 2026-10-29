@@ -65,7 +65,6 @@ if (typeof document !== "undefined") {
       ...(payload ? { body: JSON.stringify(payload) } : {}),
     });
     if (!response.ok) {
-      if (response.status === 403) throw new Error("Set a dashboard password in config.json to manage notifications.");
       const text = (await response.text()).trim();
       throw new Error(text.length <= 200 ? text : "Could not update notification settings.");
     }
@@ -79,7 +78,7 @@ if (typeof document !== "undefined") {
     status.textContent = "Loading…";
     try {
       render(await request());
-      status.textContent = allowed ? "" : "Set a dashboard password in config.json to manage notifications.";
+      status.textContent = allowed ? "" : "Notification settings are unavailable.";
     }
     catch (error) { status.textContent = error.message; }
   }
