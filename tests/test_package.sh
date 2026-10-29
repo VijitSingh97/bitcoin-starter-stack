@@ -58,6 +58,11 @@ privacy=$root/usr/share/doc/bitcoin-starter-stack/docs/privacy.md
 grep -q '^expected=UNPUBLISHED$' "$privacy" || fail "unreleased feed key is not fail-closed"
 grep -q -- '--proxy socks5h://172.29.0.25:9050 --noproxy' "$privacy" || fail "feed key download is not pinned to the Tor proxy"
 grep -q -- 'gpg --batch --show-keys --with-colons' "$privacy" || fail "feed key fingerprint is not verified"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "PASS: test_package.sh artifact checks"
+  echo "SKIP: test_package.sh lifecycle checks require root; the dedicated package CI job runs them"
+  exit 0
+fi
 fake=$tmp/fake-bin
 mkdir "$fake"
 cat >"$fake/docker" <<'EOF'
