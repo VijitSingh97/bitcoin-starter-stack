@@ -33,6 +33,7 @@ var (
 type monitorState struct {
 	fails         int
 	downAlerted   bool
+	chainKnown    bool
 	ibd           bool
 	syncPending   bool
 	lastBlock     int64
@@ -113,7 +114,7 @@ func NewMonitor(version, dataDir, stateDir string) *Monitor {
 }
 
 func (m *Monitor) Run(ctx context.Context, blockchain func() map[string]any, network func() map[string]any) {
-	m.sendTelegram("🚀 node monitor online")
+	onlinePending := true
 	ticker := time.NewTicker(m.tickEvery)
 	defer ticker.Stop()
 	for {
@@ -126,6 +127,14 @@ func (m *Monitor) Run(ctx context.Context, blockchain func() map[string]any, net
 		var info map[string]any
 		if blockchain != nil {
 			info = blockchain()
+		}
+		if onlinePending && info != nil {
+			if ibd, ok := info["initialblockdownload"].(bool); ok {
+				onlinePending = false
+				if !ibd {
+					m.sendTelegram("🚀 node monitor online")
+				}
+			}
 		}
 		var netInfo map[string]any
 		if info != nil && network != nil && m.state.ticks%updateCheckEveryTick == 0 {
@@ -152,22 +161,23 @@ func (m *Monitor) UpdateNote() string {
 
 func (m *Monitor) tick(info, network map[string]any) {
 	healthy := info != nil
+	ibd, hasIBD := false, false
 	if healthy {
-		if m.state.downAlerted {
+		ibd, hasIBD = info["initialblockdownload"].(bool)
+		if m.state.ibd && hasIBD && !ibd {
+			m.state.syncPending = true
+		}
+		if hasIBD {
+			m.state.chainKnown = true
+			m.state.ibd = ibd
+		}
+		if m.state.downAlerted && hasIBD && !ibd {
 			if m.sendOperationalTelegram("🟢 node recovered — RPC is answering again") {
 				m.state.downAlerted = false
 			}
 		}
 		m.state.fails = 0
-
-		ibd, hasIBD := info["initialblockdownload"].(bool)
-		if m.state.ibd && hasIBD && !ibd {
-			m.state.syncPending = true
-		}
-		if hasIBD {
-			m.state.ibd = ibd
-		}
-		if m.state.syncPending && m.sendOperationalTelegram("✅ initial sync complete at height "+valueString(info["blocks"])) {
+		if m.state.syncPending && hasIBD && !ibd && m.sendOperationalTelegram("✅ initial sync complete at height "+valueString(info["blocks"])) {
 			m.state.syncPending = false
 		}
 
@@ -189,7 +199,7 @@ func (m *Monitor) tick(info, network map[string]any) {
 			m.writeOutput("Monitor tick failed: disk usage unavailable")
 			return
 		}
-		if free < diskWarnFreeGB {
+		if free < diskWarnFreeGB && hasIBD && !ibd {
 			if !m.state.diskAlerted {
 				m.state.diskAlerted = m.sendOperationalTelegram(fmt.Sprintf("💾 disk low: %.0f GB free", free))
 			}
@@ -198,16 +208,17 @@ func (m *Monitor) tick(info, network map[string]any) {
 		}
 	} else {
 		m.state.fails++
-		if m.state.fails >= downAfterTicks && !m.state.downAlerted {
-			m.state.downAlerted = m.sendOperationalTelegram(fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks))
+		if m.state.fails >= downAfterTicks && !m.state.downAlerted && m.state.chainKnown && !m.state.ibd {
+			message := fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks)
+			m.state.downAlerted = m.sendOperationalTelegram(message)
 		}
 	}
 
-	if m.state.ticks >= m.state.pingDue && m.pingHealthchecks(healthy) {
+	if m.state.ticks >= m.state.pingDue && (healthy || m.state.fails >= downAfterTicks) && m.pingHealthchecks(healthy) {
 		m.state.pingDue = m.state.ticks + pingEveryTicks
 	}
 	if healthy && network != nil && m.state.ticks%updateCheckEveryTick == 0 {
-		m.checkUpdates()
+		m.checkUpdatesWithNotification(hasIBD && !ibd)
 	}
 	m.state.ticks++
 }

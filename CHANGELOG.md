@@ -26,11 +26,13 @@ All notable changes to this project are documented here. Format follows
   connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
 - Update notices and Telegram release alerts track stack releases only, with
   notification state preserved across dashboard restarts.
+- Automatic Telegram alerts stay quiet during initial sync, then send the
+  existing one-time sync-complete message when the node is ready.
 
 ### Added
 
 - A notification settings menu with persistent JSON overrides, live updates,
-  masked secrets, and the dashboard's optional password on LAN or onion access.
+  visible saved values, and the dashboard's optional password on LAN or onion access.
 - Prepared an Ubuntu 24.04 APT package with a global `bitcoin-stack` command,
   FHS configuration and persistent state, a fresh-install pruning default, and
   signed-feed release automation for the next release.
@@ -44,6 +46,9 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Busy initial sync no longer inherits the page's short timeout for health
+  checks; temporary misses show the last confirmed sync progress and alerts
+  wait for sustained failure.
 - Failed Telegram release alerts retry until delivery succeeds, Healthchecks
   failure pings preserve query strings, and future wallet birthdays are rejected.
 - Refreshed the dashboard screenshot and wallet selector theme styling.

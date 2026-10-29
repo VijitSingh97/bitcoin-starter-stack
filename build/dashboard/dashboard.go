@@ -53,6 +53,8 @@ type diskInfo struct {
 
 type pageData struct {
 	Loading              bool
+	LastKnownSync        bool
+	LastSyncTime         string
 	InitialBlockDownload bool
 	Version              string
 	CoreVersion          string
@@ -87,12 +89,21 @@ type app struct {
 	static   http.Handler
 	feesMu   sync.RWMutex
 	fees     []float64
+	syncMu   sync.RWMutex
+	lastSync *syncSnapshot
 	log      *log.Logger
 	watch    *WatchStore
 	monitor  *Monitor
 	prices   *PriceCache
 	scanner  *prunedScanner
 	ctx      context.Context
+}
+
+type syncSnapshot struct {
+	blocks   int64
+	headers  int64
+	progress float64
+	time     time.Time
 }
 
 func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger *log.Logger) (*app, error) {
@@ -124,9 +135,10 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var chain blockchainInfo
 	if err := a.rpc.call(ctx, "getblockchaininfo", []any{}, &chain); err != nil {
-		a.render(w, pageData{Loading: true, Version: versionLabel(a.cfg.version)})
+		a.render(w, a.loadingPageData())
 		return
 	}
+	a.rememberSync(chain)
 	var network networkInfo
 	var peers []peerInfo
 	var uptime float64
@@ -173,6 +185,30 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		data.FeeHour = a.fee(ctx, 6)
 	}
 	a.render(w, data)
+}
+
+func (a *app) rememberSync(chain blockchainInfo) {
+	a.syncMu.Lock()
+	defer a.syncMu.Unlock()
+	if !chain.InitialBlockDownload {
+		a.lastSync = nil
+		return
+	}
+	a.lastSync = &syncSnapshot{blocks: chain.Blocks, headers: chain.Headers, progress: chain.VerificationProgress * 100, time: time.Now()}
+}
+
+func (a *app) loadingPageData() pageData {
+	data := pageData{Loading: true, Version: versionLabel(a.cfg.version)}
+	a.syncMu.RLock()
+	defer a.syncMu.RUnlock()
+	if a.lastSync != nil {
+		data.LastKnownSync = true
+		data.Blocks = a.lastSync.blocks
+		data.Headers = a.lastSync.headers
+		data.Progress = a.lastSync.progress
+		data.LastSyncTime = a.lastSync.time.Format("2006-01-02 15:04:05 MST")
+	}
+	return data
 }
 
 func (a *app) render(w http.ResponseWriter, data pageData) {

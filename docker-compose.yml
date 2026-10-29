@@ -8,7 +8,7 @@ x-logging: &logging
 
 services:
   tor:
-    # Prebuilt release image; ./stack pull verifies Tor before downloading.
+    # Prebuilt release image; downloads use the host's Docker settings.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:-latest}
     build: ${STACK_ROOT:-.}/build/tor
     container_name: tor

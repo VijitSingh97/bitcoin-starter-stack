@@ -216,14 +216,14 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 		return nil, ErrSettingsUnavailable
 	}
 	return map[string]any{
-		"telegram_enabled":       m.settings.TelegramEnabled,
-		"telegram_bot_token_set": m.settings.TelegramBotToken != "",
-		"telegram_chat_id":       m.settings.TelegramChatID,
-		"healthchecks_enabled":   m.settings.HealthchecksEnabled,
-		"healthchecks_url_set":   m.settings.HealthchecksURL != "",
-		"alert_new_block":        m.settings.AlertNewBlock,
-		"overridden":             m.settingsOverridden,
-		"can_configure":          canConfigure,
+		"telegram_enabled":     m.settings.TelegramEnabled,
+		"telegram_bot_token":   m.settings.TelegramBotToken,
+		"telegram_chat_id":     m.settings.TelegramChatID,
+		"healthchecks_enabled": m.settings.HealthchecksEnabled,
+		"healthchecks_url":     m.settings.HealthchecksURL,
+		"alert_new_block":      m.settings.AlertNewBlock,
+		"overridden":           m.settingsOverridden,
+		"can_configure":        canConfigure,
 	}, nil
 }
 
@@ -340,6 +340,7 @@ func (a *app) rejectUnsafeSettingsHost(w http.ResponseWriter, r *http.Request) b
 }
 
 func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
@@ -352,6 +353,7 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}

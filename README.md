@@ -50,7 +50,8 @@ public internet traffic; your wallet addresses stay on your node.
   over Tor. See [Notifications](docs/notifications.md).
 - ⚙️ **Notification settings that stick.** Configure Telegram, Healthchecks, and
   new-block alerts from the gear menu on localhost, your private LAN, or the onion dashboard.
-  Secrets stay masked and a separate JSON override survives reboots and upgrades.
+  Saved values are visible in the settings panel, and a separate JSON override survives
+  reboots and upgrades.
 - 👀 **Balances from your own node.** Import an address, `xpub`, `zpub`, or public
   descriptor. A pruned node scans its live UTXO set without an external address indexer;
   new imports stay pending until that scan confirms and caches a balance. A clearly

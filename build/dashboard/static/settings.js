@@ -37,19 +37,20 @@ if (typeof document !== "undefined") {
     token.disabled = chat.disabled = !allowed || !telegramEnabled.checked;
     url.disabled = !allowed || !healthchecksEnabled.checked;
     chat.required = allowed && telegramEnabled.checked;
-    token.required = chat.required && !saved.telegram_bot_token_set;
-    url.required = allowed && healthchecksEnabled.checked && !saved.healthchecks_url_set;
+    token.required = chat.required && !saved.telegram_bot_token;
+    url.required = allowed && healthchecksEnabled.checked && !saved.healthchecks_url;
   };
   const render = (data) => {
     saved = data;
     allowed = configurationAccess(data);
-    clearSecrets();
     telegramEnabled.checked = !!data.telegram_enabled;
     healthchecksEnabled.checked = !!data.healthchecks_enabled;
     newBlock.checked = !!data.alert_new_block;
+    token.value = data.telegram_bot_token || "";
     chat.value = data.telegram_chat_id || "";
-    token.placeholder = data.telegram_bot_token_set ? "Saved — leave blank to keep" : "Paste your bot token";
-    url.placeholder = data.healthchecks_url_set ? "Saved — leave blank to keep" : "https://hc-ping.com/…";
+    url.value = data.healthchecks_url || "";
+    token.placeholder = "Paste your bot token";
+    url.placeholder = "https://hc-ping.com/…";
     byId("source").textContent = data.overridden
       ? "Using settings saved from this dashboard. Use server config to restore the server’s values."
       : "Using the server configuration. Saving here creates a persistent dashboard override.";

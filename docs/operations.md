@@ -63,7 +63,8 @@ and purge never perform that migration or change those data paths.
   the stack's Tor proxy is unavailable. It only ever moves **forward** (never
   downgrades) and prints a rollback line if you need it. This is the normal way
   to update the stack itself. (Requires a git checkout; for a tarball install,
-  unpack the latest release over it and `./stack apply`.)
+  unpack the latest release over it, run `./configure.sh`, then `./stack pull`
+  and `./stack apply`.)
 - **Bitcoin Core:** the stack uses the official
   [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) image,
   pinned to an exact version and digest in `docker-compose.yml`. Dependabot

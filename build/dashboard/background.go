@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const healthRPCTimeout = 60 * time.Second
+
 func (a *app) recordFee(value float64) {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return
@@ -35,8 +37,7 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		a.watch.SetPending(entry.Key, true)
 	}
 	chain := func() map[string]any {
-		result, _ := a.nodeRPC("getblockchaininfo", nil).(map[string]any)
-		return result
+		return a.healthBlockchain(ctx)
 	}
 	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
 	start(func() { a.prices.Run(ctx) })
@@ -94,6 +95,34 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		close(done)
 	}()
 	return done
+}
+
+func (a *app) healthBlockchain(parent context.Context) map[string]any {
+	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
+	defer cancel()
+	rpc := *a.rpc
+	client := *a.rpc.client
+	client.Timeout = 0
+	rpc.client = &client
+	var result map[string]any
+	if rpc.call(ctx, "getblockchaininfo", nil, &result) != nil {
+		return nil
+	}
+	ibd, ok := result["initialblockdownload"].(bool)
+	if !ok {
+		return result
+	}
+	if !ibd {
+		a.rememberSync(blockchainInfo{})
+		return result
+	}
+	blocks, blocksOK := integer(result["blocks"])
+	headers, headersOK := integer(result["headers"])
+	progress, progressOK := result["verificationprogress"].(float64)
+	if blocksOK && headersOK && progressOK {
+		a.rememberSync(blockchainInfo{Blocks: blocks, Headers: headers, VerificationProgress: progress, InitialBlockDownload: true})
+	}
+	return result
 }
 
 func (a *app) provision(entry WatchEntry, pruned bool) {
