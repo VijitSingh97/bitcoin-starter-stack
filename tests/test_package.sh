@@ -14,7 +14,16 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-export PACKAGE_VERSION=0.0.0test
+
+source_version=$(cat VERSION)
+unset PACKAGE_VERSION
+SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null
+default_deb="dist/bitcoin-starter-stack_${source_version}_all.deb"
+cp "$default_deb" "$tmp/default-first.deb"
+SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null
+cmp -s "$tmp/default-first.deb" "$default_deb" || fail "default package build is not reproducible"
+
+export PACKAGE_VERSION=1.31.1-0pr125.abcdef0
 SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null
 deb="dist/bitcoin-starter-stack_${PACKAGE_VERSION}_all.deb"
 cp "$deb" "$tmp/first.deb"
@@ -23,6 +32,12 @@ cmp -s "$tmp/first.deb" "$deb" || fail "package build is not reproducible"
 
 dpkg-deb -c "$deb" >"$tmp/contents"
 [ "$(dpkg-deb -f "$deb" Version)" = "$PACKAGE_VERSION" ] || fail "package version override was ignored"
+for invalid in 1.0+candidate candidate; do
+  invalid_deb="dist/bitcoin-starter-stack_${invalid}_all.deb"
+  rm -f "$invalid_deb"
+  PACKAGE_VERSION=$invalid SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null 2>&1 && fail "invalid package version was accepted: $invalid"
+  [ ! -e "$invalid_deb" ] || fail "invalid package version produced an artifact: $invalid"
+done
 for required in \
   ./usr/bin/bitcoin-stack \
   ./usr/lib/bitcoin-starter-stack/stack \
@@ -54,6 +69,7 @@ done
 
 root=$tmp/root
 dpkg-deb -x "$deb" "$root"
+[ "$(cat "$root/usr/lib/bitcoin-starter-stack/VERSION")" = "$PACKAGE_VERSION" ] || fail "payload VERSION does not match package metadata"
 privacy=$root/usr/share/doc/bitcoin-starter-stack/docs/privacy.md
 grep -q '^expected=UNPUBLISHED$' "$privacy" || fail "unreleased feed key is not fail-closed"
 grep -q -- '--proxy socks5h://172.29.0.25:9050 --noproxy' "$privacy" || fail "feed key download is not pinned to the Tor proxy"

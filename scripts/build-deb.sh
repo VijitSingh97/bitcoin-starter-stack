@@ -3,6 +3,16 @@ set -eu
 cd "$(dirname "$0")/.."
 
 version=${PACKAGE_VERSION:-$(cat VERSION)}
+case "$version" in
+  '' | [!0-9]* | *[!A-Za-z0-9.-]* | *[.-])
+    echo "package version must be a Debian version and Docker-compatible tag: $version" >&2
+    exit 1
+    ;;
+esac
+if [ "${#version}" -gt 128 ]; then
+  echo "package version exceeds Docker's 128-character tag limit" >&2
+  exit 1
+fi
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
 export SOURCE_DATE_EPOCH
 package=$(mktemp -d)
@@ -15,6 +25,7 @@ install -d "$package/DEBIAN" "$package/usr/bin" "$root" "$docs/docs" "$share"
 install -m 755 scripts/bitcoin-stack "$package/usr/bin/bitcoin-stack"
 install -m 755 stack configure.sh "$root/"
 install -m 644 docker-compose.yml docker-compose.rpc.yml VERSION .dockerignore "$root/"
+printf '%s\n' "$version" >"$root/VERSION"
 cp -R build "$root/"
 rm -rf "$root/build/dashboard/tests" "$root/build/dashboard/parity" \
   "$root/build/dashboard/.pytest_cache" "$root/build/dashboard/__pycache__"
