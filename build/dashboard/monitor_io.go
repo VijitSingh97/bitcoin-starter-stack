@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func (m *Monitor) sendTelegram(text string) bool {
+func (m *Monitor) sendTelegram(ctx context.Context, text string) bool {
 	m.logEvent(text)
 	settings := m.notificationSettings()
 	if !settings.TelegramEnabled || settings.TelegramBotToken == "" || settings.TelegramChatID == "" {
@@ -27,7 +27,7 @@ func (m *Monitor) sendTelegram(text string) bool {
 	if err != nil {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+settings.TelegramBotToken+"/sendMessage", bytes.NewReader(payload))
 	if err != nil {
@@ -55,15 +55,15 @@ func (m *Monitor) sendTelegram(text string) bool {
 	return true
 }
 
-func (m *Monitor) sendOperationalTelegram(text string) bool {
+func (m *Monitor) sendOperationalTelegram(ctx context.Context, text string) bool {
 	if !m.notificationSettings().TelegramEnabled {
 		m.logEvent(text)
 		return true
 	}
-	return m.sendTelegram(text)
+	return m.sendTelegram(ctx, text)
 }
 
-func (m *Monitor) pingHealthchecks(healthy bool) bool {
+func (m *Monitor) pingHealthchecks(ctx context.Context, healthy bool) bool {
 	settings := m.notificationSettings()
 	if !settings.HealthchecksEnabled || settings.HealthchecksURL == "" {
 		return true
@@ -76,7 +76,7 @@ func (m *Monitor) pingHealthchecks(healthy bool) bool {
 	if !healthy {
 		endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/fail"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {

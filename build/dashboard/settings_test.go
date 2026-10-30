@@ -342,8 +342,8 @@ func TestSettingsLiveReadsAreRaceSafe(t *testing.T) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			m.sendTelegram("test")
-			_ = m.pingHealthchecks(true)
+			m.sendTelegram(t.Context(), "test")
+			_ = m.pingHealthchecks(t.Context(), true)
 		}()
 		go func() {
 			defer wg.Done()

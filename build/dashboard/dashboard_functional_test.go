@@ -341,7 +341,7 @@ func TestDashboardUpgradeStatusAndRequest(t *testing.T) {
 				}
 				return response(http.StatusOK, `{"tag_name":"v31.1.0"}`), nil
 			})}
-			fixture.app.monitor.checkUpdates()
+			fixture.app.monitor.checkUpdates(t.Context())
 
 			status := responseJSON(t, fixture.request(t, http.MethodGet, "/api/upgrade"))
 			if status["enabled"] != test.control || status["pending"] != false || status["update"] != "stack v1.3.0 available (running v1.2.0)" {
