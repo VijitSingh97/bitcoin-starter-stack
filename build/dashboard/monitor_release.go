@@ -12,17 +12,17 @@ import (
 	"time"
 )
 
-func (m *Monitor) checkUpdates() {
-	m.checkUpdatesWithNotification(true)
+func (m *Monitor) checkUpdates(ctx context.Context) {
+	m.checkUpdatesWithNotification(ctx, true)
 }
 
-func (m *Monitor) checkUpdatesWithNotification(notify bool) {
+func (m *Monitor) checkUpdatesWithNotification(ctx context.Context, notify bool) {
 	note := ""
-	latestStack := m.latestReleaseTag(stackReleasesURL)
+	latestStack := m.latestReleaseTag(ctx, stackReleasesURL)
 	if releaseVersion.MatchString(m.releaseBaseline) && latestStack != "" && newer(latestStack, m.releaseBaseline) {
 		note = fmt.Sprintf("stack v%s available (running v%s)", latestStack, m.releaseBaseline)
 		if notify && m.state.notifiedStack != latestStack {
-			if m.sendTelegram("🆕 " + note) {
+			if m.sendTelegram(ctx, "🆕 "+note) {
 				m.state.notifiedStack = latestStack
 				m.saveState()
 			}
@@ -52,8 +52,8 @@ func (m *Monitor) saveState() {
 	}
 }
 
-func (m *Monitor) latestReleaseTag(url string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (m *Monitor) latestReleaseTag(ctx context.Context, url string) string {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

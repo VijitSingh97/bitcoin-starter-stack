@@ -63,13 +63,13 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 		return response(http.StatusOK, `{"ok":true}`), nil
 	})
 
-	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(200)}, nil)
-	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(900000)}, nil)
-	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(900001)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(200)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(900000)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(900001)}, nil)
 
 	want := []string{
 		"[alice] ✅ initial sync complete at height 900000",
@@ -96,13 +96,13 @@ func TestUnknownStartupAndInitialSyncSuppressAutomaticTelegram(t *testing.T) {
 	})
 	m.diskFreeGB = func(string) (float64, error) { return 40, nil }
 
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
 	m.state.ticks = 0
-	m.tick(map[string]any{"blocks": float64(1)}, map[string]any{})
+	m.tick(t.Context(), map[string]any{"blocks": float64(1)}, map[string]any{})
 	m.state.ticks = 0
-	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, map[string]any{})
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(100)}, map[string]any{})
 
 	if telegrams != 0 {
 		t.Fatalf("automatic Telegram sends during unknown startup or sync = %d", telegrams)
@@ -137,14 +137,14 @@ func TestOperationalAlertsRetryUntilDelivered(t *testing.T) {
 		}
 	})
 
-	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(map[string]any{"initialblockdownload": false}, nil)
-	m.tick(map[string]any{"initialblockdownload": false}, nil)
-	m.tick(map[string]any{"initialblockdownload": false}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false}, nil)
 
 	want := []string{
 		"[alice] 🔴 node down — RPC unreachable for 3 minutes",
@@ -201,7 +201,7 @@ func TestSyncAndNewBlockAlertsRetryUntilDelivered(t *testing.T) {
 				return response(http.StatusOK, `{"ok":true}`), nil
 			})
 			for _, info := range test.ticks {
-				m.tick(info, nil)
+				m.tick(t.Context(), info, nil)
 			}
 			if len(messages) != 2 || messages[0] != test.want || messages[1] != test.want {
 				t.Fatalf("retry messages = %#v, want two %q", messages, test.want)
@@ -225,14 +225,14 @@ func TestSyncCompleteRetryWaitsForConfirmedCompletedState(t *testing.T) {
 	})
 	m.settings.AlertNewBlock = false
 
-	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
-	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(200)}, nil)
-	m.tick(map[string]any{"initialblockdownload": true, "blocks": float64(201)}, nil)
-	m.tick(map[string]any{"blocks": float64(202)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(200)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(201)}, nil)
+	m.tick(t.Context(), map[string]any{"blocks": float64(202)}, nil)
 	if len(messages) != 1 {
 		t.Fatalf("sync completion retried without a confirmed completed state: %#v", messages)
 	}
-	m.tick(map[string]any{"initialblockdownload": false, "blocks": float64(203)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(203)}, nil)
 
 	want := "[alice] ✅ initial sync complete"
 	if len(messages) != 2 || !strings.Contains(messages[0], want) || !strings.Contains(messages[1], want) {
@@ -256,13 +256,13 @@ func TestDiskAlertRetriesUntilDelivered(t *testing.T) {
 	})
 	m.diskFreeGB = func(string) (float64, error) { return free, nil }
 	info := map[string]any{"initialblockdownload": false}
-	m.tick(info, nil)
-	m.tick(info, nil)
-	m.tick(info, nil)
+	m.tick(t.Context(), info, nil)
+	m.tick(t.Context(), info, nil)
+	m.tick(t.Context(), info, nil)
 	free = 100
-	m.tick(info, nil)
+	m.tick(t.Context(), info, nil)
 	free = 40
-	m.tick(info, nil)
+	m.tick(t.Context(), info, nil)
 	if got, want := strings.Join(messages, "\n"), strings.Join([]string{
 		"[alice] 💾 disk low: 40 GB free",
 		"[alice] 💾 disk low: 40 GB free",
@@ -284,12 +284,12 @@ func TestDisabledTelegramDoesNotRetryOperationalAlerts(t *testing.T) {
 		return nil, nil
 	})}
 	info := map[string]any{"initialblockdownload": false}
-	m.tick(info, nil)
-	m.tick(info, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
+	m.tick(t.Context(), info, nil)
+	m.tick(t.Context(), info, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
 
 	events, err := os.ReadFile(filepath.Join(stateDir, "events.log"))
 	if err != nil {
@@ -317,19 +317,19 @@ func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 		return response(http.StatusOK, ""), nil
 	})}
 
-	m.tick(nil, nil)
-	m.tick(nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
 	if len(paths) != 0 {
 		t.Fatalf("transient failures pinged Healthchecks: %v", paths)
 	}
-	m.tick(nil, nil)
-	m.tick(nil, nil)
-	m.tick(nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
 	if got, want := strings.Join(paths, ","), "/private-uuid/fail?source=node,/private-uuid/fail?source=node,/private-uuid/fail?source=node"; got != want {
 		t.Fatalf("sustained failure paths = %q, want %q", got, want)
 	}
 	for range 5 {
-		m.tick(map[string]any{"initialblockdownload": false}, nil)
+		m.tick(t.Context(), map[string]any{"initialblockdownload": false}, nil)
 	}
 	if len(paths) != 4 || paths[3] != "/private-uuid/?source=node" {
 		t.Fatalf("paths after cadence = %v", paths)
@@ -356,8 +356,8 @@ func TestUpdateCheckKeepsBadgeAndDoesNotRepeatAlert(t *testing.T) {
 		}
 	})
 
-	m.checkUpdates()
-	m.checkUpdates()
+	m.checkUpdates(t.Context())
+	m.checkUpdates(t.Context())
 	want := "stack v1.3.0 available (running v1.2.0)"
 	if got := m.UpdateNote(); got != want {
 		t.Fatalf("UpdateNote() = %q, want %q", got, want)
@@ -413,18 +413,18 @@ func TestUpdateCheckUsesBakedBaselineAndPersistsAlert(t *testing.T) {
 	m := NewMonitor("7101c3a", t.TempDir(), stateDir)
 	m.client = &http.Client{Transport: handler}
 	m.output = io.Discard
-	m.checkUpdates()
+	m.checkUpdates(t.Context())
 	if got, want := m.UpdateNote(), "stack v1.32.0 available (running v1.31.1)"; got != want {
 		t.Fatalf("UpdateNote() = %q, want %q", got, want)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
 		t.Fatalf("failed delivery persisted monitor state: %v", err)
 	}
-	m.checkUpdates()
+	m.checkUpdates(t.Context())
 	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
 		t.Fatalf("rejected Telegram response persisted monitor state: %v", err)
 	}
-	m.checkUpdates()
+	m.checkUpdates(t.Context())
 
 	persisted, err := os.ReadFile(filepath.Join(stateDir, "monitor_state.json"))
 	if err != nil || !strings.Contains(string(persisted), `"notified_stack":"1.32.0"`) {
@@ -437,7 +437,7 @@ func TestUpdateCheckUsesBakedBaselineAndPersistsAlert(t *testing.T) {
 	restarted := NewMonitor("7101c3a", t.TempDir(), stateDir)
 	restarted.client = &http.Client{Transport: handler}
 	restarted.output = io.Discard
-	restarted.checkUpdates()
+	restarted.checkUpdates(t.Context())
 	if telegrams != 3 {
 		t.Fatalf("telegram sends across retries and restart = %d, want 3", telegrams)
 	}
@@ -456,7 +456,7 @@ func TestUpdateCheckWaitsForTelegramConfiguration(t *testing.T) {
 	m := NewMonitor("1.2.0", t.TempDir(), stateDir)
 	m.client = &http.Client{Transport: roundTripFunc(release)}
 	m.output = io.Discard
-	m.checkUpdates()
+	m.checkUpdates(t.Context())
 	if _, err := os.Stat(filepath.Join(stateDir, "monitor_state.json")); !os.IsNotExist(err) {
 		t.Fatalf("disabled Telegram persisted monitor state: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestUpdateCheckWaitsForTelegramConfiguration(t *testing.T) {
 		return release(r)
 	})}
 	restarted.output = io.Discard
-	restarted.checkUpdates()
+	restarted.checkUpdates(t.Context())
 	if sent != 1 {
 		t.Fatalf("Telegram sends after configuration = %d, want 1", sent)
 	}
@@ -489,7 +489,7 @@ func TestEventLogRotatesAndUsesUTCTimestamp(t *testing.T) {
 	m := NewMonitor("dev", t.TempDir(), stateDir)
 	m.output = io.Discard
 	m.now = func() time.Time { return time.Date(2026, 10, 27, 1, 2, 3, 0, time.FixedZone("local", -5*3600)) }
-	m.sendTelegram("🔴 node down")
+	m.sendTelegram(t.Context(), "🔴 node down")
 	b, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
@@ -555,6 +555,85 @@ func TestRunDoesNotSendOnlineDuringInitialSync(t *testing.T) {
 	}
 	if got := telegrams.Load(); got != 0 {
 		t.Fatalf("initial sync Telegram sends = %d", got)
+	}
+}
+
+func TestRunCancellationStopsReleaseCheck(t *testing.T) {
+	m := NewMonitor("1.2.0", t.TempDir(), t.TempDir())
+	m.diskFreeGB = func(string) (float64, error) { return 1000, nil }
+	started := make(chan struct{})
+	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		close(started)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx,
+			func() map[string]any { return map[string]any{"initialblockdownload": false} },
+			func() map[string]any { return map[string]any{} },
+		)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("release check did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not cancel an in-flight release check")
+	}
+}
+
+func TestMonitorRequestsHonorParentCancellation(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Monitor)
+		call  func(context.Context, *Monitor) bool
+	}{
+		{name: "Telegram", call: func(ctx context.Context, m *Monitor) bool { return m.sendTelegram(ctx, "test") }},
+		{
+			name: "Healthchecks",
+			setup: func(m *Monitor) {
+				m.settings.HealthchecksEnabled = true
+				m.settings.HealthchecksURL = "https://healthchecks.io/test"
+			},
+			call: func(ctx context.Context, m *Monitor) bool { return m.pingHealthchecks(ctx, true) },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			started := make(chan struct{})
+			m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+				close(started)
+				<-r.Context().Done()
+				return nil, r.Context().Err()
+			})
+			if test.setup != nil {
+				test.setup(m)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() {
+				test.call(ctx, m)
+				close(done)
+			}()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("request did not start")
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("request did not stop after parent cancellation")
+			}
+		})
 	}
 }
 
@@ -668,7 +747,7 @@ func TestHealthchecksRejectsUnencryptedOrCredentialedURLs(t *testing.T) {
 			})
 			m.settings.HealthchecksEnabled = true
 			m.settings.HealthchecksURL = endpoint
-			if m.pingHealthchecks(true) {
+			if m.pingHealthchecks(t.Context(), true) {
 				t.Fatal("invalid Healthchecks URL was accepted")
 			}
 		})
@@ -750,8 +829,8 @@ func TestTransportErrorsRedactSecrets(t *testing.T) {
 	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return nil, errors.New(r.URL.String())
 	})}
-	m.sendTelegram("hello")
-	m.pingHealthchecks(true)
+	m.sendTelegram(t.Context(), "hello")
+	m.pingHealthchecks(t.Context(), true)
 	got := output.String()
 	if strings.Contains(got, "top-secret") || strings.Contains(got, "private-uuid") {
 		t.Fatalf("secret leaked in output: %q", got)
