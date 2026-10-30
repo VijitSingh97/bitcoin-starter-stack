@@ -14,8 +14,8 @@
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1>
-    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span aria-hidden="true">Bitcoin</span></button>
-    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span aria-hidden="true">Monero</span></button>
+    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Bitcoin</b><small data-tower-price-asset="bitcoin">Price unavailable</small></span></button>
+    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Monero</b><small data-tower-price-asset="monero">Price unavailable</small></span></button>
   </main>
   <div id="node-close-backdrop" class="node-close-backdrop" aria-hidden="true"></div>
   <div id="bitcoin-panel" class="stack-col node-panel" data-node-panel="bitcoin" hidden>
@@ -44,8 +44,8 @@
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1>
-    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span aria-hidden="true">Bitcoin</span></button>
-    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span aria-hidden="true">Monero</span></button>
+    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Bitcoin</b><small data-tower-price-asset="bitcoin">Price unavailable</small></span></button>
+    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Monero</b><small data-tower-price-asset="monero">Price unavailable</small></span></button>
   </main>
   <div id="node-close-backdrop" class="node-close-backdrop" aria-hidden="true"></div>
   <div id="bitcoin-panel" class="stack-col node-panel" data-node-panel="bitcoin" hidden>
@@ -148,6 +148,10 @@
       <fieldset id="settings-appearance">
         <legend>Appearance</legend>
         <label class="settings-check"><input id="settings-tower-labels" type="checkbox"> Label towers</label>
+        <label>Default currency<select id="settings-default-currency">
+          <option>USD</option><option>EUR</option><option>GBP</option><option>INR</option><option>CAD</option>
+          <option>AUD</option><option>JPY</option><option>RUB</option><option>CNY</option>
+        </select></label>
       </fieldset>
       <fieldset id="settings-telegram">
         <legend>Telegram</legend>
@@ -166,18 +170,18 @@
           <label class="settings-check"><input id="settings-bitcoin-new-block" type="checkbox"> Alert on each new block (about 144 per day)</label>
           <div id="settings-port-bitcoin-rpc" class="settings-port">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
-            <div class="settings-port-fields"><label>LAN address<input type="text" inputmode="decimal" autocomplete="off" maxlength="15" data-port-bind></label><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
+            <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
         </details>
         <details id="settings-monero-alerts"><summary>Monero</summary>
           <label class="settings-check"><input id="settings-monero-new-block" type="checkbox"> Alert on each new block (about 720 per day)</label>
           <div id="settings-port-monero-rpc" class="settings-port">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
-            <div class="settings-port-fields"><label>LAN address<input type="text" inputmode="decimal" autocomplete="off" maxlength="15" data-port-bind></label><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
+            <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
           <div id="settings-port-monero-zmq" class="settings-port">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose ZMQ on private LAN</label>
-            <div class="settings-port-fields"><label>LAN address<input type="text" inputmode="decimal" autocomplete="off" maxlength="15" data-port-bind></label><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
+            <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
         </details>
       </fieldset>

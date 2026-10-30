@@ -185,11 +185,13 @@ workload fits; see [hardware estimates and test evidence](hardware.md).
 Appearance, Telegram, and Healthchecks are global. Per-node settings live in
 collapsible sections; block alerts are off by default for each node.
 
-Each node's section also lets you enable or disable its LAN RPC listener and,
-for Monero, its ZMQ listener. Set the host's private IPv4 address and port when
-enabling a listener. Public, wildcard, loopback, and IPv6 addresses are rejected;
-RPC exposure also requires a strong saved node password. ZMQ has no password,
-so only enable it on a trusted LAN.
+Each node's section lets you enable or disable its LAN RPC listener and, for
+Monero, its ZMQ listener, and choose the port. It reuses the node's configured
+private LAN address, or the dashboard's configured private LAN address for a
+first enable. Addresses stay in server configuration. If neither address is
+private, set one there before enabling a port. Public, wildcard, loopback, and
+IPv6 listener addresses are rejected. RPC exposure also requires a strong saved
+node password. ZMQ has no password, so only enable it on a trusted LAN.
 
 Changes stay in the form until you save. Appearance and notification changes
 use **Save**. Port changes use **Save & restart**, with the affected services
@@ -197,8 +199,10 @@ listed above the button. LAN listeners live in the Tor relay, so changing them
 restarts the relay and dashboard rather than the Bitcoin or Monero daemon.
 The dashboard can briefly reconnect; chain data and node sync are preserved.
 Port changes require the dashboard password and a running host helper. A
-private typed request stays pending until the host validates it, updates
-`config.json`, and applies it; an error is shown if that cannot complete.
+private typed request stays pending while the host checks it. The helper checks
+host TCP listeners and Docker's published ports before changing `config.json`
+or restarting services. If a selected port is occupied, the panel names the
+affected listener and keeps the edits available for correction.
 
 For APT installs, `bitcoin-stack init`, `up`, and `apply` enable
 `bitcoin-starter-stack-port-control.timer`. Source installs reuse the host agent
@@ -208,7 +212,10 @@ Port settings persist across reboot because the host configuration is updated.
 
 The gear panel also includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
-survives restarts. Resetting to server configuration hides the names again.
+survives restarts. With labels enabled, each tower also shows its coin price.
+**Default currency** starts at USD and applies to those prices and to a panel
+when opened. Panel currency selectors can still change the current view.
+Resetting to server configuration hides the names and restores USD.
 
 Node cards display configured host RPC/ZMQ endpoints under **Open ports**.
 Disabled services have no endpoint, and disabling a node disables its relays.

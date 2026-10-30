@@ -1,7 +1,6 @@
 export const PRICE_URL = "/api/prices";
 export const FIAT_CURRENCIES = ["USD", "EUR", "GBP", "INR", "CAD", "AUD", "JPY", "RUB", "CNY"];
 
-const STORAGE_KEY = "btc-price-currency";
 const POLL_MS = 60000;
 
 export function normalizeCurrency(value) {
@@ -9,30 +8,8 @@ export function normalizeCurrency(value) {
   return FIAT_CURRENCIES.includes(currency) ? currency : "USD";
 }
 
-export function storageKey(asset = "bitcoin") {
-  return asset === "monero" ? "monero-price-currency" : STORAGE_KEY;
-}
-
 export function priceURL(asset = "bitcoin") {
   return asset === "monero" ? `${PRICE_URL}?asset=monero` : PRICE_URL;
-}
-
-export function loadCurrency(storage = browserStorage(), asset = "bitcoin") {
-  try {
-    return normalizeCurrency(storage?.getItem(storageKey(asset)));
-  } catch {
-    return "USD";
-  }
-}
-
-export function saveCurrency(value, storage = browserStorage(), asset = "bitcoin") {
-  const currency = normalizeCurrency(value);
-  try {
-    storage?.setItem(storageKey(asset), currency);
-  } catch {
-    // The selector still works for this page when storage is unavailable.
-  }
-  return currency;
 }
 
 export function formatPrice(amount, currency, NumberFormat = Intl.NumberFormat) {
@@ -61,8 +38,17 @@ export function priceView(data, currency, formatTime = defaultTime) {
   };
 }
 
-function browserStorage() {
-  return typeof localStorage === "undefined" ? null : localStorage;
+export function panelCurrency(openedNode, asset, current, configured) {
+  return openedNode === asset ? normalizeCurrency(configured) : normalizeCurrency(current);
+}
+
+export function towerPriceView(data, currency) {
+  const view = priceView(data, currency);
+  return {
+    text: view.value === "—" ? "Price unavailable" : `${view.value}${view.stale ? " · stale" : ""}`,
+    status: view.status,
+    stale: view.stale,
+  };
 }
 
 function defaultTime(unixSeconds) {
@@ -78,33 +64,50 @@ function defaultTime(unixSeconds) {
 }
 
 if (typeof document !== "undefined") {
-  for (const widget of document.querySelectorAll("[data-price-asset]")) {
-    const asset = widget.dataset.priceAsset;
-    const value = widget.querySelector("[data-price-value]");
-    const currencySelect = widget.querySelector("[data-price-currency]");
-    const status = widget.querySelector("[data-price-status]");
-    if (!value || !currencySelect || !status) continue;
-    for (const code of FIAT_CURRENCIES) {
+  let configuredCurrency = "USD";
+  const controllers = new Map();
+  const assets = new Set([
+    ...Array.from(document.querySelectorAll("[data-price-asset]"), element => element.dataset.priceAsset),
+    ...Array.from(document.querySelectorAll("[data-tower-price-asset]"), element => element.dataset.towerPriceAsset),
+  ]);
+
+  for (const asset of assets) {
+    const widget = document.querySelector(`[data-price-asset="${asset}"]`);
+    const towerPrices = document.querySelectorAll(`[data-tower-price-asset="${asset}"]`);
+    const value = widget?.querySelector("[data-price-value]");
+    const currencySelect = widget?.querySelector("[data-price-currency]");
+    const status = widget?.querySelector("[data-price-status]");
+    if (widget && (!value || !currencySelect || !status)) continue;
+    if (!widget && !towerPrices.length) continue;
+
+    if (currencySelect) for (const code of FIAT_CURRENCIES) {
       const option = document.createElement("option");
       option.value = option.textContent = code;
       currencySelect.append(option);
     }
 
-    let currency = loadCurrency(browserStorage(), asset);
-    let latest = { available: false };
-    currencySelect.value = currency;
+    const controller = { currency: configuredCurrency, latest: { available: false } };
+    controllers.set(asset, controller);
 
     const render = () => {
-      const view = priceView(latest, currency);
-      value.textContent = view.value;
-      status.textContent = view.status;
-      status.classList.toggle("stale", view.stale);
-      widget.hidden = false;
+      if (widget) {
+        const view = priceView(controller.latest, controller.currency);
+        value.textContent = view.value;
+        currencySelect.value = controller.currency;
+        status.textContent = view.status;
+        status.classList.toggle("stale", view.stale);
+        widget.hidden = false;
+      }
+      const towerView = towerPriceView(controller.latest, configuredCurrency);
+      for (const price of towerPrices) {
+        price.textContent = towerView.text;
+        price.title = towerView.status;
+        price.classList.toggle("stale", towerView.stale);
+      }
     };
 
-    currencySelect.addEventListener("change", () => {
-      currency = saveCurrency(currencySelect.value, browserStorage(), asset);
-      currencySelect.value = currency;
+    currencySelect?.addEventListener("change", () => {
+      controller.currency = normalizeCurrency(currencySelect.value);
       render();
     });
 
@@ -115,15 +118,32 @@ if (typeof document !== "undefined") {
           credentials: "same-origin",
         });
         if (!response.ok) throw new Error("price request failed");
-        latest = await response.json();
+        controller.latest = await response.json();
       } catch {
-        latest = { available: false };
+        controller.latest = { available: false };
       }
       render();
     };
 
+    controller.render = render;
     render();
     refresh();
     setInterval(refresh, POLL_MS);
   }
+
+  document.addEventListener("appearance-updated", event => {
+    configuredCurrency = normalizeCurrency(event.detail?.default_currency);
+    for (const controller of controllers.values()) {
+      controller.currency = configuredCurrency;
+      controller.render();
+    }
+  });
+
+  window.addEventListener("node-selected", event => {
+    const node = event.detail?.node;
+    for (const [asset, controller] of controllers) {
+      controller.currency = panelCurrency(node, asset, controller.currency, configuredCurrency);
+      controller.render();
+    }
+  });
 }

@@ -3,12 +3,11 @@ import assert from "node:assert/strict";
 import {
   PRICE_URL,
   formatPrice,
-  loadCurrency,
   normalizeCurrency,
+  panelCurrency,
   priceURL,
   priceView,
-  saveCurrency,
-  storageKey,
+  towerPriceView,
 } from "./prices.js";
 
 test("price endpoint is same-origin", () => {
@@ -18,36 +17,14 @@ test("price endpoint is same-origin", () => {
   assert.equal(priceURL("monero"), "/api/prices?asset=monero");
 });
 
-test("currency persistence defaults and falls through to USD", () => {
-  const values = new Map();
-  const storage = {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-  };
-  assert.equal(loadCurrency(storage), "USD");
-  assert.equal(saveCurrency("eur", storage), "EUR");
-  assert.equal(loadCurrency(storage), "EUR");
-  values.set("btc-price-currency", "DOGE");
-  assert.equal(loadCurrency(storage), "USD");
+test("configured currency controls a tower when it opens", () => {
   assert.equal(normalizeCurrency("inr"), "INR");
-  assert.equal(storageKey("monero"), "monero-price-currency");
-  assert.equal(saveCurrency("cad", storage, "monero"), "CAD");
-  assert.equal(loadCurrency(storage, "monero"), "CAD");
+  assert.equal(normalizeCurrency("DOGE"), "USD");
+  assert.equal(panelCurrency("bitcoin", "bitcoin", "EUR", "CAD"), "CAD");
+  assert.equal(panelCurrency("monero", "bitcoin", "EUR", "CAD"), "EUR");
 });
 
-test("currency persistence tolerates blocked storage", () => {
-  const blocked = {
-    getItem() { throw new Error("blocked"); },
-    setItem() { throw new Error("blocked"); },
-  };
-  assert.equal(loadCurrency(blocked), "USD");
-  assert.equal(saveCurrency("GBP", blocked), "GBP");
-});
-
-test("rubles and yuan use cached quotes and persist the selected currency", () => {
-  const storage = { getItem: () => "cny", setItem() {} };
-  assert.equal(loadCurrency(storage), "CNY");
-  assert.equal(saveCurrency("rub", storage), "RUB");
+test("rubles and yuan use cached quotes", () => {
   const data = { available: true, stale: false, updated_at: 1700000000,
     prices: { rub: 6500000, cny: 500000 } };
   for (const currency of ["RUB", "CNY"]) {
@@ -85,6 +62,12 @@ test("priceView renders current and stale cached prices", () => {
     prices: { eur: 51000 },
   }, "EUR", () => "yesterday");
   assert.equal(stale.status, "Stale · as of yesterday");
+  assert.match(towerPriceView({
+    available: true,
+    stale: true,
+    updated_at: 1_700_000_000,
+    prices: { eur: 51000 },
+  }, "EUR").text, / · stale$/);
 });
 
 test("priceView never renders zero for unavailable or bad data", () => {
@@ -101,4 +84,9 @@ test("priceView never renders zero for unavailable or bad data", () => {
       stale: false,
     });
   }
+  assert.deepEqual(towerPriceView({ available: false }, "USD"), {
+    text: "Price unavailable",
+    status: "Price unavailable",
+    stale: false,
+  });
 });

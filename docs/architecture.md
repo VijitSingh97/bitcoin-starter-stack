@@ -108,7 +108,8 @@ that makes `tor_egress` Tor's deterministic default route.
   ([Upgrade button](operations.md#upgrade-button-opt-in)).
 - LAN port controls use a separate typed request in the same private volume.
   A host helper validates the request, private LAN bind, ports, saved RPC
-  credentials, and Compose ownership, then updates only the selected RPC/ZMQ
+  credentials, Compose ownership, and host/Docker port availability before any
+  restart, then updates only the selected RPC/ZMQ
   listener fields in server config and applies it offline. The dashboard cannot
   publish a public listener, choose host paths, run commands, or access Docker.
   Source installs reuse the host agent; APT installs use a dedicated hardened

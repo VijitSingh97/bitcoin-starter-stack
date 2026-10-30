@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
@@ -36,6 +37,8 @@ type portControlStatus struct {
 	State            string   `json:"state"`
 	Message          string   `json:"message,omitempty"`
 	AffectedServices []string `json:"affected_services,omitempty"`
+	ErrorCode        string   `json:"error_code,omitempty"`
+	Port             string   `json:"port,omitempty"`
 }
 
 type portControlView struct {
@@ -45,11 +48,9 @@ type portControlView struct {
 }
 
 type portControlChangeInput struct {
-	Port            string  `json:"port"`
-	Enabled         *bool   `json:"enabled"`
-	BindIP          *string `json:"bind_ip,omitempty"`
-	HostPort        *int    `json:"host_port,omitempty"`
-	bindIPPresent   bool
+	Port            string `json:"port"`
+	Enabled         *bool  `json:"enabled"`
+	HostPort        *int   `json:"host_port,omitempty"`
 	hostPortPresent bool
 }
 
@@ -72,10 +73,9 @@ type portControlRequest struct {
 
 func (input *portControlChangeInput) UnmarshalJSON(data []byte) error {
 	type wireInput struct {
-		Port     string  `json:"port"`
-		Enabled  *bool   `json:"enabled"`
-		BindIP   *string `json:"bind_ip"`
-		HostPort *int    `json:"host_port"`
+		Port     string `json:"port"`
+		Enabled  *bool  `json:"enabled"`
+		HostPort *int   `json:"host_port"`
 	}
 	var wire wireInput
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -87,8 +87,7 @@ func (input *portControlChangeInput) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	input.Port, input.Enabled, input.BindIP, input.HostPort = wire.Port, wire.Enabled, wire.BindIP, wire.HostPort
-	_, input.bindIPPresent = fields["bind_ip"]
+	input.Port, input.Enabled, input.HostPort = wire.Port, wire.Enabled, wire.HostPort
 	_, input.hostPortPresent = fields["host_port"]
 	return nil
 }
@@ -111,7 +110,30 @@ func configuredPort(id, label, endpoint, bindEnv, portEnv, defaultPort string) p
 			}
 		}
 	}
+	if !privateLANAddress(bindIP) {
+		bindIP = strings.TrimSpace(os.Getenv("DASHBOARD_BIND_IP"))
+		if !privateLANAddress(bindIP) {
+			bindIP = ""
+		}
+	}
 	return portControlPort{ID: id, Label: label, Enabled: endpoint != "", BindIP: bindIP, HostPort: hostPort}
+}
+
+func privateLANAddress(value string) bool {
+	address, err := netip.ParseAddr(value)
+	return err == nil && address.Is4() && address.IsPrivate()
+}
+
+func portControlLabel(id string) string {
+	switch id {
+	case "bitcoin_rpc":
+		return "Bitcoin RPC"
+	case "monero_rpc":
+		return "Monero RPC"
+	case "monero_zmq":
+		return "Monero ZMQ"
+	}
+	return ""
 }
 
 func (a *app) portControlPorts() []portControlPort {
@@ -151,7 +173,7 @@ func (a *app) pendingPortControl() (*portControlStatus, bool) {
 		if err == nil {
 			var request portControlRequest
 			_ = json.Unmarshal(b, &request)
-			return &portControlStatus{ID: request.ID, State: "pending", Message: "Applying LAN port changes…", AffectedServices: affectedPortServices()}, true
+			return &portControlStatus{ID: request.ID, State: "pending", Message: "Checking LAN port changes…", AffectedServices: affectedPortServices()}, true
 		}
 		if !os.IsNotExist(err) {
 			return &portControlStatus{State: "pending", Message: "Port changes are being checked…", AffectedServices: affectedPortServices()}, true
@@ -174,13 +196,27 @@ func (a *app) readPortControlStatus() *portControlStatus {
 	if status.State != "applied" && status.State != "rejected" && status.State != "failed" {
 		return nil
 	}
+	validConflict := status.ErrorCode == "port_in_use" && status.State == "rejected" && portControlLabel(status.Port) != ""
+	checkFailed := status.ErrorCode == "port_check_failed" && status.State == "failed"
+	if checkFailed {
+		status.Port = ""
+	}
+	if !validConflict && !checkFailed {
+		status.ErrorCode, status.Port = "", ""
+	}
 	switch status.State {
 	case "applied":
 		status.Message = "LAN port changes applied."
 	case "rejected":
 		status.Message = "LAN port changes were rejected."
+		if status.ErrorCode == "port_in_use" && portControlLabel(status.Port) != "" {
+			status.Message = fmt.Sprintf("Selected port for %s is already in use.", portControlLabel(status.Port))
+		}
 	case "failed":
-		status.Message = "LAN port changes were saved but could not be applied."
+		status.Message = "LAN port changes could not be applied."
+		if status.ErrorCode == "port_check_failed" {
+			status.Message = "Port availability could not be checked; no services were restarted."
+		}
 	}
 	status.AffectedServices = affectedPortServices()
 	return &status
@@ -235,18 +271,17 @@ func validatePortControlChanges(input portControlInput, ports []portControlPort)
 		seen[inputChange.Port] = true
 		change := portControlChange{Port: inputChange.Port, Enabled: *inputChange.Enabled}
 		if change.Enabled {
-			if !inputChange.bindIPPresent || !inputChange.hostPortPresent || inputChange.BindIP == nil || inputChange.HostPort == nil || strings.TrimSpace(*inputChange.BindIP) != *inputChange.BindIP {
-				return nil, errors.New("enabled port requires a private LAN address and host port")
+			if !inputChange.hostPortPresent || inputChange.HostPort == nil || *inputChange.HostPort < 1 || *inputChange.HostPort > 65535 {
+				return nil, errors.New("enter a port from 1 to 65535")
 			}
-			address, err := netip.ParseAddr(*inputChange.BindIP)
-			if err != nil || !address.Is4() || !address.IsPrivate() || *inputChange.HostPort < 1 || *inputChange.HostPort > 65535 {
-				return nil, errors.New("enabled port requires a private LAN address and host port")
+			if !privateLANAddress(current.BindIP) {
+				return nil, fmt.Errorf("configure a private LAN address on the server before opening %s", portControlLabel(current.ID))
 			}
-			change.BindIP, change.HostPort = *inputChange.BindIP, *inputChange.HostPort
+			change.BindIP, change.HostPort = current.BindIP, *inputChange.HostPort
 			if current.Enabled && current.BindIP == change.BindIP && current.HostPort == change.HostPort {
 				return nil, errors.New("port change has no effect")
 			}
-		} else if inputChange.bindIPPresent || inputChange.hostPortPresent || !current.Enabled {
+		} else if inputChange.hostPortPresent || !current.Enabled {
 			return nil, errors.New("disabled port change is invalid")
 		}
 		next := current
@@ -254,16 +289,18 @@ func validatePortControlChanges(input portControlInput, ports []portControlPort)
 		desired[change.Port] = next
 		changes = append(changes, change)
 	}
-	endpoints := make(map[string]bool)
-	for _, port := range desired {
-		if !port.Enabled {
+	for _, change := range changes {
+		if !change.Enabled {
 			continue
 		}
-		endpoint := net.JoinHostPort(port.BindIP, strconv.Itoa(port.HostPort))
-		if endpoints[endpoint] {
-			return nil, errors.New("LAN ports conflict")
+		if change.HostPort == 80 && change.BindIP == strings.TrimSpace(os.Getenv("DASHBOARD_BIND_IP")) {
+			return nil, fmt.Errorf("Selected port for %s is already in use.", portControlLabel(change.Port))
 		}
-		endpoints[endpoint] = true
+		for _, port := range desired {
+			if port.ID != change.Port && port.Enabled && port.BindIP == change.BindIP && port.HostPort == change.HostPort {
+				return nil, fmt.Errorf("Selected port for %s is already in use.", portControlLabel(change.Port))
+			}
+		}
 	}
 	return changes, nil
 }

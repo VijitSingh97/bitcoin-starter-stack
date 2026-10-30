@@ -9,6 +9,7 @@
   [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
   so your user can run `docker` without sudo.
 - **`jq`, `openssl`, and `curl`** — configuration and downloads.
+- **`iproute2`** — checks host port availability before LAN port changes.
 - Hardware per [Hardware Requirements](hardware.md) — the short version:
   allow 30–60 GB SSD space for Bitcoin and 120–150 GiB for Monero.
   The experimental steady budget is 1 CPU / 2 GiB per node, plus shared services
@@ -22,7 +23,7 @@ Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
 machines on your LAN.
 
-Install `jq`, `openssl`, `curl`, and optionally `avahi-daemon` with APT.
+Install `jq`, `openssl`, `curl`, `iproute2`, and optionally `avahi-daemon` with APT.
 
 ## Install
 

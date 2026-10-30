@@ -72,6 +72,7 @@ depends=$(dpkg-deb -f "$deb" Depends)
 printf '%s' "$depends" | grep -q 'docker-ce | docker.io' || fail "Docker Engine dependency alternatives are missing"
 printf '%s' "$depends" | grep -q 'curl' || fail "curl dependency is missing"
 printf '%s' "$depends" | grep -q 'util-linux' || fail "resource profile lock dependency is missing"
+printf '%s' "$depends" | grep -q 'iproute2' || fail "port listener inspection dependency is missing"
 printf '%s' "$depends" | grep -q 'docker-compose-plugin (>= 2.33.1) | docker-compose-v2 (>= 2.33.1) | docker-compose (>= 2.33.1)' || fail "Compose v2 dependency alternatives are missing minimum versions"
 
 mkdir "$tmp/control"

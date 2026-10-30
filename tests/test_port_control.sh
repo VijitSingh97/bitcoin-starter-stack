@@ -8,17 +8,35 @@ fail() {
 }
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+listener_pid=
+cleanup() {
+  if [ -n "$listener_pid" ]; then
+    kill "$listener_pid" 2>/dev/null || true
+    wait "$listener_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 fake=$tmp/docker
 cat >"$fake" <<'EOF'
 #!/bin/sh
 set -eu
 printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
 if [ "$1" = inspect ]; then
-  case "$3" in
-    '{{.Id}}') printf '%s\n' dashboard-id ;;
+  case "$3:$4" in
+    '{{.Id}}:dashboard') printf '%s\n' dashboard-id ;;
+    '{{.Id}}:tor') printf '%s\n' tor-id ;;
+    *project.config_files*':tor-id') printf '%s\n' "${FAKE_TOR_CONFIG_FILES:-$BITCOIN_STACK_ROOT/docker-compose.yml}" ;;
     *project.config_files*) printf '%s\n' "${FAKE_CONFIG_FILES:-$BITCOIN_STACK_ROOT/docker-compose.yml}" ;;
+    '{{json .NetworkSettings.Ports}}:tor-id') printf '%s\n' "$FAKE_TOR_PORTS" ;;
+    '{{json .NetworkSettings.Ports}}:'*)
+      if [ -n "${FAKE_OTHER_PORTS:-}" ]; then printf '%s\n' "$FAKE_OTHER_PORTS"; else printf '%s\n' '{}'; fi
+      ;;
   esac
+  exit 0
+fi
+if [ "$1" = ps ] && [ "$2" = -q ]; then
+  printf '%s\n' tor-id ${FAKE_OTHER_DOCKER_IDS:-}
   exit 0
 fi
 if [ "$1" = compose ]; then
@@ -44,6 +62,14 @@ done
 eval "exec $args"
 EOF
 chmod +x "$fake" scripts/node-port-control
+fake_ss=$tmp/ss
+cat >"$fake_ss" <<'EOF'
+#!/bin/sh
+set -eu
+[ "${FAKE_SS_FAIL:-0}" != 1 ] || exit 1
+printf '%s' "${FAKE_SS_LISTENERS:-}"
+EOF
+chmod +x "$fake_ss"
 
 new_case() {
   case_root=$tmp/$1
@@ -74,9 +100,11 @@ EOF
   export BITCOIN_STACK_STATE_DIR=$case_root/state
   export BITCOIN_STACK_CONFIG_DIR=$case_root/config
   export DOCKER_BIN=$fake FAKE_DASH_STATE=$case_root/state/dashboard
+  export SS_BIN=$fake_ss
   export FAKE_DOCKER_LOG=$case_root/docker.log FAKE_STACK_LOG=$case_root/stack.log
   export PORT_CONTROL_NOW_EPOCH=1000 FAKE_APPLY_FAIL=0 FAKE_APPLY_FAIL_ONCE=0 FAKE_APPLY_FAIL_MARKER=$case_root/apply-failed
-  unset FAKE_CONFIG_FILES
+  export FAKE_TOR_PORTS='{"8332/tcp":[{"HostIp":"192.168.1.10","HostPort":"8332"}],"18081/tcp":[{"HostIp":"192.168.1.10","HostPort":"18081"}],"18083/tcp":[{"HostIp":"192.168.1.10","HostPort":"18083"}]}'
+  unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL
   : >"$FAKE_DOCKER_LOG"
   : >"$FAKE_STACK_LOG"
 }
@@ -175,6 +203,105 @@ scripts/node-port-control
 [ "$(status .state)" = rejected ] || fail "colliding open request was accepted"
 [ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = false ] || fail "colliding open request poisoned config"
 [ ! -s "$FAKE_STACK_LOG" ] || fail "colliding open request invoked apply"
+
+new_case host-port-conflict
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export FAKE_SS_LISTENERS='LISTEN 0 4096 0.0.0.0:28081 0.0.0.0:*'
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303031","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = rejected ] || fail "occupied host port was accepted"
+[ "$(status .error_code)" = port_in_use ] || fail "occupied host port lacked typed error"
+[ "$(status .port)" = monero_rpc ] || fail "occupied host port status named the wrong setting"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "occupied host port changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "occupied host port invoked apply"
+
+if command -v ss >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+  new_case real-host-port-conflict
+  jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+  mv "$case_root/config/config.next" "$case_root/config/config.json"
+  SS_BIN=$(command -v ss)
+  export SS_BIN
+  openssl s_server -accept 0.0.0.0:49555 -nocert -quiet -ign_eof </dev/null >"$case_root/listener.log" 2>&1 &
+  listener_pid=$!
+  listener_ready=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if "$SS_BIN" -H -ltn | grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*):49555([[:space:]]|$)'; then
+      listener_ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  [ "$listener_ready" = 1 ] || fail "real TCP listener did not start"
+  original_config=$(cat "$case_root/config/config.json")
+  request '{"id":"30303030303030303030303030303036","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":49555}],"requested_at":1000}'
+  scripts/node-port-control
+  [ "$(status .error_code)" = port_in_use ] || fail "real host listener lacked typed conflict status"
+  [ "$(status .port)" = monero_rpc ] || fail "real host listener named the wrong setting"
+  [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "real host listener changed config"
+  [ ! -s "$FAKE_STACK_LOG" ] || fail "real host listener invoked apply"
+  kill "$listener_pid" 2>/dev/null || true
+  wait "$listener_pid" 2>/dev/null || true
+  listener_pid=
+fi
+
+new_case docker-port-conflict
+jq '.monero.zmq_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export FAKE_OTHER_DOCKER_IDS=other-id
+export FAKE_OTHER_PORTS='{"28083/tcp":[{"HostIp":"0.0.0.0","HostPort":"28083"}]}'
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303032","changes":[{"port":"monero_zmq","enabled":true,"bind_ip":"192.168.1.10","host_port":28083}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .error_code)" = port_in_use ] || fail "other Docker port lacked typed conflict status"
+[ "$(status .port)" = monero_zmq ] || fail "other Docker conflict named the wrong setting"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "other Docker conflict changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "other Docker conflict invoked apply"
+
+new_case mapped-ipv6-conflict
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export FAKE_SS_LISTENERS='LISTEN 0 4096 [::ffff:192.168.1.10]:28081 [::]:*'
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303037","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .error_code)" = port_in_use ] || fail "IPv4-mapped IPv6 listener was missed"
+[ "$(status .port)" = monero_rpc ] || fail "IPv4-mapped listener named the wrong setting"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "IPv4-mapped listener changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "IPv4-mapped listener invoked apply"
+
+new_case own-port-swap
+export FAKE_SS_LISTENERS='LISTEN 0 4096 192.168.1.10:8332 0.0.0.0:*'
+request '{"id":"30303030303030303030303030303033","changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":8332}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = applied ] || fail "own Tor listener prevented a port swap"
+[ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = false ] || fail "port swap did not close Bitcoin RPC"
+[ "$(jq -r '.monero.rpc_port' "$case_root/config/config.json")" = 8332 ] || fail "port swap did not move Monero RPC"
+
+new_case inspection-failure
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export FAKE_SS_FAIL=1
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303034","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = failed ] || fail "listener inspection failure did not fail safely"
+[ "$(status .error_code)" = port_check_failed ] || fail "listener inspection failure lacked typed status"
+[ "$(status 'has("port")')" = false ] || fail "listener inspection failure included a misleading port"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "inspection failure changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "inspection failure invoked apply"
+
+new_case wrong-tor
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export FAKE_TOR_CONFIG_FILES=/another/install/docker-compose.yml
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303035","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .error_code)" = port_check_failed ] || fail "unrelated Tor container was trusted"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "unrelated Tor container changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "unrelated Tor container invoked apply"
 
 new_case disabled-node
 jq '.monero.enabled=false | .monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
@@ -307,7 +434,8 @@ grep -q 'compose .*up -d --pull never --no-build --no-deps tor dashboard' "$FAKE
   fail "actual stack open did not target only Tor and dashboard"
 
 grep -q '^ProtectSystem=strict$' packaging/systemd/bitcoin-starter-stack-port-control.service || fail "systemd service is not filesystem-hardened"
-grep -q '^RestrictAddressFamilies=AF_UNIX$' packaging/systemd/bitcoin-starter-stack-port-control.service || fail "systemd service can use public network sockets"
+grep -q '^RestrictAddressFamilies=AF_UNIX AF_NETLINK$' packaging/systemd/bitcoin-starter-stack-port-control.service ||
+  fail "systemd service lacks its restricted Unix and socket-diagnostic families"
 grep -q '^Persistent=true$' packaging/systemd/bitcoin-starter-stack-port-control.timer || fail "systemd timer does not catch up after reboot"
 
 echo "PASS: test_port_control.sh"

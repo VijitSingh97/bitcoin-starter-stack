@@ -16,6 +16,13 @@ import (
 
 const maxSettingsBody = 16 << 10
 
+const defaultPriceCurrency = "USD"
+
+var allowedPriceCurrencies = map[string]bool{
+	"USD": true, "EUR": true, "GBP": true, "INR": true, "CAD": true,
+	"AUD": true, "JPY": true, "RUB": true, "CNY": true,
+}
+
 var (
 	ErrSettingsUnavailable = errors.New("notification settings unavailable")
 	ErrSettingsInvalid     = errors.New("invalid notification settings")
@@ -32,6 +39,7 @@ type notificationSettings struct {
 	AlertNewBlock       bool   `json:"alert_new_block"`
 	AlertNewBlockMonero bool   `json:"alert_new_block_monero"`
 	TowerLabels         bool   `json:"tower_labels"`
+	DefaultCurrency     string `json:"default_currency"`
 }
 
 type settingsUpdate struct {
@@ -44,6 +52,7 @@ type settingsUpdate struct {
 	AlertNewBlock       *bool   `json:"alert_new_block,omitempty"`
 	AlertNewBlockMonero *bool   `json:"alert_new_block_monero,omitempty"`
 	TowerLabels         *bool   `json:"tower_labels,omitempty"`
+	DefaultCurrency     *string `json:"default_currency,omitempty"`
 	present             map[string]bool
 }
 
@@ -59,6 +68,7 @@ func notificationSettingsFromEnv() notificationSettings {
 		HealthchecksURL:     healthchecks,
 		AlertNewBlock:       enabled(os.Getenv("ALERT_NEW_BLOCK")),
 		AlertNewBlockMonero: enabled(os.Getenv("ALERT_NEW_BLOCK_MONERO")),
+		DefaultCurrency:     defaultPriceCurrency,
 	}
 }
 
@@ -73,7 +83,7 @@ func loadNotificationSettings(path string, baseline notificationSettings) (notif
 	if err != nil {
 		return notificationSettings{}, false, err
 	}
-	var settings notificationSettings
+	settings := notificationSettings{DefaultCurrency: defaultPriceCurrency}
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&settings); err != nil {
@@ -99,6 +109,9 @@ func loadNotificationSettings(path string, baseline notificationSettings) (notif
 }
 
 func validateStoredSettings(settings notificationSettings) error {
+	if !allowedPriceCurrencies[settings.DefaultCurrency] {
+		return errors.New("invalid default currency")
+	}
 	if settings.TelegramEnabled {
 		if err := validateSecret(settings.TelegramBotToken, 10, 256); err != nil {
 			return err
@@ -192,6 +205,9 @@ func (update settingsUpdate) apply(current notificationSettings) (notificationSe
 	if update.TowerLabels != nil {
 		next.TowerLabels = *update.TowerLabels
 	}
+	if update.DefaultCurrency != nil {
+		next.DefaultCurrency = *update.DefaultCurrency
+	}
 	if next.TelegramEnabled {
 		if update.TelegramBotToken != nil && *update.TelegramBotToken != "" {
 			next.TelegramBotToken = *update.TelegramBotToken
@@ -238,6 +254,7 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 		"bitcoin_enabled":         m.bitcoinEnabled,
 		"monero_enabled":          m.moneroEnabled,
 		"tower_labels":            m.settings.TowerLabels,
+		"default_currency":        m.settings.DefaultCurrency,
 		"overridden":              m.settingsOverridden,
 		"can_configure":           canConfigure,
 	}, nil
@@ -366,7 +383,10 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("scope") == "appearance" {
-		writeJSON(w, map[string]any{"tower_labels": view["tower_labels"]})
+		writeJSON(w, map[string]any{
+			"tower_labels":     view["tower_labels"],
+			"default_currency": view["default_currency"],
+		})
 		return
 	}
 	view["port_control"] = a.portControlView()

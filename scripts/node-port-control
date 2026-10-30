@@ -8,6 +8,7 @@ env_file=$state_root/.env
 config_file=$config_root/config.json
 config_lock=$state_root/.config.lock
 docker_bin=${DOCKER_BIN:-docker}
+ss_bin=${SS_BIN:-ss}
 control_state=$state_root/port-control
 request_path=/state/port-control.request
 processing_path=/state/port-control.processing
@@ -38,7 +39,10 @@ dashboard_exec() {
 
 write_status() {
   status=$(jq -nc --arg id "$1" --arg state "$2" --arg message "$3" \
-    '{id:$id,state:$state,message:$message,affected_services:["tor","dashboard"]}')
+    --arg error_code "${4:-}" --arg port "${5:-}" '
+      {id:$id,state:$state,message:$message,affected_services:["tor","dashboard"]} |
+      if $error_code == "" then . else . + {error_code:$error_code} end |
+      if $port == "" then . else . + {port:$port} end')
   printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c \
     'umask 077; cat >/state/.port-control.status.tmp; mv /state/.port-control.status.tmp /state/port-control.status' >/dev/null
 }
@@ -68,6 +72,64 @@ EOF
     return 0
   fi
   [ "$1" = 192 ] && [ "$2" = 168 ]
+}
+
+published_ports() {
+  ports_json=$("$docker_bin" inspect --format '{{json .NetworkSettings.Ports}}' "$1" 2>/dev/null) || return 1
+  printf '%s' "$ports_json" | jq -e 'type == "object"' >/dev/null 2>&1 || return 1
+  printf '%s' "$ports_json" | jq -r 'to_entries[] | select(.key | endswith("/tcp")) | .value[]? |
+    [.HostIp, .HostPort] | @tsv'
+}
+
+binding_conflicts() {
+  desired_ip=$1
+  desired_port=$2
+  occupied_ip=$3
+  occupied_port=$4
+  case "$occupied_ip" in ::ffff:*) occupied_ip=${occupied_ip#::ffff:} ;; esac
+  [ "$desired_port" = "$occupied_port" ] || return 1
+  case "$occupied_ip" in
+    '' | 0.0.0.0 | '*' | :: | '[::]') return 0 ;;
+  esac
+  [ "$desired_ip" = "$occupied_ip" ]
+}
+
+own_listener() {
+  listener_ip=$1
+  listener_port=$2
+  normalized_listener_ip=$listener_ip
+  case "$normalized_listener_ip" in ::ffff:*) normalized_listener_ip=${normalized_listener_ip#::ffff:} ;; esac
+  case "$normalized_listener_ip" in '' | '*' | :: | '[::]') normalized_listener_ip=0.0.0.0 ;; esac
+  while IFS="$(printf '\t')" read -r own_ip own_port; do
+    case "$own_ip" in ::ffff:*) own_ip=${own_ip#::ffff:} ;; esac
+    case "$own_ip" in '' | '*' | :: | '[::]') own_ip=0.0.0.0 ;; esac
+    if [ "$own_ip" = "$normalized_listener_ip" ] && [ "$own_port" = "$listener_port" ]; then
+      return 0
+    fi
+  done <<EOF
+$own_bindings
+EOF
+  return 1
+}
+
+port_available() {
+  desired_ip=$1
+  desired_port=$2
+  while IFS="$(printf '\t')" read -r occupied_ip occupied_port; do
+    [ -n "$occupied_port" ] || continue
+    binding_conflicts "$desired_ip" "$desired_port" "$occupied_ip" "$occupied_port" && return 1
+  done <<EOF
+$other_bindings
+EOF
+  while IFS="$(printf '\t')" read -r occupied_ip occupied_port; do
+    [ -n "$occupied_port" ] || continue
+    if binding_conflicts "$desired_ip" "$desired_port" "$occupied_ip" "$occupied_port" &&
+      ! own_listener "$occupied_ip" "$occupied_port"; then
+      return 1
+    fi
+  done <<EOF
+$host_bindings
+EOF
 }
 
 password=$(env_get DASHBOARD_PASSWORD)
@@ -230,6 +292,81 @@ while [ "$attempt" -lt 3 ]; do
     exit 0
   fi
   rm -rf "$validate_dir"
+  if printf '%s' "$changes" | jq -e 'any(.[]; .enabled)' >/dev/null; then
+    tor_id=$($docker_bin inspect --format '{{.Id}}' tor 2>/dev/null || true)
+    own_bindings=
+    other_bindings=
+    host_bindings=
+    inspection_ok=1
+    if [ -z "$tor_id" ] || ! own_bindings=$(published_ports "$tor_id"); then
+      inspection_ok=0
+    fi
+    tor_config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' \
+      "$tor_id" 2>/dev/null || true)
+    case ",$tor_config_files," in
+      *",$stack_root/docker-compose.yml,"*) ;;
+      *) inspection_ok=0 ;;
+    esac
+    if ! container_ids=$($docker_bin ps -q --no-trunc 2>/dev/null); then
+      inspection_ok=0
+      container_ids=
+    fi
+    for container_id in $container_ids; do
+      [ "$container_id" = "$tor_id" ] && continue
+      if ! bindings=$(published_ports "$container_id"); then
+        inspection_ok=0
+        break
+      fi
+      if [ -n "$bindings" ]; then
+        other_bindings=$(printf '%s\n%s' "$other_bindings" "$bindings")
+      fi
+    done
+    if ! ss_output=$($ss_bin -H -ltn 2>/dev/null); then
+      inspection_ok=0
+      ss_output=
+    fi
+    if [ "$inspection_ok" = 1 ]; then
+      host_bindings=$(printf '%s\n' "$ss_output" | awk '
+        NF >= 4 {
+          endpoint=$4
+          if (endpoint ~ /^\[/) {
+            sub(/^\[/, "", endpoint)
+            count=split(endpoint, parts, /\]:/)
+            if (count == 2) print parts[1] "\t" parts[2]
+          } else {
+            port=endpoint
+            sub(/^.*:/, "", port)
+            address=endpoint
+            sub(/:[^:]*$/, "", address)
+            print address "\t" port
+          }
+        }')
+    fi
+    if [ "$inspection_ok" != 1 ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" failed "Port availability could not be checked." port_check_failed
+      exit 0
+    fi
+    conflict_port=
+    while IFS="$(printf '\t')" read -r port bind_ip host_port; do
+      [ -n "$port" ] || continue
+      if ! port_available "$bind_ip" "$host_port"; then
+        conflict_port=$port
+        break
+      fi
+    done <<EOF
+$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip, (.host_port | tostring)] | @tsv')
+EOF
+    if [ -n "$conflict_port" ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" rejected "Selected port is already in use." port_in_use "$conflict_port"
+      exit 0
+    fi
+  fi
   if { [ "$had_config" = 1 ] && [ -f "$config_file" ] && cmp -s "$config_snapshot" "$config_file"; } ||
     { [ "$had_config" = 0 ] && [ ! -e "$config_file" ]; }; then
     rollback_snapshot=$config_snapshot

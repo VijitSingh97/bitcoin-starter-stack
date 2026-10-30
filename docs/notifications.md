@@ -26,12 +26,14 @@ configuration is unchanged.
 
 Each configured node has its own collapsible section. It shows whether its LAN
 RPC or ZMQ port is exposed. With a dashboard password and the installed host
-helper, the same bottom Save button can open or close those ports on a private
-IPv4 LAN address. Port edits stay local in the form until Save. The button reads
+helper, the same bottom Save button can open or close those ports using the
+server's configured private LAN address. The port number is editable; the
+address stays in server configuration. Port edits stay local until Save. The button reads
 **Save & restart** when a port change will recreate the Tor relay and dashboard;
 the blockchain node processes keep running. The helper validates the address,
-port, enabled node, saved credentials, and port collisions before updating
-`config.json` and applying the change.
+port, enabled node, saved credentials, and actual host/Docker port conflicts
+before updating `config.json` or restarting services. A conflict names the
+selected listener and leaves the edits available for correction.
 
 Three opt-in ways to keep an eye on the node set when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access

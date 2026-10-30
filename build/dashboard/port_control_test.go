@@ -83,6 +83,7 @@ func TestPortControlQueuesStrictOpenAndCloseRequestAndReportsStatus(t *testing.T
 	a.cfg.moneroEnabled = true
 	a.cfg.moneroRPCEndpoint = ""
 	a.cfg.moneroZMQEndpoint = "192.168.1.50:18083"
+	t.Setenv("MONERO_RPC_BIND_IP", "192.168.1.50")
 	enablePortControl(t, a)
 	handler := a.routes()
 
@@ -95,6 +96,9 @@ func TestPortControlQueuesStrictOpenAndCloseRequestAndReportsStatus(t *testing.T
 		`{"changes":[{"port":"monero_rpc","enabled":false}]}`,
 		`{"changes":[{"port":"bitcoin_rpc","enabled":false,"bind_ip":"192.168.1.50"}]}`,
 		`{"changes":[{"port":"monero_rpc","enabled":true}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"host_port":0}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"host_port":8332}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"host_port":null}]}`,
 		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"127.0.0.1","host_port":18081}]}`,
 		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"8.8.8.8","host_port":18081}]}`,
 		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"fc00::1","host_port":18081}]}`,
@@ -112,7 +116,7 @@ func TestPortControlQueuesStrictOpenAndCloseRequestAndReportsStatus(t *testing.T
 		}
 	}
 
-	response := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.50","host_port":18081}]}`, true)
+	response := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"monero_rpc","enabled":true,"host_port":18081}]}`, true)
 	if response.Code != http.StatusAccepted || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("valid close = %d: %s", response.Code, response.Body.String())
 	}
@@ -177,5 +181,73 @@ func TestPortControlRejectsStaleCapabilityAndMalformedStatus(t *testing.T) {
 	}
 	if _, err := os.Stat(a.portControlPath("request")); !os.IsNotExist(err) {
 		t.Fatalf("stale capability wrote request: %v", err)
+	}
+}
+
+func TestPortControlUsesServerLANAddress(t *testing.T) {
+	for _, tc := range []struct {
+		name, savedBind, dashboardBind, wantBind string
+	}{
+		{"saved node address", "192.168.2.10", "192.168.1.10", "192.168.2.10"},
+		{"first enable on LAN", "", "192.168.1.10", "192.168.1.10"},
+		{"compose loopback default", "127.0.0.1", "192.168.1.10", "192.168.1.10"},
+		{"no private server address", "", "127.0.0.1", ""},
+		{"wildcard dashboard", "", "0.0.0.0", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := testApp(t, &rpcFixture{}, "dashboard-secret")
+			a.cfg.bitcoinDisabled = true
+			a.cfg.moneroEnabled = true
+			t.Setenv("MONERO_RPC_BIND_IP", tc.savedBind)
+			t.Setenv("DASHBOARD_BIND_IP", tc.dashboardBind)
+			enablePortControl(t, a)
+			handler := a.routes()
+			response := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"monero_rpc","enabled":true,"host_port":28081,"bind_ip":"192.168.8.8"}]}`, true)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("client address override accepted: %d", response.Code)
+			}
+			response = portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"monero_rpc","enabled":true,"host_port":28081}]}`, true)
+			if tc.wantBind == "" {
+				if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "configure a private LAN address on the server") {
+					t.Fatalf("missing server LAN address = %d %s", response.Code, response.Body.String())
+				}
+				return
+			}
+			if response.Code != http.StatusAccepted {
+				t.Fatalf("server LAN address rejected: %d %s", response.Code, response.Body.String())
+			}
+			b, err := os.ReadFile(a.portControlPath("request"))
+			var request portControlRequest
+			if err != nil || json.Unmarshal(b, &request) != nil || len(request.Changes) != 1 || request.Changes[0].BindIP != tc.wantBind {
+				t.Fatalf("server-derived binding = %#v, %v", request, err)
+			}
+		})
+	}
+}
+
+func TestPortControlNamesConflictingService(t *testing.T) {
+	a, _ := testApp(t, &rpcFixture{}, "dashboard-secret")
+	a.cfg.bitcoinRPCEndpoint = "192.168.1.50:8332"
+	a.cfg.moneroEnabled = true
+	t.Setenv("MONERO_RPC_BIND_IP", "192.168.1.50")
+	t.Setenv("DASHBOARD_BIND_IP", "192.168.1.50")
+	enablePortControl(t, a)
+	want := "Selected port for Monero RPC is already in use."
+	for _, body := range []string{
+		`{"changes":[{"port":"monero_rpc","enabled":true,"host_port":8332}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"host_port":80}]}`,
+	} {
+		response := portControlHTTP(a.routes(), http.MethodPost, "dashboard-secret", body, true)
+		if response.Code != http.StatusBadRequest || strings.TrimSpace(response.Body.String()) != want {
+			t.Fatalf("configured conflict = %d %s", response.Code, response.Body.String())
+		}
+	}
+	status := `{"id":"11111111111111111111111111111111","state":"rejected","error_code":"port_in_use","port":"monero_rpc","message":"untrusted host detail"}`
+	if err := os.WriteFile(a.portControlPath("status"), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	view := a.portControlView()
+	if view.Status == nil || view.Status.Message != want {
+		t.Fatalf("host conflict = %#v", view.Status)
 	}
 }

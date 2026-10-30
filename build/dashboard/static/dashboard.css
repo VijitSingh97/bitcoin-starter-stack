@@ -98,8 +98,17 @@ body {
   box-shadow: 0 2px 8px var(--shadow);
 }
 body[data-tower-labels="1"] .node-choice span { display: table; }
+.node-choice-label b,
+.node-choice-label small { display: block; }
+.node-choice-label small {
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+.node-choice-label small.stale { opacity: 0.65; }
 .node-choice-bitcoin { left: 32%; }
-.node-choice-monero { left: 68%; }
+.node-choice-monero { left: 68%; --accent: var(--monero); }
 .node-choice:focus { outline: 0; }
 body[data-tower-labels="1"] .node-choice-bitcoin:focus-visible span { box-shadow: 0 0 0 2px var(--accent); }
 body[data-tower-labels="1"] .node-choice-monero:focus-visible span { box-shadow: 0 0 0 2px var(--monero); }
@@ -137,8 +146,7 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
 .node-panel-close:hover, .node-panel-close:focus-visible { color: var(--text); }
 .node-state { color: var(--muted); line-height: 1.5; }
 .monero-card h2 { color: var(--monero); }
-.monero-badge { color: var(--monero); border-color: var(--monero); }
-.monero-progress { background: var(--monero); }
+#monero-panel, body[data-node="monero"] #tower-label { --accent: var(--monero); }
 
 @keyframes node-panel-in {
   from { opacity: 0; transform: scale(0.92); }
@@ -193,7 +201,8 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
 .settings-dialog fieldset { margin: 16px 0; border: 1px solid var(--border); border-radius: 6px; }
 .settings-dialog legend { color: var(--accent); }
 .settings-dialog label { display: block; margin: 12px 0; font-size: 0.9rem; }
-.settings-dialog label input:not([type="checkbox"]) {
+.settings-dialog label input:not([type="checkbox"]),
+#settings-default-currency {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -209,7 +218,7 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
 .settings-dialog details { margin: 10px 0; }
 .settings-dialog summary { color: var(--text); cursor: pointer; }
 .settings-port { margin: 10px 0 14px 24px; color: var(--muted); }
-.settings-port-fields { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; }
+.settings-port-fields { display: grid; grid-template-columns: minmax(100px, 140px); }
 .settings-port-fields label { margin: 4px 0; font-size: 0.75rem; }
 .settings-port-fields:has(input:disabled) { opacity: 0.55; }
 .settings-actions { display: flex; gap: 10px; }
@@ -340,7 +349,7 @@ h2 {
   font-size: 0.7rem;
   text-align: right;
 }
-.price-row .price-status.stale { color: #e0a800; }
+.price-row .price-status.stale { color: var(--accent); }
 .watch-card h2 { font-size: 1.1rem; }
 .wk-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wk { /* truncated key/address, click to expand */
@@ -600,5 +609,6 @@ hr {
 
 .monero-wallets { --accent: var(--monero); }
 #monero-fees { white-space: pre-line; text-align: right; }
-.monero-wallet-entry { border-top: 1px solid var(--border); padding-block: 12px; }
+.monero-wallet-entry { padding-block: 12px; }
+.monero-wallet-entry + .monero-wallet-entry { border-top: 1px solid var(--border); }
 .monero-wallet-entry input[type="file"] { display: block; max-width: 100%; margin-block: 8px; color: var(--muted); }

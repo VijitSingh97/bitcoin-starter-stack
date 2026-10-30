@@ -82,7 +82,7 @@ func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["tower_labels"] != false || view["overridden"] != false {
+	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["tower_labels"] != false || view["default_currency"] != "USD" || view["overridden"] != false {
 		t.Fatalf("unexpected settings view: %#v", view)
 	}
 	if view["can_configure"] != true {
@@ -111,14 +111,14 @@ func TestSettingsAppearanceScopeOmitsNotificationCredentials(t *testing.T) {
 		t.Fatalf("appearance response leaked notification settings: %s", w.Body.String())
 	}
 	var view map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || len(view) != 1 || view["tower_labels"] != false {
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || len(view) != 2 || view["tower_labels"] != false || view["default_currency"] != "USD" {
 		t.Fatalf("appearance response = %#v, %v", view, err)
 	}
 }
 
 func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *testing.T) {
 	a, handler := testApp(t, &rpcFixture{}, "")
-	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true,"tower_labels":true}`
+	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true,"tower_labels":true,"default_currency":"CNY"}`
 	if got := settingsRequest(handler, http.MethodPost, "", body, false); got.Code != http.StatusForbidden {
 		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
 	}
@@ -143,7 +143,7 @@ func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *tes
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
 	}
-	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true || view["tower_labels"] != true {
+	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true || view["tower_labels"] != true || view["default_currency"] != "CNY" {
 		t.Fatalf("restarted LAN settings view = %#v", view)
 	}
 }
@@ -196,6 +196,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 		AlertNewBlock:       boolPointer(true),
 		AlertNewBlockMonero: boolPointer(true),
 		TowerLabels:         boolPointer(true),
+		DefaultCurrency:     stringPointer("EUR"),
 	}
 	if err := m.updateSettings(update); err != nil {
 		t.Fatal(err)
@@ -211,7 +212,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 
 	restarted := NewMonitor("dev", t.TempDir(), stateDir)
 	got := restarted.notificationSettings()
-	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.AlertNewBlockMonero || !got.TowerLabels {
+	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.AlertNewBlockMonero || !got.TowerLabels || got.DefaultCurrency != "EUR" {
 		t.Fatalf("restarted settings = %#v", got)
 	}
 	view, err := restarted.settingsView(true)
@@ -224,7 +225,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !restarted.notificationSettings().TowerLabels || !restarted.notificationSettings().AlertNewBlockMonero {
+	if !restarted.notificationSettings().TowerLabels || !restarted.notificationSettings().AlertNewBlockMonero || restarted.notificationSettings().DefaultCurrency != "EUR" {
 		t.Fatal("legacy settings update changed newer preferences")
 	}
 
@@ -248,7 +249,7 @@ func TestSettingsLoadOldOverrideDefaultsTowerLabelsOff(t *testing.T) {
 	}
 	m := NewMonitor("dev", t.TempDir(), stateDir)
 	view, err := m.settingsView(true)
-	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false || view["tower_labels"] != false {
+	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false || view["tower_labels"] != false || view["default_currency"] != "USD" {
 		t.Fatalf("old override view = %#v, %v", view, err)
 	}
 }
@@ -283,6 +284,7 @@ func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
 		`{"telegram_enabled":true,"telegram_chat_id":"new-chat","healthchecks_enabled":true,"alert_new_block":true,"unexpected":1}`,
 		`{"telegram_enabled":true,"telegram_bot_token":"bad token","telegram_chat_id":"new-chat","healthchecks_enabled":true,"healthchecks_url":"https://hc-ping.com/id","alert_new_block":true}`,
 		`{"telegram_enabled":true,"telegram_bot_token":"ok","telegram_chat_id":"new-chat","healthchecks_enabled":true,"healthchecks_url":"http://hc-ping.com/id","alert_new_block":true}`,
+		`{"telegram_enabled":true,"telegram_chat_id":"new-chat","healthchecks_enabled":true,"alert_new_block":true,"default_currency":"DOGE"}`,
 		`{"reset":true,"alert_new_block":true}`,
 		`{"reset":true,"alert_new_block":null}`,
 		`{"reset":false}`,

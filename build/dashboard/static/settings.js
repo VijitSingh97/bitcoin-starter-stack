@@ -6,6 +6,7 @@ export function notificationPayload(values) {
     alert_new_block: !!values.alert_new_block_bitcoin,
     alert_new_block_monero: !!values.alert_new_block_monero,
     tower_labels: !!values.tower_labels,
+    default_currency: normalizeDefaultCurrency(values.default_currency),
   };
   const token = String(values.telegram_bot_token || "").trim();
   const url = String(values.healthchecks_url || "").trim();
@@ -21,6 +22,7 @@ export function configurationAccess(data) {
 export function notificationChanged(saved, payload) {
   const fields = ["telegram_enabled", "telegram_chat_id", "healthchecks_enabled", "alert_new_block_monero", "tower_labels"];
   if (fields.some((field) => payload[field] !== saved?.[field])) return true;
+  if (payload.default_currency !== normalizeDefaultCurrency(saved?.default_currency)) return true;
   if (payload.alert_new_block !== (saved?.alert_new_block_bitcoin ?? saved?.alert_new_block)) return true;
   if (Object.hasOwn(payload, "telegram_bot_token") && payload.telegram_bot_token !== saved?.telegram_bot_token) return true;
   return Object.hasOwn(payload, "healthchecks_url") && payload.healthchecks_url !== saved?.healthchecks_url;
@@ -31,9 +33,10 @@ export function configuredNodeVisibility(data) {
 }
 
 export function portControlModel(data) {
+  const portIDs = ["bitcoin_rpc", "monero_rpc", "monero_zmq"];
   const ports = {};
   for (const port of Array.isArray(data?.ports) ? data.ports : []) {
-    if (!["bitcoin_rpc", "monero_rpc", "monero_zmq"].includes(port?.id)) continue;
+    if (!portIDs.includes(port?.id)) continue;
     ports[port.id] = {
       id: port.id,
       enabled: port.enabled === true,
@@ -44,12 +47,16 @@ export function portControlModel(data) {
   const state = ["pending", "applied", "rejected", "failed"].includes(data?.status?.state) ? data.status.state : "";
   const affectedServices = Array.isArray(data?.status?.affected_services)
     ? data.status.affected_services.filter((service) => ["tor", "dashboard"].includes(service)) : [];
+  const errorCode = data?.status?.error_code === "port_in_use" ? "port_in_use" : "";
+  const errorPort = errorCode && portIDs.includes(data?.status?.port) ? data.status.port : "";
   return {
     available: data?.available === true,
     ports,
     state,
     message: state ? String(data.status.message || "") : "",
     affected_services: [...new Set(affectedServices)],
+    error_code: state ? errorCode : "",
+    port: state ? errorPort : "",
   };
 }
 
@@ -60,36 +67,67 @@ export function portChanges(ports, draft) {
     const after = draft?.[id];
     if (!before || !after) continue;
     const enabled = after.enabled === true;
-    const bindIP = String(after.bind_ip || "").trim();
     const hostPort = Number(after.host_port);
-    if (enabled === before.enabled && (!enabled || (bindIP === before.bind_ip && hostPort === before.host_port))) continue;
+    if (enabled === before.enabled && (!enabled || hostPort === before.host_port)) continue;
     const change = { port: id, enabled };
-    if (enabled) Object.assign(change, { bind_ip: bindIP, host_port: hostPort });
+    if (enabled) change.host_port = hostPort;
     changes.push(change);
   }
   return changes;
 }
 
-export function privateLANIPv4(value) {
-  const parts = String(value).split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9][0-9]{0,2})$/.test(part) || Number(part) > 255)) return false;
-  const octets = parts.map(Number);
-  return octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168);
+export function portCollision(changes, draft, ports) {
+  for (const change of changes || []) {
+    if (!change.enabled) continue;
+    const bindIP = ports?.[change.port]?.bind_ip;
+    const conflict = Object.entries(draft || {}).some(([id, port]) => id !== change.port
+      && port?.enabled === true && Number(port.host_port) === change.host_port && ports?.[id]?.bind_ip === bindIP);
+    if (conflict) return change.port;
+  }
+  return "";
 }
 
-export function portSubmissionOutcome(view, draft) {
+export function portStatusMessage(view) {
+  const labels = { bitcoin_rpc: "Bitcoin RPC", monero_rpc: "Monero RPC", monero_zmq: "Monero ZMQ" };
+  if (view?.error_code === "port_in_use" && labels[view.port]) return `Selected port for ${labels[view.port]} is already in use.`;
+  return String(view?.message || "");
+}
+
+export function portDraftAfterStatus(draft, state, requestMatches) {
+  return requestMatches && state === "applied" ? undefined : draft;
+}
+
+export function portSubmissionOutcome(view, changes) {
   if (view?.state === "pending") return "queued";
-  return portChanges(view?.ports, draft).length === 0 ? "applied" : "unknown";
+  if (!Array.isArray(changes) || changes.length === 0) return "unknown";
+  const applied = changes.every((change) => {
+    const port = view?.ports?.[change.port];
+    if (!port || port.enabled !== change.enabled) return false;
+    return !change.enabled || port.host_port === change.host_port;
+  });
+  return applied ? "applied" : "unknown";
 }
 
 export function shouldPollPort(dialogOpen, state) {
   return dialogOpen === true && state === "pending";
 }
 
-export function applyTowerLabels(data, root = typeof document === "undefined" ? undefined : document.body) {
-  const value = data?.tower_labels === true ? "1" : "0";
-  if (root?.dataset) root.dataset.towerLabels = value;
-  return value;
+export function settingsSaveMessage(settingsSaved) {
+  return settingsSaved ? "Settings saved." : "";
+}
+
+const defaultCurrencies = ["USD", "EUR", "GBP", "INR", "CAD", "AUD", "JPY", "RUB", "CNY"];
+
+export function normalizeDefaultCurrency(value) {
+  const currency = String(value || "").toUpperCase();
+  return defaultCurrencies.includes(currency) ? currency : "USD";
+}
+
+export function applyAppearance(data, root = typeof document === "undefined" ? undefined : document.body, target = typeof document === "undefined" ? undefined : document) {
+  const detail = { tower_labels: data?.tower_labels === true, default_currency: normalizeDefaultCurrency(data?.default_currency) };
+  if (root?.dataset) root.dataset.towerLabels = detail.tower_labels ? "1" : "0";
+  if (target?.dispatchEvent) target.dispatchEvent(new CustomEvent("appearance-updated", { detail }));
+  return detail;
 }
 
 if (typeof document !== "undefined") {
@@ -105,6 +143,7 @@ if (typeof document !== "undefined") {
   const bitcoinNewBlock = byId("bitcoin-new-block");
   const moneroNewBlock = byId("monero-new-block");
   const towerLabels = byId("tower-labels");
+  const defaultCurrency = byId("default-currency");
   const save = byId("save");
   const reset = byId("reset");
   const portImpact = byId("port-impact");
@@ -117,6 +156,7 @@ if (typeof document !== "undefined") {
   let portRequestID = "";
   let ambiguousPortDraft;
   let ambiguousStatusPrefix = "";
+  let stagedPortDraft;
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
   const portRows = {
@@ -127,29 +167,29 @@ if (typeof document !== "undefined") {
 
   const portDraft = () => Object.fromEntries(Object.entries(portRows).map(([id, row]) => [id, {
     enabled: row.querySelector("[data-port-enabled]").checked,
-    bind_ip: row.querySelector("[data-port-bind]").value,
     host_port: Number(row.querySelector("[data-port-number]").value),
   }]));
 
-  const applyPortDraft = (draft) => {
+  const applyPortDraft = (draft, remember = true) => {
     for (const [id, values] of Object.entries(draft || {})) {
       const row = portRows[id];
       if (!row) continue;
       row.querySelector("[data-port-enabled]").checked = values.enabled === true;
-      row.querySelector("[data-port-bind]").value = values.bind_ip || "";
       row.querySelector("[data-port-number]").value = values.host_port || "";
     }
-    updatePortPlan();
+    if (remember) stagedPortDraft = draft;
+    updatePortPlan(false);
   };
 
-  const updatePortPlan = () => {
+  const updatePortPlan = (remember = false) => {
     const pending = portState === "pending";
-    const changes = portChanges(savedPorts, portDraft());
+    const draft = portDraft();
+    const changes = portChanges(savedPorts, draft);
+    if (remember) stagedPortDraft = changes.length ? draft : undefined;
     for (const row of Object.values(portRows)) {
       const enabled = row.querySelector("[data-port-enabled]");
       const locked = !allowed || !portAvailable || pending || row.hidden;
       enabled.disabled = locked;
-      row.querySelector("[data-port-bind]").disabled = locked || !enabled.checked;
       row.querySelector("[data-port-number]").disabled = locked || !enabled.checked;
     }
     portImpact.hidden = changes.length === 0 && !pending;
@@ -161,16 +201,21 @@ if (typeof document !== "undefined") {
 
   const renderPortControl = (data) => {
     const view = portControlModel(data);
+    const statusID = String(data?.status?.id || "");
+    const requestMatches = !!portRequestID && statusID === portRequestID;
     if (view.state === "pending" && /^[0-9a-f]{32}$/.test(String(data?.status?.id || ""))) {
       portRequestID = data.status.id;
       try { localStorage.setItem("nodeStackPortRequest", portRequestID); } catch {}
     } else if (view.state && data?.status?.id !== portRequestID) {
       view.state = "";
       view.message = "";
+      view.error_code = "";
+      view.port = "";
     } else if (view.state && view.state !== "pending") {
       try { localStorage.removeItem("nodeStackPortRequest"); } catch {}
       portRequestID = "";
     }
+    stagedPortDraft = portDraftAfterStatus(stagedPortDraft, view.state, requestMatches);
     savedPorts = view.ports;
     portAvailable = view.available;
     portState = view.state;
@@ -179,10 +224,10 @@ if (typeof document !== "undefined") {
       row.hidden = !port;
       if (!port) continue;
       row.querySelector("[data-port-enabled]").checked = port.enabled;
-      row.querySelector("[data-port-bind]").value = port.bind_ip;
       row.querySelector("[data-port-number]").value = port.host_port || "";
     }
-    byId("port-status").textContent = view.message || (!view.available && Object.keys(view.ports).length
+    if (stagedPortDraft) applyPortDraft(stagedPortDraft, false);
+    byId("port-status").textContent = portStatusMessage(view) || (!view.available && Object.keys(view.ports).length
       ? "LAN port changes require a dashboard password and the installed host helper."
       : "");
     clearTimeout(portPoll);
@@ -212,14 +257,15 @@ if (typeof document !== "undefined") {
     byId("node-alerts").hidden = !nodes.bitcoin && !nodes.monero;
     renderPortControl(data.port_control);
     towerLabels.checked = !!data.tower_labels;
-    applyTowerLabels(data);
+    defaultCurrency.value = normalizeDefaultCurrency(data.default_currency);
+    applyAppearance(data);
     token.value = data.telegram_bot_token || "";
     chat.value = data.telegram_chat_id || "";
     url.value = data.healthchecks_url || "";
     token.placeholder = "Paste your bot token";
     url.placeholder = "https://hc-ping.com/…";
     reset.disabled = !allowed || !data.overridden;
-    telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = !allowed;
+    telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = defaultCurrency.disabled = !allowed;
     updateInputs();
     updatePortPlan();
   };
@@ -255,14 +301,16 @@ if (typeof document !== "undefined") {
       const view = portControlModel(data);
       renderPortControl(data);
       if (ambiguousPortDraft) {
-        const draft = ambiguousPortDraft;
-        const outcome = portSubmissionOutcome(view, draft);
+        const { draft, changes } = ambiguousPortDraft;
+        const outcome = portSubmissionOutcome(view, changes);
         if (outcome === "queued") {
           ambiguousPortDraft = undefined;
-          status.textContent = `${ambiguousStatusPrefix}Restart queued.`;
+          status.textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
         } else if (outcome === "applied") {
           ambiguousPortDraft = undefined;
-          status.textContent = `${ambiguousStatusPrefix}LAN port changes applied.`;
+          stagedPortDraft = undefined;
+          updatePortPlan(false);
+          status.textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
         } else {
           ambiguousPortDraft = undefined;
           applyPortDraft(draft);
@@ -276,7 +324,7 @@ if (typeof document !== "undefined") {
   async function load() {
     allowed = false;
     save.disabled = reset.disabled = true;
-    telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = true;
+    telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = defaultCurrency.disabled = true;
     updateInputs();
     updatePortPlan();
     status.textContent = "Loading…";
@@ -292,7 +340,7 @@ if (typeof document !== "undefined") {
   telegramEnabled.addEventListener("change", updateInputs);
   healthchecksEnabled.addEventListener("change", updateInputs);
   for (const row of Object.values(portRows)) {
-    for (const input of row.querySelectorAll("input")) input.addEventListener("input", updatePortPlan);
+    for (const input of row.querySelectorAll("input")) input.addEventListener("input", () => updatePortPlan(true));
   }
 
   const settingsPayload = () => notificationPayload({
@@ -304,13 +352,19 @@ if (typeof document !== "undefined") {
     alert_new_block_bitcoin: bitcoinNewBlock.checked,
     alert_new_block_monero: moneroNewBlock.checked,
     tower_labels: towerLabels.checked,
+    default_currency: defaultCurrency.value,
   });
 
   const validatePortPlan = (changes) => {
-    for (const row of Object.values(portRows)) row.querySelector("[data-port-bind]").setCustomValidity("");
+    for (const row of Object.values(portRows)) row.querySelector("[data-port-number]").setCustomValidity("");
     for (const change of changes) {
-      if (!change.enabled || privateLANIPv4(change.bind_ip) && Number.isInteger(change.host_port) && change.host_port >= 1 && change.host_port <= 65535) continue;
-      portRows[change.port].querySelector("[data-port-bind]").setCustomValidity("Enter a private IPv4 LAN address and a port from 1 to 65535.");
+      if (!change.enabled || Number.isInteger(change.host_port) && change.host_port >= 1 && change.host_port <= 65535) continue;
+      portRows[change.port].querySelector("[data-port-number]").setCustomValidity("Enter a port from 1 to 65535.");
+      return false;
+    }
+    const collision = portCollision(changes, portDraft(), savedPorts);
+    if (collision) {
+      portRows[collision].querySelector("[data-port-number]").setCustomValidity(portStatusMessage({ error_code: "port_in_use", port: collision }));
       return false;
     }
     return true;
@@ -319,7 +373,7 @@ if (typeof document !== "undefined") {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!allowed) return;
-    const changes = updatePortPlan();
+    const changes = updatePortPlan(true);
     const draft = portDraft();
     const portPlanValid = validatePortPlan(changes);
     const formValid = form.reportValidity();
@@ -358,7 +412,7 @@ if (typeof document !== "undefined") {
         try { localStorage.setItem("nodeStackPortRequest", portRequestID); } catch {}
       }
       renderPortControl(portView);
-      status.textContent = saveNotifications ? "Settings saved. Restart queued." : "Restart queued.";
+      status.textContent = settingsSaveMessage(saveNotifications);
     } catch (error) {
       render(settingsView);
       applyPortDraft(draft);
@@ -366,7 +420,7 @@ if (typeof document !== "undefined") {
       if (error.definitive) {
         status.textContent = `${prefix}LAN port changes were rejected: ${error.message}`;
       } else {
-        ambiguousPortDraft = draft;
+        ambiguousPortDraft = { draft, changes };
         ambiguousStatusPrefix = saveNotifications ? "Settings saved. " : "";
         status.textContent = `${ambiguousStatusPrefix}Checking whether the restart was queued…`;
         loadPortControl();
@@ -388,6 +442,6 @@ if (typeof document !== "undefined") {
   });
   fetch("/api/settings?scope=appearance")
     .then((response) => response.ok ? response.json() : Promise.reject())
-    .then(applyTowerLabels)
-    .catch(() => applyTowerLabels({}));
+    .then(applyAppearance)
+    .catch(() => applyAppearance({}));
 }
