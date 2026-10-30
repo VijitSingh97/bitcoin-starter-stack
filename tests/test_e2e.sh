@@ -40,28 +40,31 @@ fail() {
 }
 
 BITCOIN_DATA_DIR=$(mktemp -d)
+MONERO_DATA_DIR=$(mktemp -d)
 WALLET_DATA_DIR=$(mktemp -d)
-chmod 777 "$BITCOIN_DATA_DIR" "$WALLET_DATA_DIR" # bitcoind runs as uid 1000; CI runners often aren't
+chmod 777 "$BITCOIN_DATA_DIR" "$MONERO_DATA_DIR" "$WALLET_DATA_DIR" # nodes run as uid 1000; CI runners often aren't
 
 # bitcoind writes as uid 1000, which the invoking user may not be able to
 # delete — clean the datadir through a root container instead of rm -rf
 cleanup() {
   docker compose down -v --remove-orphans >/dev/null 2>&1 || true
   docker run --rm -v "$BITCOIN_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
+  docker run --rm -v "$MONERO_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
   docker run --rm -v "$WALLET_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
   rmdir "$BITCOIN_DATA_DIR" 2>/dev/null || true
+  rmdir "$MONERO_DATA_DIR" 2>/dev/null || true
   rmdir "$WALLET_DATA_DIR" 2>/dev/null || true
   rm -f config.json .env # created by this test (guarded above)
 }
 trap cleanup EXIT
 
-# Setup exactly as a user does it: default paths, upgrade button n, LAN RPC n,
-# prune 1 GB, and don't download or start yet.
-printf 'e2eDashboardSharedPassword123\n\n\nn\nn\n1\nn\n' | ./stack init >/dev/null
+# Setup exactly as a user does it: both nodes, default Bitcoin storage,
+# upgrade button n, LAN relays n, prune Bitcoin to 1 GB, and don't start yet.
+printf 'e2eDashboardSharedPassword123\nboth\n\nn\n\nn\n1\n%s\nn\nn\nn\n' "$MONERO_DATA_DIR" | ./stack init >/dev/null
 # The documented customize loop: edit config.json, re-render. Point the
 # datadir at the temp dir, bind the dashboard to this host's LAN address, and
 # shrink dbcache for CI-sized runners.
-lan_ip=$(python3 - <<'PY'
+host_ip=$(python3 - <<'PY'
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.connect(("192.0.2.1", 9))
@@ -69,17 +72,28 @@ print(s.getsockname()[0])
 s.close()
 PY
 )
-jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$lan_ip" \
-  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.inbound_onion = true | .dashboard.onion = true | .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 | .dashboard.bind_ip = $ip' \
+test_lan_rpc=true
+if [ "$(uname -s)" = Darwin ] && [ ! -S /var/run/com.docker.vmnetd.sock ]; then
+  host_ip=127.0.0.1
+  test_lan_rpc=false
+fi
+jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$host_ip" --argjson lan_rpc "$test_lan_rpc" \
+  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.inbound_onion = true | .dashboard.onion = true | .dashboard.bind_ip = $ip |
+   if $lan_rpc then
+     .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 |
+     .monero.rpc_expose = true | .monero.rpc_bind_ip = $ip | .monero.rpc_port = 28081
+   else . end' \
   config.json >config.json.tmp && mv config.json.tmp config.json
 ./configure.sh >/dev/null
-dashboard_url="http://$lan_ip:80"
+dashboard_url="http://$host_ip:80"
 
 # The credentials the setup generated — every later assertion uses these.
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
-if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ]; then
-  fail "configure.sh did not render RPC credentials into .env"
+monero_rpc_user=$(sed -n 's/^MONERO_RPC_USER=//p' .env)
+monero_rpc_pass=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' .env)
+if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ] || [ -z "$monero_rpc_user" ] || [ -z "$monero_rpc_pass" ]; then
+  fail "configure.sh did not render separate node RPC credentials into .env"
 fi
 
 docker compose up -d --build --wait --wait-timeout 300 ||
@@ -91,10 +105,46 @@ docker exec dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*
 # rpcauth accepts the generated plaintext password end to end
 docker exec bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" getblockchaininfo |
   grep -q '"chain"' || fail "RPC rejected the generated password against the rpcauth hash"
-curl --noproxy '*' -fsS --user "$rpc_user:$rpc_pass" -H 'content-type: application/json' \
-  --data-binary '{"jsonrpc":"1.0","id":"e2e","method":"getblockchaininfo","params":[]}' \
-  "http://$lan_ip:18332" | jq -e '.result.chain != null and .error == null' >/dev/null ||
-  fail "LAN RPC relay did not authenticate to Core"
+if [ "$test_lan_rpc" = true ]; then
+  curl --noproxy '*' -fsS --user "$rpc_user:$rpc_pass" -H 'content-type: application/json' \
+    --data-binary '{"jsonrpc":"1.0","id":"e2e","method":"getblockchaininfo","params":[]}' \
+    "http://$host_ip:18332" | jq -e '.result.chain != null and .error == null' >/dev/null ||
+    fail "LAN RPC relay did not authenticate to Core"
+fi
+
+docker exec monero /usr/local/bin/monero-healthcheck || fail "Monero authenticated health check failed"
+monero_info=$(docker exec monero curl --silent --show-error --fail --digest \
+  --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' http://127.0.0.1:18085/json_rpc) ||
+  fail "Monero internal RPC rejected its generated Digest credentials"
+printf '%s' "$monero_info" | jq -e '.result.restricted == false and (.result.height | type == "number") and (.result.version | length > 0) and .result.start_time > 0' >/dev/null ||
+  fail "Monero internal RPC redacted node health fields"
+if docker exec monero curl --silent --fail --digest --user "$monero_rpc_user:wrong" \
+  -H 'content-type: application/json' --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' \
+  http://127.0.0.1:18085/json_rpc >/dev/null 2>&1; then
+  fail "Monero RPC accepted an invalid password"
+fi
+restricted_info=$(docker exec monero curl --silent --show-error --fail --digest \
+  --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' http://127.0.0.1:18081/json_rpc) ||
+  fail "Monero restricted RPC rejected its generated Digest credentials"
+printf '%s' "$restricted_info" | jq -e '.result.restricted == true and (.result.height | type == "number")' >/dev/null ||
+  fail "Monero public RPC is not restricted"
+printf '%s' "$restricted_info" | jq -e '(.result.version // "") == "" and (.result.start_time // 0) == 0 and (.result.pruning_seed // 0) == 0' >/dev/null ||
+  fail "Monero restricted RPC exposed private node metadata"
+restricted_admin=$(docker exec monero curl --silent --show-error --digest \
+  --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_connections"}' http://127.0.0.1:18081/json_rpc) ||
+  fail "Monero restricted RPC request failed before returning its denial"
+printf '%s' "$restricted_admin" | jq -e '.error != null' >/dev/null ||
+  fail "Monero restricted RPC allowed an administrative method"
+if [ "$test_lan_rpc" = true ]; then
+  lan_admin=$(curl --noproxy '*' -sS --digest --user "$monero_rpc_user:$monero_rpc_pass" \
+    -H 'content-type: application/json' --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_connections"}' \
+    "http://$host_ip:28081/json_rpc") || fail "Monero LAN restricted RPC relay did not authenticate"
+  printf '%s' "$lan_admin" | jq -e '.error != null' >/dev/null ||
+    fail "Monero LAN restricted RPC allowed an administrative method"
+fi
 
 # ...but the plaintext password is nowhere in the bitcoin container's config
 docker inspect bitcoin | grep -q "$rpc_pass" && fail "plaintext RPC password leaked into the bitcoin container"
@@ -112,6 +162,10 @@ for _ in 1 2 3 4 5 6; do
 done
 echo "$body" | grep -q "Sync Progress" || fail "dashboard never rendered live stats"
 echo "$body" | grep -q "Pruned" || fail "dashboard missing pruned badge on a pruned node"
+dashboard_monero=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/monero") ||
+  fail "dashboard Monero health API was unavailable"
+printf '%s' "$dashboard_monero" | jq -e '.enabled == true and .available == true and (.version | length > 0) and .uptime_seconds > 0 and (.pruned | type == "boolean")' >/dev/null ||
+  fail "dashboard Monero health API omitted unrestricted node fields"
 
 # The inbound onion service registers with tor's control port: once
 # ADD_ONION succeeds, the .onion address appears in localaddresses.
@@ -204,11 +258,16 @@ docker exec dashboard sh -c 'command -v nc >/dev/null && command -v nslookup >/d
 docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" \
   -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.25 9050' ||
   fail "bitcoin network probes are unavailable or cannot reach local Tor"
+docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" \
+  -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.25 9050' ||
+  fail "Monero network probes are unavailable or cannot reach local Tor"
 docker compose stop tor >/dev/null
 [ "$(docker inspect bitcoin --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
   fail "bitcoin does not have loopback-only DNS configured"
 [ "$(docker inspect dashboard --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
   fail "dashboard does not have loopback-only DNS configured"
+[ "$(docker inspect monero --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+  fail "Monero does not have loopback-only DNS configured"
 if docker exec dashboard nc -z -w 3 1.1.1.1 443; then
   fail "dashboard reached a public IP directly with Tor offline"
 fi
@@ -233,6 +292,18 @@ fi
 if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
   fail "bitcoin reached a public DNS server directly with Tor offline"
 fi
+if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
+  fail "Monero reached a public IP directly with Tor offline"
+fi
+if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
+  fail "Monero reached a public IPv6 address directly with Tor offline"
+fi
+if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
+  fail "Monero resolved public DNS with Tor offline"
+fi
+if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
+  fail "Monero reached a public DNS server directly with Tor offline"
+fi
 docker compose start tor >/dev/null
 for _ in $(seq 1 30); do
   [ "$(docker inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] && break
@@ -245,7 +316,7 @@ done
 # containers must terminate inside the stack subnet (172.29.0.x renders as
 # xx001DAC in /proc/net/tcp little-endian hex) — i.e. everything goes to tor
 # or intra-stack RPC, and nothing dials clearnet directly.
-for c in bitcoin dashboard; do
+for c in bitcoin monero dashboard; do
   bad=$(docker exec "$c" awk 'NR>1 && $4=="01" {split($3,r,":"); if (r[1] !~ /001DAC$/) print r[1]":"r[2]}' /proc/net/tcp 2>/dev/null || true)
   [ -z "$bad" ] || fail "clearnet egress from $c: $bad"
   bad6=$(docker exec "$c" sh -c 'awk "NR>1 && \$4==\"01\" {print \$3}" /proc/net/tcp6 2>/dev/null' || true)

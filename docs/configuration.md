@@ -6,13 +6,14 @@ the defaults below and auto-generates the internal RPC credentials. Create a
 only to override something. `configure.sh` renders it into a gitignored `.env`,
 which docker compose reads. Tracked files are never modified, so your settings
 can't end up in a commit. `./stack init` and `./stack restore` keep both files
-private with mode `600`. The wizard prints the new shared login once at the end;
-restore does not print credentials.
+private with mode `600`. The wizard prints the dashboard login and each selected
+node's separate login once at the end; restore does not print credentials.
 
 APT installations use `bitcoin-stack` in place of `./stack`. Their config is
 `/etc/bitcoin-starter-stack/config.json`; generated credentials and backups live
 under `/var/lib/bitcoin-starter-stack`, and chain data defaults to the dedicated
-`/var/lib/bitcoin-starter-stack/data/bitcoin` directory. Run package commands
+`/var/lib/bitcoin-starter-stack/data/bitcoin` and
+`/var/lib/bitcoin-starter-stack/data/monero` directories. Run package commands
 with `sudo`. A fresh package installation with no config or prior `.env` defaults
 to `prune_mb: 10000`; an explicit config or existing generated value always wins.
 `dashboard.control` is unavailable for APT installations because package
@@ -26,6 +27,7 @@ shows the overridable settings with their defaults:
 ```json
 {
     "bitcoin": {
+        "enabled": true,
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 128,
@@ -33,9 +35,22 @@ shows the overridable settings with their defaults:
         "inbound_onion": false,
         "blockfilterindex": false,
         "mem_limit_mb": 0,
+        "resource_profile": "off",
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 8332
+    },
+    "monero": {
+        "enabled": false,
+        "node_username": "admin",
+        "data_dir": "./data/monero",
+        "resource_profile": "off",
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 18081,
+        "zmq_expose": false,
+        "zmq_bind_ip": "",
+        "zmq_port": 18083
     },
     "dashboard": {
         "password": "",
@@ -61,8 +76,9 @@ shows the overridable settings with their defaults:
 
 | Key | Default | What it does |
 |---|---|---|
+| `bitcoin.enabled` | `true` | Runs the Bitcoin node. Set false for a Monero-only installation. |
 | `bitcoin.node_username` | `admin` | RPC username used by the dashboard and optional LAN wallet connections. Letters and numbers only. |
-| `bitcoin.node_password` | auto-generated | Shared RPC and dashboard password on fresh installs. Existing explicit or rendered credentials remain unchanged. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
+| `bitcoin.node_password` | auto-generated | Separate Bitcoin RPC password. Existing explicit or rendered credentials remain unchanged. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
 | `bitcoin.data_dir` | `./data/bitcoin` (source), `/var/lib/bitcoin-starter-stack/data/bitcoin` (APT) | Where the blockchain lives on the host. Relative source paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `128` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). Existing installs keep their rendered cache setting when this key is omitted; the Compose fallback remains 3000 for older `.env` files that predate this setting. |
 | `bitcoin.prune_mb` | `10000` | Keeps about 10 GB of recent block files after full validation. Existing explicit configuration and rendered state remain unchanged. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
@@ -72,7 +88,19 @@ shows the overridable settings with their defaults:
 | `bitcoin.rpc_expose` | `false` | `true` exposes authenticated Bitcoin RPC to a trusted private LAN through the Tor container's TCP relay. See [LAN wallet RPC](#lan-wallet-rpc-opt-in). |
 | `bitcoin.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host for the opt-in RPC listener. Required when `rpc_expose` is true. Public, wildcard, loopback, malformed, and IPv6 addresses are rejected. |
 | `bitcoin.rpc_port` | `8332` | Host port for the opt-in RPC listener (`1`–`65535`). The internal Core RPC port remains `8332`. |
-| `dashboard.password` | shared auto-generated password | Enables basic auth on fresh installs. The wizard prints `admin` and its new shared password once after setup; the current dashboard accepts any basic-auth username with that password. Existing separate credentials remain unchanged. |
+| `bitcoin.resource_profile` | `off`; `compact` for a node selected by the APT wizard | Experimental APT-only profile: initial sync is uncapped, then a host timer applies 1 CPU and 2048 MiB after three spaced, healthy, current sync checks. Existing and source installs remain off. Explicit operator limits take precedence. |
+| `monero.enabled` | `false` | Runs the pruned Monero node and adds its health card to the dashboard. |
+| `monero.node_username` | `admin` | Digest-auth username for restricted Monero RPC. |
+| `monero.node_password` | auto-generated | Separate Digest-auth password for restricted Monero RPC. LAN exposure requires at least 24 letters or numbers. |
+| `monero.data_dir` | `./data/monero` (source), `/var/lib/bitcoin-starter-stack/data/monero` (APT) | Monero blockchain data on the host. The node always uses pruned storage. |
+| `monero.resource_profile` | `off`; `compact` for a node selected by the APT wizard | The same experimental per-node limit as Bitcoin. Sustained Monero operation at 2 GiB remains unqualified. |
+| `monero.rpc_expose` | `false` | Publishes restricted Digest-auth RPC to one trusted private-LAN address. |
+| `monero.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host. Required when Monero RPC exposure is enabled. |
+| `monero.rpc_port` | `18081` | Host port for the opt-in restricted RPC relay. |
+| `monero.zmq_expose` | `false` | Publishes the Monero ZMQ feed to one trusted private-LAN address for software such as P2Pool. ZMQ has no application authentication. |
+| `monero.zmq_bind_ip` | `""` | Private IPv4 address assigned to this host. Required when ZMQ exposure is enabled. |
+| `monero.zmq_port` | `18083` | Host port for the opt-in ZMQ relay. |
+| `dashboard.password` | auto-generated | Enables basic auth on fresh installs. It is separate from both node passwords. The wizard prints the selected credentials once after setup. |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
 | `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. `./stack up`/`apply` start and manage the host-side agent for you; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
 | `dashboard.bind_ip` | `127.0.0.1` | Host address for dashboard port 80. Use loopback for access from this machine only, or an RFC1918 address (`10/8`, `172.16/12`, or `192.168/16`) assigned to this host for LAN access. Public, wildcard, and IPv6 binds are rejected. |
@@ -87,9 +115,22 @@ strong random RPC credentials on first run (reused on later runs).
 Starting and applying use local images only. See [Tor-only networking](privacy.md)
 for the boundary between host downloads and Tor-only runtime traffic.
 
-Fresh headless installs use the same generated value for `BITCOIN_RPC_PASSWORD`
-and `DASHBOARD_PASSWORD`. Read it locally from the mode-600 `.env`; upgrades
-preserve existing usernames and separate passwords instead of forcing a rotation.
+Fresh installs generate independent dashboard, Bitcoin RPC, and Monero RPC
+passwords. Read them locally from the mode-600 `.env`; upgrades preserve
+existing credentials instead of forcing a rotation.
+
+The compact profile uses `bitcoin-starter-stack-resource-profile.timer`; it
+never runs inside the dashboard or mounts the Docker socket there. It may
+cleanly restart a synced node once to release sync memory before rechecking.
+If memory stays above 1792 MiB, it leaves the node uncapped and records the
+reason in the system journal. A Bitcoin cache above 512 MiB also blocks the
+handoff. Lower `bitcoin.dbcache_mb` explicitly before retrying. Recreated
+containers are qualified again, so they can briefly run without caps after an
+upgrade. `off` stops future automatic changes; removing an already-applied
+Docker limit requires recreating the node with `bitcoin-stack apply`.
+
+Notification settings currently monitor Bitcoin only. A Monero-only install
+does not send Bitcoin Telegram alerts or Bitcoin Healthchecks pings.
 
 ## Applying changes
 

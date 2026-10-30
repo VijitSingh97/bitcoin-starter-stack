@@ -10,10 +10,10 @@
   so your user can run `docker` without sudo.
 - **`jq`, `openssl`, and `curl`** — configuration and downloads.
 - Hardware per [Hardware Requirements](hardware.md) — the short version:
-  2 CPUs, 4 GB RAM, and 30–60 GB free on an SSD are the recommended target for
-  the default pruned node. A short trial also worked with the containers limited
-  to a 1 CPU/2 GB budget; full initial sync and heavier loads need longer testing.
-  An archival node needs about 1 TB free today.
+  allow 30–60 GB SSD space for Bitcoin and 120–150 GiB for Monero.
+  The experimental steady budget is 1 CPU / 2 GiB per node, plus shared services
+  and host overhead. Bitcoin has passed a short capped trial; sustained
+  qualification for both daemons is pending. Initial sync is uncapped.
 
 Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
@@ -31,6 +31,7 @@ locations:
 - configuration: `/etc/bitcoin-starter-stack/config.json`
 - generated credentials and backups: `/var/lib/bitcoin-starter-stack/`
 - Bitcoin chain data: `/var/lib/bitcoin-starter-stack/data/bitcoin/`
+- Monero chain data: `/var/lib/bitcoin-starter-stack/data/monero/`
 
 APT installation does not start containers, run setup, or change an existing
 checkout. Run `sudo bitcoin-stack init` explicitly after installation. A new
@@ -51,7 +52,7 @@ sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
 
-The wizard configures the node, downloads missing images with the host's Docker
+The wizard lets you select Bitcoin, Monero, or both, downloads missing images with the host's Docker
 settings, and starts the stack when you accept its final default. Docker keeps
 image layers in its own managed storage. Neither package installation nor the
 wizard changes the Docker daemon or its proxy settings.
@@ -78,14 +79,14 @@ network action.
 `./stack up` runs `configure.sh` on first launch, which renders a gitignored
 `.env` and creates the data directory. With no `config.json` it uses sensible
 defaults (10 GB of recent blocks, about 30–60 GB total disk) and **auto-generates**
-the internal RPC password (username defaults to `admin`) shared by the dashboard
-and bitcoind.
+separate passwords for the dashboard and each node's RPC (username defaults to
+`admin`). Existing generated credentials are retained on subsequent applies.
 
 If you skip the wizard, read the generated dashboard login locally after first
 start with `sed -n 's/^DASHBOARD_PASSWORD=/Password: /p' .env`; the username is
 `admin`. The wizard instead prints its newly created login once at the end.
 
-The `tor` and `dashboard` images are published prebuilt on GHCR
+The `tor`, `dashboard`, and optional `monero` images are published prebuilt on GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
 (Raspberry Pi). `./stack pull` downloads them with the host's existing Docker
 settings. The running Bitcoin and dashboard containers remain isolated behind
@@ -93,10 +94,10 @@ Tor regardless of how their images were obtained.
 
 Everything is optional. Two ways to customize:
 
-- **`./stack init`** — an interactive wizard that asks for a shared RPC/dashboard
-  password (Enter generates a strong one and prints it once at the end), the data
-  directory, a loopback or private-LAN dashboard address, one-click upgrades,
-  optional private-LAN wallet RPC, recent-block retention, and whether to download
+- **`./stack init`** — an interactive wizard that asks for a dashboard
+  password (Enter generates one), selected nodes, their data directories,
+  a loopback or private-LAN dashboard address, one-click upgrades,
+  optional private-LAN RPC, Bitcoin recent-block retention, and whether to download
   missing images and start. Every prompt has a default you accept by pressing Enter.
 - Or edit `config.json` by hand (copy `config.example.json`) and run
   `./stack apply`. Stick to letters and numbers in any credentials you set.
@@ -106,21 +107,34 @@ The full key reference is in [Configuration](configuration.md).
 A default source-install wizard run includes these choices:
 
 ```text
-Shared RPC and dashboard password (letters/numbers) [Enter = strong random]:
-Bitcoin data directory [./data/bitcoin]:
+Dashboard password (letters/numbers) [Enter = strong random]:
+Nodes to run — bitcoin, monero (experimental), or both [bitcoin]:
 Dashboard bind address (loopback or private LAN) [127.0.0.1]:
 One-click upgrades from the dashboard (Upgrade button)? [y/N]
+Bitcoin data directory [./data/bitcoin]:
 Expose Bitcoin RPC to trusted LAN wallet apps? [y/N]
 Recent-block retention in GB [10]:
 Download missing containers and start the stack now? [Y/n]
-Dashboard login (shown once):
-  Username: admin
-  Password: <the password you entered or the generated password>
+Generated credentials (shown once):
+  Dashboard — username: admin  password: <dashboard password>
+  Bitcoin RPC — username: admin  password: <different Bitcoin RPC password>
 ```
 
 Package installation is deliberately noninteractive and does not start setup.
 After installing a future Debian/APT package, run `sudo bitcoin-stack init`
 explicitly. The project does not currently publish an APT feed.
+
+Selecting Monero asks for its own data directory, optional restricted LAN RPC,
+and optional LAN ZMQ for P2Pool. Selecting only Monero skips Bitcoin questions.
+The wizard prints credentials only for selected nodes. See
+[Pithead remote-node setup](nodes.md#monero-as-a-remote-node-for-pithead).
+
+Fresh package wizard installs select `resource_profile: compact` for each
+chosen node. A host timer waits for three spaced, healthy, current sync checks
+before applying 1 CPU and 2048 MiB, with no extra swap. Existing installs and
+source installs leave automatic resource limits off. The profile remains
+experimental until sustained capped operation is qualified; it is not a claim
+that a whole 2 GB VPS can host multiple nodes.
 
 ## First start: what to expect
 
@@ -136,8 +150,13 @@ explicitly. The project does not currently publish an APT feed.
    docker logs -f bitcoin
    ```
 
-3. **The dashboard** at `http://localhost` shows a holding page until
-   the node's RPC comes up, then live sync progress.
+3. **Monero**, if selected, starts a pruned sync through Tor. Its node status
+   uses authenticated internal RPC; LAN clients use a separate restricted
+   listener. No wallet service or miner starts.
+
+4. **The dashboard** at `http://localhost` shows two towers. Click a tower to
+   open its chain's card. It shows a connecting state until RPC comes up,
+   then sync progress. A disabled node says **Not configured**.
 
 To open it to your private LAN, set `dashboard.bind_ip` to this host's RFC1918
 address and run `./stack apply`. Wildcard and public binds are rejected.
@@ -145,7 +164,7 @@ address and run `./stack apply`. Wildcard and public binds are rejected.
 The node downloads and validates the whole historical chain, currently hundreds
 of GB (roughly 900 GB), even though it later retains only 10 GB of block files.
 Over Tor, expect the first sync to take days. The dashboard remains informative
-during sync. Container health is visible in `docker ps` — all three
+during sync. Container health is visible in `docker ps` — the selected
 services define health checks, though `bitcoin` only reports healthy once
 its RPC is warmed up.
 

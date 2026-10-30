@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 )
 
 type config struct {
+	bitcoinDisabled   bool
 	rpcURL            string
 	rpcUser           string
 	rpcPassword       string
@@ -25,11 +27,16 @@ type config struct {
 	port              string
 	settingsPort      string
 	control           bool
+	moneroEnabled     bool
+	moneroRPCURL      string
+	moneroRPCUser     string
+	moneroRPCPassword string
 }
 
 func envConfig() (config, error) {
 	cfg := config{
-		rpcURL: os.Getenv("RPC_URL"), rpcUser: os.Getenv("RPC_USER"), rpcPassword: os.Getenv("RPC_PASSWORD"),
+		bitcoinDisabled: explicitlyDisabled(os.Getenv("BITCOIN_ENABLED")),
+		rpcURL:          os.Getenv("RPC_URL"), rpcUser: os.Getenv("RPC_USER"), rpcPassword: os.Getenv("RPC_PASSWORD"),
 		dashboardPassword: os.Getenv("DASHBOARD_PASSWORD"), dataDir: os.Getenv("DATA_DIR"), stateDir: os.Getenv("STATE_DIR"), version: strings.TrimSpace(os.Getenv("STACK_VERSION")), port: os.Getenv("PORT"), settingsPort: os.Getenv("SETTINGS_PORT"),
 	}
 	if cfg.rpcURL == "" {
@@ -64,10 +71,30 @@ func envConfig() (config, error) {
 		}
 	}
 	cfg.control = enabled(os.Getenv("DASHBOARD_CONTROL"))
-	if cfg.rpcUser == "" || cfg.rpcPassword == "" {
+	cfg.moneroEnabled = enabled(os.Getenv("MONERO_ENABLED"))
+	cfg.moneroRPCURL = strings.TrimSpace(os.Getenv("MONERO_RPC_URL"))
+	if cfg.moneroRPCURL == "" {
+		cfg.moneroRPCURL = "http://172.29.0.30:18085"
+	}
+	cfg.moneroRPCUser = os.Getenv("MONERO_RPC_USER")
+	cfg.moneroRPCPassword = os.Getenv("MONERO_RPC_PASSWORD")
+	if cfg.moneroEnabled {
+		if parsed, err := url.Parse(cfg.moneroRPCURL); err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil {
+			return config{}, errors.New("MONERO_RPC_URL must be an HTTP URL without embedded credentials")
+		}
+		if cfg.moneroRPCUser == "" || cfg.moneroRPCPassword == "" {
+			return config{}, errors.New("MONERO_RPC_USER and MONERO_RPC_PASSWORD are required when MONERO_ENABLED is true")
+		}
+	}
+	if !cfg.bitcoinDisabled && (cfg.rpcUser == "" || cfg.rpcPassword == "") {
 		return config{}, errors.New("RPC_USER and RPC_PASSWORD are required")
 	}
 	return cfg, nil
+}
+
+func explicitlyDisabled(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "0" || value == "false"
 }
 
 func serveHTTPServers(ctx context.Context, servers []*http.Server) error {

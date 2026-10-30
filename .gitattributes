@@ -4,6 +4,7 @@
 .gitleaks.toml export-ignore
 CONTRIBUTING.md export-ignore
 scripts export-ignore
+packaging export-ignore
 tests export-ignore
 experiments export-ignore
 images export-ignore

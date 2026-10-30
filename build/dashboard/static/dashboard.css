@@ -10,6 +10,7 @@
   --faint: #444;
   --border: #333;
   --accent: #f2a900;
+  --monero: #ff6600;
   --tag-bg: #222;
   --tag-border: #444;
   --shadow: rgba(0, 0, 0, 0.8);
@@ -24,6 +25,7 @@
   --faint: #aaa;
   --border: #e0e0e0;
   --accent: #c77f00;
+  --monero: #d94f00;
   --tag-bg: #f0f0f0;
   --tag-border: #d4d4d4;
   --shadow: rgba(0, 0, 0, 0.12);
@@ -40,6 +42,7 @@
     --faint: #aaa;
     --border: #e0e0e0;
     --accent: #c77f00;
+    --monero: #d94f00;
     --tag-bg: #f0f0f0;
     --tag-border: #d4d4d4;
     --shadow: rgba(0, 0, 0, 0.12);
@@ -52,6 +55,102 @@ body {
   color: var(--text);
   margin: 0;
   transition: background 0.3s, color 0.3s;
+}
+
+.node-overview {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.node-choice {
+  position: absolute;
+  top: 50%;
+  width: min(260px, 42vw);
+  height: min(380px, 66vh);
+  transform: translate(-50%, -50%);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: 700 1.15rem monospace;
+  text-align: center;
+  padding-top: min(300px, 52vh);
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+.node-choice span, .node-choice small {
+  display: table;
+  margin-inline: auto;
+  padding: 3px 8px;
+  background: var(--card);
+  border-radius: 5px;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.node-choice small { margin-top: 4px; color: var(--muted); font-size: 0.68rem; font-weight: 400; }
+.node-choice-bitcoin { left: 32%; }
+.node-choice-monero { left: 68%; }
+.node-choice:hover, .node-choice:focus-visible {
+  transform: translate(-50%, -50%) scale(1.03);
+  background: rgba(128, 128, 128, 0.08);
+}
+.node-choice-bitcoin:hover, .node-choice-bitcoin:focus-visible { border-color: var(--accent); outline-color: var(--accent); }
+.node-choice-monero:hover, .node-choice-monero:focus-visible { border-color: var(--monero); outline-color: var(--monero); }
+
+.node-close-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: none;
+  background: rgba(0, 0, 0, 0.22);
+}
+body[data-node="bitcoin"] .node-close-backdrop,
+body[data-node="monero"] .node-close-backdrop { display: block; }
+
+.node-panel {
+  position: relative;
+  z-index: 1;
+  animation: node-panel-in 180ms ease-out;
+}
+.node-panel[hidden] { display: none; }
+.node-panel-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tag-bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+}
+.node-panel-close:hover, .node-panel-close:focus-visible { color: var(--text); }
+.node-state { color: var(--muted); line-height: 1.5; }
+.monero-card h2 { color: var(--monero); }
+.monero-badge { color: var(--monero); border-color: var(--monero); }
+.monero-progress { background: var(--monero); }
+
+@keyframes node-panel-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 700px) {
+  .node-choice {
+    left: 50%;
+    width: min(300px, 84vw);
+    height: 42vh;
+    padding-top: 31vh;
+  }
+  .node-choice-bitcoin { top: 27%; }
+  .node-choice-monero { top: 73%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-choice, .node-panel { transition: none; animation: none; }
 }
 
 .settings-open {

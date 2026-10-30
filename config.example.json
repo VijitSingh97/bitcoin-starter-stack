@@ -1,5 +1,6 @@
 {
     "bitcoin": {
+        "enabled": true,
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 128,
@@ -7,9 +8,22 @@
         "inbound_onion": false,
         "blockfilterindex": false,
         "mem_limit_mb": 0,
+        "resource_profile": "off",
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 8332
+    },
+    "monero": {
+        "enabled": false,
+        "node_username": "admin",
+        "data_dir": "./data/monero",
+        "resource_profile": "off",
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 18081,
+        "zmq_expose": false,
+        "zmq_bind_ip": "",
+        "zmq_port": 18083
     },
     "dashboard": {
         "password": "",

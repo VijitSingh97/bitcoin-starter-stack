@@ -405,6 +405,73 @@ func TestRuntimeConfigKeepsPasswordOptional(t *testing.T) {
 	}
 }
 
+func TestBitcoinEnabledDefaultsOnAndCanBeDisabledWithoutRPCCredentials(t *testing.T) {
+	t.Setenv("MONERO_ENABLED", "")
+	t.Setenv("BITCOIN_ENABLED", "")
+	t.Setenv("RPC_USER", "rpc-user")
+	t.Setenv("RPC_PASSWORD", "rpc-password")
+	cfg, err := envConfig()
+	if err != nil || cfg.bitcoinDisabled {
+		t.Fatalf("default Bitcoin configuration: %#v %v", cfg, err)
+	}
+
+	t.Setenv("BITCOIN_ENABLED", "false")
+	t.Setenv("RPC_USER", "")
+	t.Setenv("RPC_PASSWORD", "")
+	cfg, err = envConfig()
+	if err != nil || !cfg.bitcoinDisabled {
+		t.Fatalf("disabled Bitcoin configuration: %#v %v", cfg, err)
+	}
+}
+
+func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
+	fixture := &rpcFixture{}
+	rpcServer := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer rpcServer.Close()
+
+	cfg := config{bitcoinDisabled: true, rpcURL: rpcServer.URL, stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: rpcServer.URL, client: rpcServer.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := a.routes()
+	index := request(t, handler, http.MethodGet, "/", "")
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") || strings.Contains(index.Body.String(), "/static/prices.js") {
+		t.Fatalf("disabled index = %d %q", index.Code, index.Body.String())
+	}
+	metrics := request(t, handler, http.MethodGet, "/metrics", "")
+	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "bitcoin_node_enabled 0") || !strings.Contains(metrics.Body.String(), "bitcoin_node_up 0") {
+		t.Fatalf("disabled metrics = %d %q", metrics.Code, metrics.Body.String())
+	}
+	for _, check := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/watch"},
+		{http.MethodPost, "/api/watch"},
+		{http.MethodDelete, "/api/watch/Cold"},
+	} {
+		response := request(t, handler, check.method, check.path, "")
+		if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != "Bitcoin node is not configured" {
+			t.Fatalf("%s %s = %d %q", check.method, check.path, response.Code, response.Body.String())
+		}
+	}
+	if a.nodeRPC("getblockchaininfo", nil) != nil || a.walletRPC("wallet", "getbalances", nil, time.Second) != nil {
+		t.Fatal("disabled Bitcoin RPC helpers returned data")
+	}
+
+	done := a.startBackground(context.Background())
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled Bitcoin background workers did not stop immediately")
+	}
+	if fixture.count() != 0 {
+		t.Fatalf("disabled Bitcoin made %d RPC requests", fixture.count())
+	}
+}
+
 func TestSettingsPortConfigIsOptionalDistinctAndValid(t *testing.T) {
 	t.Setenv("RPC_USER", "rpc-user")
 	t.Setenv("RPC_PASSWORD", "rpc-password")

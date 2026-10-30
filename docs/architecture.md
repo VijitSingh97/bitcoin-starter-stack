@@ -1,6 +1,6 @@
 # Architecture
 
-Three containers share the internal `btc_net` bridge (`172.29.0.0/24`). Only
+Tor, the dashboard, and each selected node share the internal `btc_net` bridge (`172.29.0.0/24`). Only
 Tor also joins the external `tor_egress` bridge.
 
 ```mermaid
@@ -8,10 +8,11 @@ flowchart LR
     You(["👤 You · Browser"])
     Net(["🌐 Tor Network"])
 
-    subgraph stack ["🐳 bitcoin-starter-stack"]
+    subgraph stack ["🐳 Node Starter Stack"]
       subgraph internal ["btc_net · internal · 172.29.0.0/24"]
         Dashboard["📊 dashboard<br/>.27 · Go"]
         Bitcoin["🟠 bitcoin<br/>.26 · Bitcoin Core"]
+        Monero["🟠 monero<br/>.30 · monerod"]
         Tor["🧅 tor<br/>.25 · SOCKS5"]
       end
     end
@@ -21,7 +22,9 @@ flowchart LR
     You -.->|"optional authenticated RPC · private LAN"| Tor
     Tor -.->|"fixed TCP relay · :8332"| Bitcoin
     Dashboard -.->|"RPC :8332 (internal)"| Bitcoin
+    Dashboard -.->|"internal Digest RPC :18085"| Monero
     Bitcoin ==>|"SOCKS5 :9050 (internal)"| Tor
+    Monero ==>|"SOCKS5 :9050 (internal)"| Tor
     Tor <==> Net
 ```
 
@@ -31,6 +34,7 @@ flowchart LR
 |---|---|---|---|
 | `tor` | `alpine:3.24` + tor (built locally) | `tor` user | Outbound SOCKS5 proxy at `172.29.0.25:9050`. Fresh onion identity per volume. |
 | `bitcoin` | [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) (official, digest-pinned) | `1000:1000` | Full or pruned node. `-datadir=/data` bind-mounted from the host. Credentials, `dbcache`, and `prune` injected from `.env` at runtime. |
+| `monero` | Pinned, SHA-256 verified upstream Monero binary | `1000:1000` | Optional pruned node. Restricted Digest RPC, separately opt-in LAN RPC and ZMQ. |
 | `dashboard` | `alpine:3.24` + a static Go binary (built locally) | `1000:1000` | Polls the node over RPC every page load; reads the data dir read-only for disk stats. |
 
 Static IPs keep the bitcoin entrypoint's `-proxy=` argument (in
@@ -50,6 +54,12 @@ that makes `tor_egress` Tor's deterministic default route.
   Tor alone joins `tor_egress`; its gateway has explicit priority. The host
   dashboard and optional LAN RPC ports terminate in Tor's container and forward
   only to fixed internal addresses.
+- **Monero uses the same isolated network.** Both P2P sync and transaction relay
+  use Tor; DNS checkpoints and update checks are disabled. Restricted RPC and
+  ZMQ are separate private-LAN relays owned by the Tor container. The authenticated
+  unrestricted RPC listener at internal port 18085 supplies complete dashboard
+  metrics; it has no host relay or published port. LAN clients use restricted
+  port 18081. ZMQ has no authentication.
 - **Inbound onion service** (`inbound_onion` in `config.json`, opt-in):
   bitcoind registers an onion address over tor's cookie-authed control
   port and serves blocks to the network — still no clearnet, no host port,
@@ -77,7 +87,7 @@ that makes `tor_egress` Tor's deterministic default route.
 
 ## Trust boundaries — and non-boundaries
 
-- Fresh installs share one generated RPC/dashboard password. Existing deployments
+- Fresh installs generate separate dashboard, Bitcoin RPC, and Monero RPC passwords. Existing deployments
   may keep an empty or separate `dashboard.password`. The default host bind is loopback; set a private
   `dashboard.bind_ip` to make LAN exposure intentional. See
   [SECURITY.md](../SECURITY.md).

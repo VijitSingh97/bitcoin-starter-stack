@@ -52,6 +52,7 @@ type diskInfo struct {
 }
 
 type pageData struct {
+	BitcoinEnabled       bool
 	Loading              bool
 	LastKnownSync        bool
 	LastSyncTime         string
@@ -131,6 +132,10 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if a.cfg.bitcoinDisabled {
+		a.render(w, pageData{Version: versionLabel(a.cfg.version)})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	var chain blockchainInfo
@@ -161,6 +166,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	}
 	disk := diskUsage(a.cfg.dataDir)
 	data := pageData{
+		BitcoinEnabled:       true,
 		InitialBlockDownload: chain.InitialBlockDownload,
 		Version:              versionLabel(a.cfg.version), CoreVersion: network.Subversion, Uptime: uptimeLabel,
 		Blocks: chain.Blocks, Headers: chain.Headers, Progress: chain.VerificationProgress * 100,
@@ -198,7 +204,7 @@ func (a *app) rememberSync(chain blockchainInfo) {
 }
 
 func (a *app) loadingPageData() pageData {
-	data := pageData{Loading: true, Version: versionLabel(a.cfg.version)}
+	data := pageData{BitcoinEnabled: true, Loading: true, Version: versionLabel(a.cfg.version)}
 	a.syncMu.RLock()
 	defer a.syncMu.RUnlock()
 	if a.lastSync != nil {

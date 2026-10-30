@@ -45,19 +45,24 @@ echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded w
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric shared password"
+printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric dashboard password"
 [ ! -f config.json ] || fail "failed init wrote config.json"
-# shared password, data dir, dashboard bind, control, LAN RPC, prune, start
-out=$(printf 'hunter2hunter2hunter2hunter2\n%s\n192.168.1.116\ny\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
+# dashboard password, nodes, dashboard bind, control, Bitcoin data/RPC/prune, start
+out=$(printf 'hunter2hunter2hunter2hunter2\nbitcoin\n192.168.1.116\ny\n%s\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
 printf '%s' "$out" | grep -q 'Later: ./stack pull && ./stack up' || fail "init deferred-start instructions omit image download"
-[ "$(printf '%s' "$out" | grep -c 'Password: hunter2hunter2hunter2hunter2')" = "1" ] || fail "init did not print the new login exactly once"
-[ "$(printf '%s' "$out" | grep -c 'Username: admin')" = "1" ] || fail "init did not print the username exactly once"
+printf '%s' "$out" | grep -q 'Dashboard — username: admin  password: hunter2hunter2hunter2hunter2' || fail "init did not print the dashboard login"
+[ "$(printf '%s' "$out" | grep -c 'username: admin  password:')" = "2" ] || fail "init did not print the selected node and dashboard credentials"
+printf '%s' "$out" | grep -q 'Monero RPC' && fail "init printed credentials for an unselected node"
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l config.json | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail "init config.json is not mode 600"
 [ "$(jq -r '.dashboard.password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: dashboard password"
-[ "$(jq -r '.bitcoin.node_password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: shared RPC password"
+bitcoin_password=$(jq -r '.bitcoin.node_password' config.json)
+monero_password=$(jq -r '.monero.node_password' config.json)
+printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Bitcoin RPC password was not generated"
+printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Monero RPC password was not generated"
+[ "$bitcoin_password" != "$monero_password" ] && [ "$bitcoin_password" != hunter2hunter2hunter2hunter2 ] || fail "init: node passwords are not separate"
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
 [ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: data directory"
 [ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: dashboard bind address"
@@ -68,23 +73,25 @@ perms=$(ls -l config.json | cut -c1-10)
 [ "$(jq -r '.bitcoin.rpc_port' config.json)" = "18332" ] || fail "init: RPC host port"
 [ "$(jq -r 'has("sync_over_clearnet") or (.bitcoin | has("sync_over_clearnet"))' config.json)" = "false" ] || fail "init: clearnet setting should be absent"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
+[ "$(jq -r '.bitcoin.resource_profile // "off"' config.json)" = "off" ] || fail "init: source setup enabled an unavailable resource profile"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
 # the generated config must feed configure.sh cleanly (creds auto-generated)
 ./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
 grep -q '^BITCOIN_RPC_USER=admin$' .env || fail "wizard config: username default not applied"
-grep -q '^BITCOIN_RPC_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: shared RPC password not rendered"
+grep -q "^BITCOIN_RPC_PASSWORD=$bitcoin_password$" .env || fail "wizard config: Bitcoin RPC password not rendered"
+grep -q "^MONERO_RPC_PASSWORD=$monero_password$" .env || fail "wizard config: Monero RPC password not rendered"
 grep -q '^DASHBOARD_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: dashboard password not rendered"
 grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail "wizard config: RPC override not enabled"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
 # Existing archival, path, and bind settings survive a wizard rewrite.
 jq '.bitcoin.prune_mb=0' config.json >config.next && mv config.next config.json
-out=$(printf 'y\n\n\n\nn\nn\n\nn\n' | ./stack init)
+out=$(printf 'y\n\nbitcoin\n\nn\n\nn\n\nn\n' | ./stack init)
 generated=$(jq -r '.dashboard.password' config.json)
 printf '%s' "$generated" | grep -qE '^[0-9a-f]{48}$' ||
   fail "init: empty password should generate a 48-hex one"
-[ "$(jq -r '.bitcoin.node_password' config.json)" = "$generated" ] || fail "init: generated password was not shared"
-[ "$(printf '%s' "$out" | grep -c "Password: $generated")" = "1" ] || fail "init did not print generated login exactly once"
+[ "$(jq -r '.bitcoin.node_password' config.json)" != "$generated" ] || fail "init: generated passwords were shared"
+printf '%s' "$out" | grep -q "Dashboard — username: admin  password: $generated" || fail "init did not print generated dashboard login"
 printf '%s' "$out" | grep -q 'hunter2hunter2hunter2hunter2' && fail "init printed the previous credential"
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
@@ -98,8 +105,37 @@ legacy_wizard="$tmp/legacy-wizard"
 mkdir "$legacy_wizard"
 cp stack configure.sh "$legacy_wizard/"
 printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\n' >"$legacy_wizard/.env"
-(cd "$legacy_wizard" && printf 'legacywizardpassword1234\n\n\nn\nn\n\nn\n' | ./stack init >/dev/null)
+(cd "$legacy_wizard" && printf 'legacywizardpassword1234\nbitcoin\n\nn\n\nn\n\nn\n' | ./stack init >/dev/null)
 [ "$(jq -r '.bitcoin.prune_mb' "$legacy_wizard/config.json")" = "0" ] || fail "init converted a pre-prune environment"
+
+multi_wizard="$tmp/multi-wizard"
+mkdir "$multi_wizard"
+cp stack configure.sh "$multi_wizard/"
+printf '1.2.3\n' >"$multi_wizard/VERSION"
+(cd "$multi_wizard" && printf 'dashboardpassword1234567890\nboth\n\nn\n\nn\n\n%s\ny\n192.168.1.118\n28081\ny\n192.168.1.118\n28083\nn\n' "$tmp/monero-data" | ./stack init >/dev/null)
+[ "$(jq -r '.monero.enabled' "$multi_wizard/config.json")" = "true" ] || fail "init: both-node selection did not enable Monero"
+[ "$(jq -r '.bitcoin.enabled // true' "$multi_wizard/config.json")" = "true" ] || fail "init: both-node selection disabled Bitcoin"
+[ "$(jq -r '.monero.data_dir' "$multi_wizard/config.json")" = "$tmp/monero-data" ] || fail "init: Monero data directory"
+[ "$(jq -r '.monero.rpc_expose' "$multi_wizard/config.json")" = "true" ] || fail "init: Monero RPC exposure"
+[ "$(jq -r '.monero.zmq_expose' "$multi_wizard/config.json")" = "true" ] || fail "init: Monero ZMQ exposure"
+[ "$(jq -r '.bitcoin.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Bitcoin compact profile"
+[ "$(jq -r '.monero.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Monero compact profile"
+(cd "$multi_wizard" && ./configure.sh >/dev/null)
+grep -q '^COMPOSE_PROFILES=bitcoin,monero$' "$multi_wizard/.env" || fail "init: both-node profiles not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.monero-rpc.yml:docker-compose.monero-zmq.yml$' "$multi_wizard/.env" || fail "init: Monero LAN overrides not rendered"
+
+monero_wizard="$tmp/monero-wizard"
+mkdir "$monero_wizard"
+cp stack configure.sh "$monero_wizard/"
+printf '1.2.3\n' >"$monero_wizard/VERSION"
+monero_out=$(cd "$monero_wizard" && printf 'dashboardpassword1234567890\nmonero\n\nn\n\nn\nn\nn\n' | ./stack init)
+printf '%s' "$monero_out" | grep -q 'Bitcoin data directory' && fail "init: Monero-only setup asked Bitcoin storage questions"
+printf '%s' "$monero_out" | grep -q 'Expose Bitcoin RPC' && fail "init: Monero-only setup asked Bitcoin RPC questions"
+printf '%s' "$monero_out" | grep -q 'Bitcoin RPC —' && fail "init: Monero-only setup printed Bitcoin credentials"
+[ "$(jq -r '.bitcoin.enabled' "$monero_wizard/config.json")" = "false" ] || fail "init: Monero-only setup enabled Bitcoin"
+[ "$(jq -r '.monero.enabled' "$monero_wizard/config.json")" = "true" ] || fail "init: Monero-only setup disabled Monero"
+(cd "$monero_wizard" && ./configure.sh >/dev/null)
+grep -q '^COMPOSE_PROFILES=monero$' "$monero_wizard/.env" || fail "init: Monero-only profile not rendered"
 
 # ensure_agent: up/apply must start the agent + install the @reboot cron entry
 # when dashboard.control is on, remove both when off, and defer to systemd.
@@ -145,7 +181,7 @@ mkdir "$wizard"
 cp stack configure.sh "$wizard/"
 printf '1.2.3\n' >"$wizard/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+(cd "$wizard" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "init did not pull missing images"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
@@ -155,7 +191,7 @@ mkdir "$wizard_loaded"
 cp stack configure.sh "$wizard_loaded/"
 printf '1.2.3\n' >"$wizard_loaded/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard_loaded" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+(cd "$wizard_loaded" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
 grep -q 'docker compose pull' "$FAKE_LOG" && fail "init pulled images that were already local"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init did not start local images"
@@ -165,7 +201,7 @@ mkdir "$wizard_failed"
 cp stack configure.sh "$wizard_failed/"
 printf '1.2.3\n' >"$wizard_failed/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard_failed" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+(cd "$wizard_failed" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init ignored a missing-image pull failure"
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "init failure did not attempt a pull"

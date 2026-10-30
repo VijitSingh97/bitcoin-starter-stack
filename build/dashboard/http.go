@@ -20,6 +20,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /metrics", a.metrics)
 	mux.HandleFunc("GET /api/fees", a.apiFees)
 	mux.HandleFunc("GET /api/prices", a.apiPrices)
+	mux.HandleFunc("GET /api/monero", a.apiMonero)
 	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
 	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
@@ -55,6 +56,11 @@ func (a *app) auth(next http.Handler) http.Handler {
 	})
 }
 func (a *app) metrics(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.bitcoinDisabled {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprint(w, "# TYPE bitcoin_node_enabled gauge\nbitcoin_node_enabled 0\n# TYPE bitcoin_node_up gauge\nbitcoin_node_up 0\n")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -114,6 +120,9 @@ func (a *app) apiPrices(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) nodeRPC(method string, params []any) any {
+	if a.cfg.bitcoinDisabled {
+		return nil
+	}
 	var result any
 	if a.rpc.call(a.ctx, method, params, &result) != nil {
 		return nil
@@ -122,6 +131,9 @@ func (a *app) nodeRPC(method string, params []any) any {
 }
 
 func (a *app) walletRPC(wallet, method string, params []any, timeout time.Duration) any {
+	if a.cfg.bitcoinDisabled {
+		return nil
+	}
 	rpc := *a.rpc
 	rpc.url = strings.TrimRight(rpc.url, "/") + "/wallet/" + url.PathEscape(wallet)
 	rpc.client = &http.Client{Timeout: timeout}
@@ -141,6 +153,9 @@ func rejectCSRF(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
+	if a.rejectDisabledBitcoin(w) {
+		return
+	}
 	if a.watch.Err() != nil {
 		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
 		return
@@ -162,6 +177,9 @@ func publicExampleOnly(entries []WatchEntry) bool {
 }
 
 func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
+	if a.rejectDisabledBitcoin(w) {
+		return
+	}
 	if a.cfg.dashboardPassword == "" {
 		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
 		return
@@ -231,6 +249,9 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
+	if a.rejectDisabledBitcoin(w) {
+		return
+	}
 	if a.cfg.dashboardPassword == "" {
 		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
 		return
@@ -266,6 +287,14 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, coreName)
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (a *app) rejectDisabledBitcoin(w http.ResponseWriter) bool {
+	if !a.cfg.bitcoinDisabled {
+		return false
+	}
+	http.Error(w, "Bitcoin node is not configured", http.StatusServiceUnavailable)
+	return true
 }
 
 func (a *app) apiUpgradeStatus(w http.ResponseWriter, r *http.Request) {

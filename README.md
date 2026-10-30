@@ -1,20 +1,20 @@
 <div align="center">
 
-# Bitcoin Starter Stack
+# Node Starter Stack
 
-### A very lightweight dashboard for monitoring your new or existing Bitcoin node.
+### A very lightweight dashboard for monitoring your new or existing nodes.
 
 [![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
 ![Runtime: Tor-only](https://img.shields.io/badge/Runtime-Tor--only-7D4698?logo=torproject&logoColor=white)
 
-Run a [Bitcoin Core](https://bitcoincore.org/) node with a small Go dashboard.
-Watch blocks arrive, track your own watch-only balances, check fees and BTC prices,
-and get alerts when something needs attention. Running services use Tor for
-public internet traffic; your wallet addresses stay on your node.
+Run [Bitcoin Core](https://bitcoincore.org/), [Monero](https://www.getmonero.org/),
+or both, with a small Go dashboard. Pick the gold Bitcoin tower or the orange
+Monero tower to open its status card. Running services use Tor for public
+internet traffic; the dashboard and optional wallet RPC stay on your trusted LAN.
 
-<img src="./images/dashboard.png" width="100%" alt="Go dashboard with Bitcoin Core 32.1, BTC price below mempool, the public Binance example, and Your Wallet marked Pending history; demo data" />
+<img src="./images/nodes.png" width="100%" alt="Node Starter Stack's gold Bitcoin tower and orange Monero tower; click either to open its status card" />
 
 </div>
 
@@ -25,26 +25,28 @@ public internet traffic; your wallet addresses stay on your node.
 - 🪶 **Small dashboard, low overhead.** A single Go binary with no third-party
   runtime dependencies. The full dashboard used about **8 MiB of working memory**
   in our [mini-1 benchmark](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/c9cdd75/experiments/go-dashboard-results/mini-1-full-port-2026-10-27/README.md).
-  Bitcoin Core's memory and chain storage are separate.
-- 🟠 **Fully validating, pruned by default.** Bitcoin Core validates every block, then keeps
-  10 GB of recent blocks. Plan on **30–60 GB total disk**; archival storage remains an
-  advanced manual option.
-- 🧅 **Tor-only runtime networking.** All P2P traffic goes through the Tor container
-  (`onlynet=onion`). Bitcoin and the dashboard cannot route directly to the internet,
-  and local DNS forwarding is disabled. Inbound Bitcoin connections use an onion
+  Node memory and chain storage are separate; this measurement predates Monero support.
+- 🟠 **Choose your nodes.** Bitcoin, Monero, or both. Bitcoin keeps a 10 GB recent-block
+  budget; allow **30–60 GB total**. Monero uses its pruned database; allow roughly
+  **120–150 GiB including growth room**. Both still validate the chain. See the
+  [node comparison and planned chains](docs/nodes.md).
+- 🧅 **Tor-only runtime networking.** P2P traffic goes through the Tor container.
+  Node containers and the dashboard cannot route directly to the internet,
+  and local DNS forwarding is disabled. Bitcoin uses onion peers; inbound connections use an onion
   service when enabled. See the [privacy model](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
   add a password and an onion address for remote access. RPC is private by default,
   with optional authenticated access for wallets on your LAN.
-- 🔑 **One generated login.** Fresh installs share one strong password between RPC and
-  the dashboard and use username `admin`; the wizard prints the new login once. Config
+- 🔑 **Separate generated logins.** Fresh installs generate different passwords for
+  the dashboard and each node's RPC. The username defaults to `admin`; the wizard
+  prints the selected services' credentials once. Existing passwords are preserved. Config
   renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
   `rpcauth` hash, never the plaintext.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
   the multi-day initial download.
-- 📟 **Opt-in alerts & remote access.** Telegram alerts (node down, sync complete, disk
+- 📟 **Opt-in Bitcoin alerts & remote access.** Telegram alerts (node down, sync complete, disk
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
@@ -58,6 +60,9 @@ public internet traffic; your wallet addresses stay on your node.
   marked public Binance
   address gives fresh installs an example; it is excluded from your totals.
   [How watch-only works](docs/watch-only.md).
+- 🔌 **Monero remote node for Pithead.** Independently enable restricted, authenticated
+  Monero RPC and the optional ZMQ publisher on your private LAN. Monero support is
+  node monitoring and remote-node access; it does not import wallet keys or show balances.
 - 💱 **BTC in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
   CoinGecko quotes are fetched through Tor, cached, and labeled when stale.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
@@ -70,11 +75,13 @@ public internet traffic; your wallet addresses stay on your node.
 ## 🚀 Fresh install
 
 You need Ubuntu Server 24.04, Docker Engine with Compose 2.33.1 or newer,
-`jq`, `openssl`, and `curl`; an SSD with 30–60 GB free; and a recommended target
-of 2 CPUs and 4 GB RAM. A short trial also worked with the containers limited
-to a 1 CPU/2 GB budget. Full initial sync and heavier loads still need longer
-testing at those limits. The default node validates the entire chain, keeps
-10 GB of recent block files, and uses about 30–60 GB in total. See
+`jq`, `openssl`, `curl`, and an SSD. Allow 30–60 GB for Bitcoin and about
+120–150 GiB for Monero. Our steady-operation target is **1 CPU and 2 GB RAM per
+node**, plus shared Docker, Tor, dashboard, and operating-system overhead.
+This is a test target, not a proven minimum: Bitcoin has passed a short capped
+trial, and Monero still needs a full capped stability test. Initial sync may use
+all available CPU and RAM. A host with only 2 GB total cannot give a node a full
+2 GB while also providing room for the operating system. See
 [Hardware Requirements](docs/hardware.md).
 
 ### 1. Install, then run the wizard
@@ -110,33 +117,45 @@ a separate development environment; they are not a fresh-install path.
 
 ### 2. Accept the safe defaults
 
-Press Enter at the password prompt to generate a strong shared RPC/dashboard
-password. The username is `admin`; the wizard prints the password once at the
-end. This package example uses a fake password only to show the questions:
+Choose Bitcoin, Monero, or both. Press Enter at the dashboard password prompt
+to generate a strong password. Each selected node gets its own different RPC
+password, with username `admin`. The wizard prints the credentials once at the
+end; save them in your password manager. A package install choosing both looks like:
 
 ```text
-Shared RPC and dashboard password (letters/numbers) [Enter = strong random]: ExampleOnly1234567890
-Bitcoin data directory [/var/lib/bitcoin-starter-stack/data/bitcoin]:
+Dashboard password (letters/numbers) [Enter = strong random]:
+Nodes to run — bitcoin, monero (experimental), or both [bitcoin]: both
 Dashboard bind address (loopback or private LAN) [127.0.0.1]:
+Bitcoin data directory [/var/lib/bitcoin-starter-stack/data/bitcoin]:
 Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] n
 Recent-block retention in GB [10]:
+Monero data directory [/var/lib/bitcoin-starter-stack/data/monero]:
+Expose restricted Monero RPC to trusted LAN apps? [y/N] n
+Expose Monero ZMQ to a trusted LAN P2Pool host? [y/N] n
 Download missing containers and start the stack now? [Y/n]
 
-Dashboard login (shown once):
-  Username: admin
-  Password: ExampleOnly1234567890
+Generated credentials (shown once):
+  Dashboard — username: admin  password: <generated dashboard password>
+  Bitcoin RPC — username: admin  password: <different generated Bitcoin password>
+  Monero RPC — username: admin  password: <different generated Monero password>
 ```
 
 Press Enter at the final question. Docker downloads the published container
 images using the host's normal network settings, then the stack starts. The
 wizard does not change Docker's proxy or daemon configuration. These initial
-APT and container downloads happen on the host; once running, Bitcoin peers,
+APT and container downloads happen on the host; once running, node peers,
 prices, alerts, and dashboard update checks use the stack's Tor container.
 
 Keep `127.0.0.1` to open the dashboard only on the node. For trusted-LAN access,
 enter the server's private IPv4 address, such as `192.168.1.117`; wildcard and
 public addresses are rejected. The source wizard uses `./data/bitcoin` and also
 asks about the optional Upgrade button, which defaults to off.
+
+Fresh package wizard installs select the experimental compact resource profile:
+initial sync is uncapped, then a host timer checks for healthy, current sync
+before applying 1 CPU and 2 GiB to each node separately. Existing installs and
+source installs keep automatic limits off. This mechanism applies a budget;
+the longer stability tests still decide whether that budget is sufficient.
 
 If you answer **n** at the final question, start later with:
 
@@ -150,18 +169,22 @@ For a source install, use `./stack pull`, `./stack up`, and `./stack status`.
 `pull` is the explicit network action; routine `up` and `apply` use local images
 only and never build or download implicitly.
 
-### 3. Open the dashboard and let Bitcoin sync
+### 3. Open the dashboard and let your nodes sync
 
 Open `http://localhost` on the node. If you chose a private LAN address, open
 `http://<server-private-ip>` from a trusted device. Keep port 80 off the public
-internet. Check progress with `./stack logs bitcoin` for source installs or
-`sudo bitcoin-stack logs bitcoin` for packages.
+internet. Click a tower to see that chain's progress. Check logs with
+`./stack logs bitcoin` or `./stack logs monero` for source installs; packages
+use `sudo bitcoin-stack logs bitcoin` or `sudo bitcoin-stack logs monero`.
 
 Watch-only wallets remain pending during initial block download. After sync, the
 node scans the live UTXO set and shows confirmed balances; its chart contains
 saved balance snapshots, not transaction history, spent outputs, or mempool
 activity. Initial sync transfers roughly 900 GB through Tor and can take days.
 See [Watch-only balances](docs/watch-only.md).
+Monero's initial sync also downloads and validates historical data before
+discarding the parts pruning does not retain. A pruned node saves disk, not
+the initial validation work. Neither chain has a fixed sync-time guarantee.
 
 Containers use Docker's `unless-stopped` policy. They return after a reboot when
 Docker starts at boot, unless you explicitly stopped them. Day-to-day commands,
@@ -172,6 +195,12 @@ and [Getting Started](docs/getting-started.md) has the fuller walkthrough.
 
 Open `http://localhost` on the node. After setting a private LAN bind address,
 use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
+The landing page shows a gold Bitcoin tower and an orange Monero tower. Click
+one to zoom in and open its card; close it with **×**, Escape, or a click outside
+the panel. Disabled nodes are labeled **Not configured**.
+
+Both cards show node version, uptime, connections, sync progress, and chain
+storage. The following extra features belong to the Bitcoin card:
 
 - **Node mode** — a **Full** or **Pruned** badge in the header.
 - **Sync progress** — block height vs. headers, with a progress bar.
@@ -207,20 +236,23 @@ flowchart LR
     You(["👤 You · Browser"])
     Net(["🌐 Tor Network"])
 
-    subgraph stack ["🐳 Bitcoin Starter Stack"]
+    subgraph stack ["🐳 Node Starter Stack"]
         Dashboard["📊 Dashboard<br/>:80"]
         Bitcoin["🟠 Bitcoin Core"]
+        Monero["🟠 Monero"]
         Tor["🧅 Tor"]
     end
 
     You ==>|LAN HTTP :80| Tor
     Tor -->|Fixed local relay| Dashboard
     Dashboard -.->|RPC| Bitcoin
+    Dashboard -.->|Internal Digest RPC| Monero
     Bitcoin ==>|SOCKS5| Tor
+    Monero ==>|SOCKS5| Tor
     Tor <==> Net
 ```
 
-Three containers. Bitcoin Core and the Go dashboard share an internal network;
+Three containers for one selected node, four for both. Nodes and the Go dashboard share an internal network;
 only Tor joins an external network. The Tor container also forwards the private
 LAN dashboard port to its fixed internal destination.
 [Architecture](docs/architecture.md) explains the layout; [Privacy](docs/privacy.md)
@@ -231,11 +263,12 @@ covers downloads, DNS, and the limits of the guarantee.
 | Guide | What's inside |
 |---|---|
 | [Getting Started](docs/getting-started.md) | Prerequisites, install, first start, what to expect during sync. |
+| [Nodes and roadmap](docs/nodes.md) | Bitcoin/Monero setup, Pithead remote-node settings, and other chain candidates. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
 | [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
 | [Tor & Privacy](docs/privacy.md) | Enforced runtime routing, LAN access, and the host-download boundary. |
-| [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
+| [Architecture](docs/architecture.md) | Services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 | [Notifications & Remote Access](docs/notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |
 | [Releasing](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/main/docs/releasing.md) | Maintainer guide to versions, release gates, and tarballs. |

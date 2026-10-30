@@ -24,23 +24,42 @@ if [ "${BITCOIN_RPC_EXPOSE:-0}" = "1" ]; then
   socat TCP4-LISTEN:8332,reuseaddr,fork,max-children=32 TCP4:172.29.0.26:8332 &
   rpc_pid=$!
 fi
+monero_rpc_pid=
+if [ "${MONERO_RPC_EXPOSE:-0}" = "1" ]; then
+  socat TCP4-LISTEN:18081,reuseaddr,fork,max-children=32 TCP4:172.29.0.30:18081 &
+  monero_rpc_pid=$!
+fi
+monero_zmq_pid=
+if [ "${MONERO_ZMQ_EXPOSE:-0}" = "1" ]; then
+  socat TCP4-LISTEN:18083,reuseaddr,fork,max-children=32 TCP4:172.29.0.30:18083 &
+  monero_zmq_pid=$!
+fi
+pids="$tor_pid $socat_pid ${rpc_pid:-} ${monero_rpc_pid:-} ${monero_zmq_pid:-}"
 
 stop() {
-  kill "$tor_pid" "$socat_pid" ${rpc_pid:+"$rpc_pid"} 2>/dev/null || true
-  wait "$tor_pid" "$socat_pid" ${rpc_pid:+"$rpc_pid"} 2>/dev/null || true
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  for pid in $pids; do
+    wait "$pid" 2>/dev/null || true
+  done
 }
 trap 'stop; exit 0' TERM INT
 
 status=0
-while kill -0 "$tor_pid" 2>/dev/null && kill -0 "$socat_pid" 2>/dev/null && { [ -z "$rpc_pid" ] || kill -0 "$rpc_pid" 2>/dev/null; }; do
+while :; do
+  running=1
+  for pid in $pids; do
+    kill -0 "$pid" 2>/dev/null || running=0
+  done
+  [ "$running" = "1" ] || break
   sleep 1
 done
-if ! kill -0 "$tor_pid" 2>/dev/null; then
-  wait "$tor_pid" || status=$?
-elif ! kill -0 "$socat_pid" 2>/dev/null; then
-  wait "$socat_pid" || status=$?
-else
-  wait "$rpc_pid" || status=$?
-fi
+for pid in $pids; do
+  if ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" || status=$?
+    break
+  fi
+done
 stop
 exit "$status"

@@ -80,6 +80,8 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f build/dashboard/Dockerfile \
             -t "$base-dashboard:$v" -t "$base-dashboard:latest" --push .
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t "$base-monero:$v" -t "$base-monero:latest" --push ./build/monero
 
   apt:
     needs: [publish, images]

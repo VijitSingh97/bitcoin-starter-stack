@@ -44,9 +44,16 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/configure.sh \
   ./usr/lib/bitcoin-starter-stack/docker-compose.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
+  ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
+  ./usr/lib/bitcoin-starter-stack/node-resource-profile \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.timer \
   ./usr/share/doc/bitcoin-starter-stack/README.md \
+  ./usr/share/doc/bitcoin-starter-stack/docs/nodes.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/privacy.md; do
   grep -q " $required$" "$tmp/contents" || fail "package is missing $required"
 done
@@ -59,6 +66,7 @@ fi
 depends=$(dpkg-deb -f "$deb" Depends)
 printf '%s' "$depends" | grep -q 'docker-ce | docker.io' || fail "Docker Engine dependency alternatives are missing"
 printf '%s' "$depends" | grep -q 'curl' || fail "curl dependency is missing"
+printf '%s' "$depends" | grep -q 'util-linux' || fail "resource profile lock dependency is missing"
 printf '%s' "$depends" | grep -q 'docker-compose-plugin (>= 2.33.1) | docker-compose-v2 (>= 2.33.1) | docker-compose (>= 2.33.1)' || fail "Compose v2 dependency alternatives are missing minimum versions"
 
 mkdir "$tmp/control"
@@ -101,6 +109,11 @@ case " $* " in
 esac
 EOF
 chmod +x "$fake/docker"
+cat >"$fake/systemctl" <<'EOF'
+#!/bin/sh
+printf 'systemctl %s\n' "$*" >>"$FAKE_DOCKER_LOG"
+EOF
+chmod +x "$fake/systemctl"
 
 home=$tmp/home
 config_dir=$tmp/etc/bitcoin-starter-stack
@@ -118,24 +131,30 @@ out=$("$wrapper" upgrade)
 printf '%s' "$out" | grep -q 'sudo apt install --only-upgrade bitcoin-starter-stack' || fail "upgrade omitted APT instructions"
 [ ! -e "$log" ] || fail "package upgrade invoked Docker"
 
-wizard_out=$(printf 'packagepassword1234567890\n\n\nn\n\nn\n' | "$wrapper" init)
+wizard_out=$(printf 'packagepassword1234567890\nbitcoin\n\n\nn\n\nn\n' | "$wrapper" init)
 printf '%s' "$wizard_out" | grep -q 'Publish the dashboard' && fail "package wizard still prompts for dashboard onion publishing"
 printf '%s' "$wizard_out" | grep -q 'Accept inbound Bitcoin' && fail "package wizard still prompts for inbound onion connections"
 printf '%s' "$wizard_out" | grep -q 'One-click upgrades' && fail "package wizard offered unsupported dashboard upgrades"
-[ "$(jq -r '.bitcoin.node_password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the shared password"
-[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not share the dashboard password"
+[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the dashboard password"
+bitcoin_password=$(jq -r '.bitcoin.node_password' "$config_dir/config.json")
+monero_password=$(jq -r '.monero.node_password' "$config_dir/config.json")
+printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wizard did not generate a Bitcoin RPC password"
+printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wizard did not generate a Monero RPC password"
+[ "$bitcoin_password" != "$monero_password" ] || fail "package wizard reused a node password"
 [ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
 [ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
-[ "$(printf '%s' "$wizard_out" | grep -c 'Password: packagepassword1234567890')" = 1 ] || fail "package wizard did not print the new login exactly once"
+[ "$(printf '%s' "$wizard_out" | grep -c 'username: admin  password:')" = 2 ] || fail "package wizard did not print the selected node and dashboard credentials"
+printf '%s' "$wizard_out" | grep -q 'Monero RPC' && fail "package wizard printed credentials for an unselected node"
 printf '%s' "$wizard_out" | grep -q 'Download missing containers and start the stack now? \[Y/n\]' || fail "package wizard omitted explicit download/start prompt"
 printf '%s' "$wizard_out" | grep -q 'Later: bitcoin-stack pull && bitcoin-stack up' || fail "package wizard deferred-start instructions omit image download"
 rm -f "$config_dir/config.json"
 
 : >"$log"
-printf 'packagepassword1234567890\n\n\nn\n\n\n' |
+printf 'packagepassword1234567890\nbitcoin\n\n\nn\n\n\n' |
   FAKE_IMAGES_MISSING=1 "$wrapper" init >/dev/null
 grep -q -- 'compose .* pull' "$log" || fail "package wizard did not pull missing images"
 grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wizard start allows implicit pulls or builds"
+grep -q 'systemctl enable --now bitcoin-starter-stack-resource-profile.timer' "$log" || fail "package wizard did not start the resource profile timer"
 
 "$wrapper" apply >/dev/null
 env_file=$state_dir/.env
@@ -144,6 +163,10 @@ grep -q "^BITCOIN_DATA_DIR=$data_root/bitcoin$" "$env_file" || fail "data path i
 grep -q '^BITCOIN_DBCACHE=128$' "$env_file" || fail "fresh package install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$env_file" || fail "fresh package install is not pruned to 10000 MB"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$env_file" || fail "fresh package install exposed RPC"
+grep -q '^MONERO_ENABLED=0$' "$env_file" || fail "fresh package install enabled Monero"
+grep -q '^COMPOSE_PROFILES=bitcoin$' "$env_file" || fail "fresh package install did not select Bitcoin"
+grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$env_file" || fail "wizard did not enable the compact Bitcoin profile"
+grep -q '^MONERO_RESOURCE_PROFILE=off$' "$env_file" || fail "wizard enabled the compact profile for an unselected node"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$env_file" || fail "fresh package install enabled an optional Compose override"
 grep -q "^STACK_ROOT=$runtime$" "$env_file" || fail "immutable payload path was not rendered"
 wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)

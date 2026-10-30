@@ -18,8 +18,14 @@ grep -q '^BITCOIN_RPC_USER=admin$' "$tmp/.env" || fail "RPC user default is not 
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
-[ "$rpc_password" = "$dashboard_password" ] || fail "fresh install did not share the generated password"
+monero_password=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' "$tmp/.env")
+[ -n "$dashboard_password" ] && [ -n "$monero_password" ] || fail "fresh install did not generate all passwords"
+[ "$rpc_password" != "$dashboard_password" ] && [ "$rpc_password" != "$monero_password" ] && [ "$dashboard_password" != "$monero_password" ] ||
+  fail "fresh install did not separate dashboard, Bitcoin, and Monero passwords"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
+grep -q '^COMPOSE_PROFILES=bitcoin$' "$tmp/.env" || fail "zero-config install did not select only Bitcoin"
+grep -q '^BITCOIN_ENABLED=1$' "$tmp/.env" || fail "Bitcoin default is not enabled"
+grep -q '^MONERO_ENABLED=0$' "$tmp/.env" || fail "Monero default is not disabled"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default is not off"
 grep -q '^BITCOIN_RPC_BIND_IP=$' "$tmp/.env" || fail "LAN RPC bind default is not empty"
 grep -q '^BITCOIN_RPC_PORT=8332$' "$tmp/.env" || fail "LAN RPC port default not applied"
@@ -130,7 +136,9 @@ grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
-grep -q '^DASHBOARD_PASSWORD=mypass123$' "$tmp/.env" || fail "fresh explicit password was not shared with dashboard"
+grep -qE '^DASHBOARD_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "dashboard password was not independently generated"
+grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
+grep -q '^MONERO_DATA_DIR=./data/monero$' "$tmp/.env" || fail "Monero data_dir default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
@@ -141,6 +149,7 @@ watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | jq -e '.[0].name == "Binance (public)"' >/dev/null ||
   fail "missing wallets must seed the public Binance example"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
+[ -d "$tmp/data/monero" ] || fail "Monero data dir not created"
 
 # An explicit empty roster opts out of the public example.
 echo '{"wallets": []}' >"$tmp/config.json"
@@ -367,5 +376,55 @@ if command -v docker >/dev/null; then
   echo "$rpc_rendered" | grep -A5 'target: 8332' | grep -q 'published: "18332"' ||
     fail "rendered COMPOSE_FILE did not select the RPC override"
 fi
+
+# Monero is opt-in, pruned, and its LAN RPC/ZMQ relays require private binds.
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":false},"monero":{"enabled":true,"node_username":"moneroadmin","node_password":"moneropassword1234567890123456","data_dir":"./monero-chain","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_PROFILES=monero$' "$tmp/.env" || fail "Monero-only selection did not disable Bitcoin"
+grep -q '^MONERO_ENABLED=1$' "$tmp/.env" || fail "Monero enablement not rendered"
+grep -q '^MONERO_RPC_USER=moneroadmin$' "$tmp/.env" || fail "separate Monero RPC user not rendered"
+grep -q '^MONERO_RPC_PASSWORD=moneropassword1234567890123456$' "$tmp/.env" || fail "separate Monero RPC password not rendered"
+grep -q '^MONERO_DATA_DIR=./monero-chain$' "$tmp/.env" || fail "Monero data path not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.monero-rpc.yml:docker-compose.monero-zmq.yml$' "$tmp/.env" ||
+  fail "Monero LAN overrides not selected"
+[ -d "$tmp/monero-chain" ] || fail "Monero data directory not created"
+
+for field in rpc zmq; do
+  jq -n --arg field "$field" '{monero:{enabled:true,node_password:"longmoneropassword123456789",($field+"_expose"):true}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Monero $field exposure without a bind address was accepted"
+done
+echo '{"monero":{"enabled":true,"node_password":"short","rpc_expose":true,"rpc_bind_ip":"192.168.1.118"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "short exposed Monero RPC password was accepted"
+
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin and Monero RPC host port collision was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28083},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin RPC and Monero ZMQ host port collision was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.119","rpc_port":28081}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null || fail "same cross-chain host port on different bind addresses was rejected"
+
+for field in bitcoin monero; do
+  for port in 080 0008332 18446744073709551617; do
+    jq -n --arg field "$field" --arg port "$port" '{($field):{rpc_port:$port}}' >"$tmp/config.json"
+    (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "$field accepted an ambiguous or overflowing RPC port"
+  done
+done
+
+echo '{"bitcoin":{"resource_profile":"compact"},"monero":{"resource_profile":"compact"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Bitcoin compact resource profile not rendered"
+grep -q '^MONERO_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Monero compact resource profile not rendered"
+echo '{"bitcoin":{"resource_profile":"tiny"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unknown Bitcoin resource profile was accepted"
+echo '{"monero":{"resource_profile":"tiny"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unknown Monero resource profile was accepted"
 
 echo "PASS: test_configure.sh"

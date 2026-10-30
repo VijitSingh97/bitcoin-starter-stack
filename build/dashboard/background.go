@@ -23,6 +23,11 @@ func (a *app) recordFee(value float64) {
 
 func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	a.ctx = ctx
+	if a.cfg.bitcoinDisabled {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
 	var workers sync.WaitGroup
 	start := func(worker func()) {
 		workers.Add(1)

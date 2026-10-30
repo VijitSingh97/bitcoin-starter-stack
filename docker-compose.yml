@@ -20,6 +20,8 @@ services:
     environment:
       DASHBOARD_ONION: ${DASHBOARD_ONION:-0}
       BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
+      MONERO_RPC_EXPOSE: ${MONERO_RPC_EXPOSE:-0}
+      MONERO_ZMQ_EXPOSE: ${MONERO_ZMQ_EXPOSE:-0}
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
@@ -42,6 +44,7 @@ services:
   bitcoin:
     image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
     container_name: bitcoin
+    profiles: ["bitcoin"]
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -103,6 +106,41 @@ services:
     dns:
       - 127.0.0.1
 
+  monero:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    build:
+      context: ${STACK_ROOT:-.}/build/monero
+    container_name: monero
+    profiles: ["monero"]
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 0
+    cpus: 0
+    environment:
+      MONERO_RPC_USER: ${MONERO_RPC_USER:?run ./configure.sh first}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:?run ./configure.sh first}
+      TOR_PROXY: 172.29.0.25:9050
+    volumes:
+      - ${MONERO_DATA_DIR:-./data/monero}:/data
+    stop_signal: SIGTERM
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/monero-healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.30
+    dns:
+      - 127.0.0.1
+
   dashboard:
     # Prebuilt release image, with an explicit build target for development.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
@@ -118,8 +156,13 @@ services:
     cap_drop:
       - ALL
     environment:
+      BITCOIN_ENABLED: ${BITCOIN_ENABLED:-1}
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      MONERO_ENABLED: ${MONERO_ENABLED:-0}
+      MONERO_RPC_URL: ${MONERO_RPC_URL:-http://172.29.0.30:18085}
+      MONERO_RPC_USER: ${MONERO_RPC_USER:-}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:-}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       DASHBOARD_CONTROL: ${DASHBOARD_CONTROL:-0}
       SETTINGS_PORT: "8001"
@@ -148,8 +191,6 @@ services:
         ipv4_address: 172.29.0.27
     dns:
       - 127.0.0.1
-    depends_on:
-      - bitcoin
 
 networks:
   btc_net:

@@ -23,10 +23,13 @@ for required in stack configure.sh docker-compose.yml docker-compose.rpc.yml con
   build/dashboard/Dockerfile build/dashboard/go.mod build/dashboard/main.go build/dashboard/settings.go \
   build/dashboard/index.html build/dashboard/static/watch.js \
   build/dashboard/static/prices.js build/dashboard/static/settings.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
+  build/monero/Dockerfile build/monero/entrypoint.sh build/monero/healthcheck.sh \
+  docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml \
+  build/dashboard/static/nodes.js docs/nodes.md \
   docs/getting-started.md docs/configuration.md docs/operations.md docs/watch-only.md docs/privacy.md; do
   grep -Fxq "$required" "$tmp/contents" || fail "release archive is missing $required"
 done
-if grep -Eq '(^|/)(tests|parity|experiments|images)(/|$)|(_test\.go|\.test\.mjs|\.pyc)$|^(\.github/|\.gitattributes$|\.gitleaks\.toml$|AGENTS\.md$|CONTRIBUTING\.md$|scripts/|tools/|docs/(developer-bot|releasing)\.md$|build/dashboard/package\.json$)' "$tmp/contents"; then
+if grep -Eq '(^|/)(tests|parity|experiments|images)(/|$)|(_test\.go|\.test\.mjs|\.pyc)$|^(\.github/|\.gitattributes$|\.gitleaks\.toml$|AGENTS\.md$|CONTRIBUTING\.md$|scripts/|packaging/|tools/|docs/(developer-bot|releasing)\.md$|build/dashboard/package\.json$)' "$tmp/contents"; then
   fail "release archive includes development-only files"
 fi
 

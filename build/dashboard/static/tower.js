@@ -95,14 +95,21 @@ if (typeof document !== "undefined") {
       if (t === "dark") return false;
       return window.matchMedia("(prefers-color-scheme: light)").matches;
     }
-    function palette() {
+    function palette(node = "bitcoin") {
+      if (node === "monero") {
+        return effectiveLight()
+          ? { top: "#ff8a3d", side: "#d94f00", dark: "#943800", grid: "#d28a5b", edge: "#b64200", alpha: 0.6, glow: 0 }
+          : { top: "#ff9b59", side: "#ff6600", dark: "#9f3f00", grid: "#704227", edge: "#ffb17d", alpha: 0.95, glow: 10 };
+      }
       return effectiveLight()
         ? { top: "#e6ad2e", side: "#c07f12", dark: "#8a5c06", grid: "#caa250", edge: "#9c6500", alpha: 0.55, glow: 0 }
         : { top: "#ffd873", side: "#f2a900", dark: "#9a6a08", grid: "#6b5320", edge: "#ffe08a", alpha: 0.95, glow: 10 };
     }
 
     const liveData = () => {
-      const el = document.getElementById("live");
+      const el = document.body.dataset.node === "monero"
+        ? document.getElementById("monero-live")
+        : document.getElementById("live");
       return (el && el.dataset) || {};
     };
 
@@ -120,6 +127,30 @@ if (typeof document !== "undefined") {
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.shadowBlur = 0;
+    }
+
+    function drawPreviewTower(node, ox, anchorY, tw, fill) {
+      const pal = palette(node);
+      const bh = tw * 0.5;
+      const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - layer * bh - GRID * (tw / 4));
+      for (let depth = 10; depth >= 1; depth--) {
+        const fade = Math.max(0.25, 1 - depth * 0.07);
+        ctx.globalAlpha = pal.alpha * fade;
+        for (let i = 0; i < GRID; i++) {
+          poly([p(i, GRID, -depth), p(i + 1, GRID, -depth), p(i + 1, GRID, -depth - 1), p(i, GRID, -depth - 1)], pal.side, pal.edge, 0);
+        }
+        for (let j = 0; j < GRID; j++) {
+          poly([p(GRID, j, -depth), p(GRID, j + 1, -depth), p(GRID, j + 1, -depth - 1), p(GRID, j, -depth - 1)], pal.dark, pal.edge, 0);
+        }
+      }
+      const done = Math.floor(fill);
+      for (let idx = 0; idx < PER_LAYER; idx++) {
+        const { gx, gy } = gridCell(idx);
+        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
+        ctx.globalAlpha = idx < done ? pal.alpha : pal.alpha * 0.35;
+        poly(face, idx < done ? pal.top : null, idx < done ? pal.edge : pal.grid, idx < done ? pal.glow : 0);
+      }
+      ctx.globalAlpha = 1;
     }
 
     let displayed = null;   // eased fill of today's layer
@@ -142,7 +173,25 @@ if (typeof document !== "undefined") {
       const fill = Math.max(0, Math.min(PER_LAYER, displayed));
 
       ctx.clearRect(0, 0, W, H);
-      const pal = palette();
+      const selected = document.body.dataset.node;
+      if (!selected) {
+        if (W <= 700) {
+          const tw = Math.max(18, Math.min(28, W / 17));
+          drawPreviewTower("bitcoin", W / 2, H * 0.25, tw, fill);
+          drawPreviewTower("monero", W / 2, H * 0.71, tw, fill);
+        } else {
+          const tw = Math.max(22, Math.min(38, W / 34));
+          drawPreviewTower("bitcoin", W * 0.32, H * 0.48, tw, fill);
+          drawPreviewTower("monero", W * 0.68, H * 0.48, tw, fill);
+        }
+        if (label) {
+          label.hidden = true;
+          label.style.opacity = "0";
+        }
+        return;
+      }
+      const pal = palette(selected);
+      if (label) label.hidden = false;
       const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
       const anchorY = H * 0.6;
