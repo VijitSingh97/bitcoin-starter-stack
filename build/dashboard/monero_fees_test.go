@@ -15,7 +15,8 @@ import (
 func TestMoneroFeeHistoryPersistsPrivatelyAndStaysBounded(t *testing.T) {
 	dir := t.TempDir()
 	history := NewMoneroFeeHistory(dir)
-	now := time.Now().Truncate(time.Minute)
+	now := time.Date(2026, time.October, 30, 12, 0, 0, 0, time.UTC)
+	history.now = func() time.Time { return now }
 	for i := 1; i <= moneroFeeHistoryPoints+2; i++ {
 		history.recordAt(float64(i)/1e9, now.Add(time.Duration(i-moneroFeeHistoryPoints-2)*time.Minute))
 	}
@@ -28,7 +29,8 @@ func TestMoneroFeeHistoryPersistsPrivatelyAndStaysBounded(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("history file = %#v, %v", info, err)
 	}
-	reloaded := NewMoneroFeeHistory(dir)
+	reloaded := &MoneroFeeHistory{path: path, now: func() time.Time { return now }}
+	reloaded.load()
 	if !reflect.DeepEqual(reloaded.snapshot(), values) {
 		t.Fatal("reloaded fee history differs")
 	}
