@@ -14,7 +14,7 @@ names for upgrade compatibility. The new product name does not move your data.
 | Node | Pruned storage | Current support | 1 CPU / 2 GiB per-node target |
 |---|---|---|---|
 | Bitcoin Core | Allow 30–60 GB total with the default 10 GB block-retention budget. Chainstate is additional to that budget. | Node status, public-only watch balances, fees, BTC prices, notifications, optional LAN RPC. | Short capped trial passed; full post-sync stability qualification is pending. |
-| Monero | Official documentation reports about 105 GiB pruned as of October 5, 2026. Allow 120–150 GiB for growth and working room. | Node status, optional restricted LAN RPC and LAN ZMQ for Pithead/P2Pool. | Experimental until a sustained capped test passes. |
+| Monero | Official documentation reports about 105 GiB pruned as of October 5, 2026. Allow 120–150 GiB for growth and working room. | Node status, native fees, XMR prices, view-only balances, optional restricted LAN RPC and LAN ZMQ for Pithead/P2Pool. | Experimental until a sustained capped test passes. |
 
 Monero's base figure comes from its [official remote-node guide](https://docs.getmonero.org/interacting/remote-nodes/).
 The extra room above is our planning allowance, not an upstream minimum.
@@ -85,14 +85,15 @@ fields. That internal listener is never published or relayed to the LAN.
 This follows Pithead's [remote-node settings](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md)
 and [Monero configuration](https://github.com/p2pool-starter-stack/pithead/blob/develop/build/monero/bitmonero.conf.template).
 P2Pool needs mining-template/submission RPC and ZMQ notifications; restricted
-Monero RPC supports the relevant methods. No miner, wallet service, or Tari
-merge-mining proxy is started by this stack.
+Monero RPC supports the relevant methods. No miner or Tari merge-mining proxy
+is started by this stack.
 
-Monero's public address alone cannot reveal a wallet balance. A view-only
-wallet requires a private view key, and accurate spent-output tracking also
-needs key images. To preserve the public-key-only policy, this first Monero
-integration displays node health only and never accepts wallet keys. See the
-[official view-only wallet guide](https://www.getmonero.org/resources/user-guides/view_only.html).
+The dashboard also runs an internal, authenticated wallet service for Monero
+view-only monitoring. It accepts a primary mainnet address and private view key,
+never a private spend key or seed. The service has no host port and stores
+encrypted watch-only wallet files in its own private Docker volume. See
+[Watch-only balances](watch-only.md#monero-view-only-wallets) and Monero's
+[official view-only guide](https://www.getmonero.org/resources/user-guides/view_only.html).
 
 ## Other chains evaluated
 

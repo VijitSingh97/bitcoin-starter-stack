@@ -52,6 +52,8 @@ func TestMoneroAPIReportsDigestAuthenticatedNode(t *testing.T) {
 					}
 				case "get_last_block_header":
 					result = map[string]any{"block_header": map[string]any{"timestamp": blockTime}}
+				case "get_fee_estimate":
+					result = map[string]any{"fees": []uint64{20_000, 80_000, 320_000, 4_000_000}, "status": "OK"}
 				default:
 					http.Error(w, "bad method", http.StatusBadRequest)
 					return
@@ -76,7 +78,7 @@ func TestMoneroAPIReportsDigestAuthenticatedNode(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 				t.Fatal(err)
 			}
-			if calls != 6 || !status.Enabled || !status.Available || !status.Synced || status.SyncPercent != 100 || status.Height != 3500000 || status.Version != "0.18.4.2-release" || status.IncomingConnections != 4 || status.OutgoingConnections != 12 || !status.Pruned || status.DatabaseSizeBytes != 84_000_000_000 || status.UptimeSeconds < 7198 || status.MempoolTxs != 23 || !status.MempoolTxsAvailable || status.MempoolBytes != 2_500_000 || !status.MempoolBytesAvailable || status.Difficulty != 720_000_000_000 || status.NetworkHashrate != 6_000_000_000 || !status.HashrateAvailable || !status.LatestBlockAvailable || status.LatestBlockAgeSeconds < 119 || !status.DiskAvailable || !status.RPCExposureEnabled || !status.ZMQExposureEnabled {
+			if calls != 8 || !status.Enabled || !status.Available || !status.Synced || status.SyncPercent != 100 || status.Height != 3500000 || status.Version != "0.18.4.2-release" || status.IncomingConnections != 4 || status.OutgoingConnections != 12 || !status.Pruned || status.DatabaseSizeBytes != 84_000_000_000 || !status.DatabaseSizeAvailable || status.UptimeSeconds < 7198 || !status.UptimeAvailable || status.MempoolTxs != 23 || !status.MempoolTxsAvailable || status.MempoolBytes != 2_500_000 || !status.MempoolBytesAvailable || status.Difficulty != 720_000_000_000 || !status.DifficultyAvailable || status.NetworkHashrate != 6_000_000_000 || !status.HashrateAvailable || !status.LatestBlockAvailable || status.LatestBlockAgeSeconds < 119 || !status.FeesAvailable || len(status.FeeEstimates) != 4 || status.FeeEstimates[2] != 320_000 || status.UpdatedAt <= 0 || !status.DiskAvailable || !status.RPCExposureEnabled || !status.ZMQExposureEnabled {
 				t.Fatalf("calls = %d, status = %#v", calls, status)
 			}
 			if response.Header().Get("Cache-Control") != "no-store" {
@@ -161,7 +163,7 @@ func TestMoneroAPIKeepsCoreStatusWhenOptionalMetricsFail(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if !status.Available || status.MempoolTxsAvailable || status.MempoolBytesAvailable || status.LatestBlockAvailable || status.Error != "" {
+	if !status.Available || status.UptimeAvailable || status.DatabaseSizeAvailable || status.DifficultyAvailable || status.MempoolTxsAvailable || status.MempoolBytesAvailable || status.LatestBlockAvailable || status.FeesAvailable || status.Error != "" {
 		t.Fatalf("status = %#v", status)
 	}
 }

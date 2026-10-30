@@ -307,21 +307,21 @@ h2 {
   font-family: monospace;
 }
 .price-row .price-label { color: var(--muted); }
-.price-row #btc-price-value { color: var(--accent); justify-self: end; }
-.price-row #btc-price-currency {
+.price-row .price-value { color: var(--accent); justify-self: end; }
+.price-row .price-currency {
   background: var(--tag-bg);
   border: 1px solid var(--tag-border);
   border-radius: 4px;
   color: var(--text);
   padding: 3px 5px;
 }
-.price-row #btc-price-status {
+.price-row .price-status {
   grid-column: 1 / -1;
   color: var(--muted);
   font-size: 0.7rem;
   text-align: right;
 }
-.price-row #btc-price-status.stale { color: #e0a800; }
+.price-row .price-status.stale { color: #e0a800; }
 .watch-card h2 { font-size: 1.1rem; }
 .wk-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wk { /* truncated key/address, click to expand */
@@ -578,3 +578,8 @@ hr {
   color: #f2a900;
 }
 .upgrade-btn:disabled { opacity: 0.5; cursor: default; }
+
+.monero-wallets { --accent: var(--monero); }
+#monero-fees { white-space: pre-line; text-align: right; }
+.monero-wallet-entry { border-top: 1px solid var(--border); padding-block: 12px; }
+.monero-wallet-entry input[type="file"] { display: block; max-width: 100%; margin-block: 8px; color: var(--muted); }

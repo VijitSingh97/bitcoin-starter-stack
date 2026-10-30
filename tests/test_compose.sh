@@ -24,6 +24,9 @@ export BITCOIN_PRUNE=555
 export COMPOSE_PROFILES=bitcoin
 export MONERO_RPC_USER=monerouser
 export MONERO_RPC_PASSWORD=moneropassword
+export MONERO_WALLET_RPC_USER=walletuser
+export MONERO_WALLET_RPC_PASSWORD=walletpassword
+export MONERO_WALLET_PASSWORD=walletfilepassword
 export WATCH_WALLETS_B64=watchblob
 export DASHBOARD_BIND_IP=127.0.0.1
 
@@ -119,6 +122,15 @@ echo "$rpc_rendered" | sed -n '/^  bitcoin:$/,/^  dashboard:$/p' | grep -q 'publ
 monero_rendered=$(COMPOSE_PROFILES=bitcoin,monero MONERO_ENABLED=1 docker compose --env-file /dev/null config)
 echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_ENABLED: "1"' || fail "dashboard did not receive enabled Monero state"
 echo "$monero_rendered" | grep -q '^  monero:' || fail "Monero profile did not start the Monero service"
+echo "$monero_rendered" | grep -q '^  monero-wallet:' || fail "Monero profile did not start the wallet service"
+wallet_rendered=$(echo "$monero_rendered" | sed -n '/^  monero-wallet:$/,/^  tor:$/p')
+echo "$wallet_rendered" | grep -q 'ipv4_address: 172.29.0.31' || fail "Monero wallet fixed internal address changed"
+echo "$wallet_rendered" | grep -q 'read_only: true' || fail "Monero wallet root filesystem is writable"
+echo "$wallet_rendered" | grep -q 'source: monero_wallets' || fail "Monero wallet volume is not persistent"
+echo "$wallet_rendered" | grep -q 'published:' && fail "Monero wallet RPC is published to the host"
+echo "$wallet_rendered" | grep -q '127.0.0.1' || fail "Monero wallet DNS is not fail-closed"
+echo "$wallet_rendered" | grep -q 'mem_limit: "536870912"' || fail "Monero wallet memory guard changed"
+echo "$wallet_rendered" | grep -q 'cpus: 0.5' || fail "Monero wallet CPU guard changed"
 echo "$monero_rendered" | sed -n '/^  monero:$/,/^  tor:$/p' | grep -q 'ipv4_address: 172.29.0.30' ||
   fail "Monero fixed internal address changed"
 echo "$monero_rendered" | sed -n '/^  monero:$/,/^  tor:$/p' | grep -q 'published:' &&
@@ -138,6 +150,12 @@ grep -q '^rpc-restricted-bind-ip=0.0.0.0$' build/monero/entrypoint.sh || fail "M
 grep -q '^restricted-rpc=1$' build/monero/entrypoint.sh && fail "Monero globally restricts the dashboard RPC"
 echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_RPC_URL: http://172.29.0.30:18085' ||
   fail "dashboard is not wired to Monero internal RPC"
+echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero-wallet:$/p' | grep -q 'MONERO_WALLET_RPC_URL: http://172.29.0.31:18082' ||
+  fail "dashboard is not wired to Monero wallet RPC"
+grep -q '^wallet-dir=/wallets$' build/monero/wallet-entrypoint.sh || fail "Monero wallet files are not in the private volume"
+grep -q '^daemon-address=http://172.29.0.30:18085$' build/monero/wallet-entrypoint.sh || fail "Monero wallet RPC does not use the internal daemon"
+grep -q '^rpc-bind-port=18082$' build/monero/wallet-entrypoint.sh || fail "Monero wallet RPC port changed"
+grep -q 'chmod 0700 /wallets' build/monero/Dockerfile || fail "Monero wallet volume is not owner-only"
 echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'target: /data-monero' ||
   fail "dashboard is missing the read-only Monero data mount"
 echo "$monero_rendered" | grep -A4 'target: /data-monero' | grep -q 'read_only: true' ||

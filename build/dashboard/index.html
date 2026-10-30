@@ -74,13 +74,13 @@
         <div class="row"><span class="label">Mempool:</span> <span>{{.MempoolTxs}} tx · {{printf "%.1f" .MempoolMB}} MB</span></div>
         <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{.FeeNext}} / {{.Fee30m}} / {{.FeeHour}}</span></div>
         <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>{{end}}
-        <section id="btc-price" hidden>
+        <section id="btc-price" data-price-asset="bitcoin" hidden>
           <hr>
           <div class="price-row">
             <span class="price-label">Bitcoin price</span>
-            <strong id="btc-price-value">—</strong>
-            <select id="btc-price-currency" aria-label="Price currency"></select>
-            <span id="btc-price-status">Price unavailable</span>
+            <strong id="btc-price-value" class="price-value" data-price-value>—</strong>
+            <select id="btc-price-currency" class="price-currency" data-price-currency aria-label="Bitcoin price currency"></select>
+            <span id="btc-price-status" class="price-status" data-price-status>Price unavailable</span>
           </div>
         </section>
         <hr>
@@ -96,6 +96,7 @@
 {{end}}
   <div id="monero-panel" class="stack-col node-panel" data-node-panel="monero" hidden>
     <button class="node-panel-close" type="button" data-close-node aria-label="Close Monero status">✕</button>
+    <div id="monero-tower-stats" class="tower-stats monero-wallets" hidden></div>
     <section id="monero-live" class="card monero-card" aria-live="polite">
       <h2>Monero Node Status<span id="monero-badge" class="badge monero-badge">Loading</span></h2>
       <p id="monero-state" class="node-state">Connecting...</p>
@@ -110,25 +111,39 @@
         <hr>
         <div class="row"><span class="label">Database Size:</span> <span id="monero-size">—</span></div>
         <div class="row"><span class="label">Disk Capacity:</span> <span id="monero-disk-capacity">—</span></div>
+        <div class="row"><span class="label">Disk Usage:</span> <span id="monero-disk-usage">—</span></div>
         <div class="row"><span class="label">Disk Free:</span> <span id="monero-disk-free">—</span></div>
         <hr>
         <div class="row"><span class="label">Mempool:</span> <span id="monero-mempool">—</span></div>
         <div class="row"><span class="label">Difficulty:</span> <span id="monero-difficulty">—</span></div>
         <div class="row"><span class="label">Network Hashrate:</span> <span id="monero-hashrate">—</span></div>
         <div class="row"><span class="label">Latest Block:</span> <span id="monero-last-block">—</span></div>
+        <div class="row"><span class="label">Fee (XMR/kB):</span> <span id="monero-fees">—</span></div>
+        <div class="spark-row"><span class="label">Normal fee XMR/kB (24h)</span><canvas class="spark" id="spark-monero-fee"></canvas></div>
+        <section id="monero-price" data-price-asset="monero" hidden>
+          <hr>
+          <div class="price-row">
+            <span class="price-label">Monero price</span>
+            <strong class="price-value" data-price-value>—</strong>
+            <select class="price-currency" data-price-currency aria-label="Monero price currency"></select>
+            <span class="price-status" data-price-status>Price unavailable</span>
+          </div>
+        </section>
         <hr>
         <div class="row"><span class="label">Open ports:</span> <span></span></div>
         <div class="row"><span class="label">RPC:</span> <span id="monero-rpc-exposure">Disabled</span></div>
         <div class="row"><span class="label">ZMQ:</span> <span id="monero-zmq-exposure">Disabled</span></div>
         <p class="node-state">Configured LAN access. RPC is restricted and requires your Monero login. ZMQ is for a trusted LAN.</p>
+        <div class="footer"><span id="monero-updated">Updated: —</span><span>Monero</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
+    <section id="monero-watch" class="card watch-card monero-wallets" hidden></section>
   </div>
   <button id="settings-open" class="settings-open" type="button" aria-label="Settings" title="Settings">⚙</button>
   <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">
       <div class="settings-heading"><h2 id="settings-title">Settings</h2><button id="settings-close" type="button" aria-label="Close settings">✕</button></div>
-      <p>Configure Bitcoin alerts without restarting your node. Changes are saved on this node. Monero currently provides node status only.</p>
+      <p>Configure Bitcoin alerts without restarting your node. Changes are saved on this node. Notification settings currently monitor Bitcoin.</p>
       <fieldset id="settings-appearance">
         <legend>Appearance</legend>
         <label class="settings-check"><input id="settings-tower-labels" type="checkbox"> Label towers</label>
@@ -156,7 +171,8 @@
   <script type="module" src="/static/theme.js"></script>
   <script type="module" src="/static/sparkline.js"></script>
   <script type="module" src="/static/refresh.js"></script>
-  {{if .BitcoinEnabled}}<script type="module" src="/static/prices.js"></script>{{end}}
+  <script type="module" src="/static/prices.js"></script>
+  <script type="module" src="/static/monero-watch.js"></script>
   <script type="module" src="/static/settings.js"></script>
   {{if and .BitcoinEnabled (not .Loading)}}<script type="module" src="/static/watch.js"></script>
   <script type="module" src="/static/upgrade.js"></script>{{end}}

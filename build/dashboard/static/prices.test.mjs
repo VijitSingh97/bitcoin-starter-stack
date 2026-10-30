@@ -5,13 +5,17 @@ import {
   formatPrice,
   loadCurrency,
   normalizeCurrency,
+  priceURL,
   priceView,
   saveCurrency,
+  storageKey,
 } from "./prices.js";
 
 test("price endpoint is same-origin", () => {
   assert.equal(PRICE_URL, "/api/prices");
   assert.equal(PRICE_URL.startsWith("http"), false);
+  assert.equal(priceURL(), "/api/prices");
+  assert.equal(priceURL("monero"), "/api/prices?asset=monero");
 });
 
 test("currency persistence defaults and falls through to USD", () => {
@@ -26,6 +30,9 @@ test("currency persistence defaults and falls through to USD", () => {
   values.set("btc-price-currency", "DOGE");
   assert.equal(loadCurrency(storage), "USD");
   assert.equal(normalizeCurrency("inr"), "INR");
+  assert.equal(storageKey("monero"), "monero-price-currency");
+  assert.equal(saveCurrency("cad", storage, "monero"), "CAD");
+  assert.equal(loadCurrency(storage, "monero"), "CAD");
 });
 
 test("currency persistence tolerates blocked storage", () => {

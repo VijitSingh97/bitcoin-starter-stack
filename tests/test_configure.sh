@@ -19,9 +19,14 @@ grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC pass
 rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
 monero_password=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' "$tmp/.env")
-[ -n "$dashboard_password" ] && [ -n "$monero_password" ] || fail "fresh install did not generate all passwords"
-[ "$rpc_password" != "$dashboard_password" ] && [ "$rpc_password" != "$monero_password" ] && [ "$dashboard_password" != "$monero_password" ] ||
-  fail "fresh install did not separate dashboard, Bitcoin, and Monero passwords"
+monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
+[ -n "$dashboard_password" ] && [ -n "$monero_password" ] && [ -n "$monero_wallet_rpc_password" ] && [ -n "$monero_wallet_password" ] ||
+  fail "fresh install did not generate all passwords"
+passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" | sort -u | wc -l | tr -d ' ')
+[ "$passwords" = "5" ] || fail "fresh install did not separate service passwords"
+grep -q '^MONERO_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Monero wallet RPC user default is not admin"
+grep -q '^MONERO_WALLET_RPC_URL=http://172.29.0.31:18082$' "$tmp/.env" || fail "Monero wallet RPC URL is not internal"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
 grep -q '^COMPOSE_PROFILES=bitcoin$' "$tmp/.env" || fail "zero-config install did not select only Bitcoin"
 grep -q '^BITCOIN_ENABLED=1$' "$tmp/.env" || fail "Bitcoin default is not enabled"
@@ -46,16 +51,23 @@ u1=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p1=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 s1=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h1=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
+mw1=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+wf1=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
 (cd "$tmp" && ./configure.sh) >/dev/null
 u2=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p2=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 s2=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h2=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
+mw2=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+wf2=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
 if [ "$u1" != "$u2" ] || [ "$p1" != "$p2" ]; then
   fail "credentials changed on re-run (not idempotent)"
 fi
 if [ "$s1" != "$s2" ] || [ "$h1" != "$h2" ]; then
   fail "rpcauth salt/hash changed on re-run — would recreate bitcoind on every apply/upgrade"
+fi
+if [ "$mw1" != "$mw2" ] || [ "$wf1" != "$wf2" ]; then
+  fail "Monero wallet credentials changed on re-run"
 fi
 
 # Existing rendered settings remain authoritative when a new default is added.
@@ -138,6 +150,8 @@ grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default n
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
 grep -qE '^DASHBOARD_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "dashboard password was not independently generated"
 grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
+grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"
+grep -qE '^MONERO_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet password was not generated"
 grep -q '^MONERO_DATA_DIR=./data/monero$' "$tmp/.env" || fail "Monero data_dir default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"

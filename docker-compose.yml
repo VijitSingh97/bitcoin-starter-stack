@@ -141,6 +141,49 @@ services:
     dns:
       - 127.0.0.1
 
+  monero-wallet:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    build:
+      context: ${STACK_ROOT:-.}/build/monero
+    container_name: monero-wallet
+    profiles: ["monero"]
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      MONERO_RPC_USER: ${MONERO_RPC_USER:?run ./configure.sh first}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:?run ./configure.sh first}
+      MONERO_WALLET_RPC_USER: ${MONERO_WALLET_RPC_USER:?run ./configure.sh first}
+      MONERO_WALLET_RPC_PASSWORD: ${MONERO_WALLET_RPC_PASSWORD:?run ./configure.sh first}
+    volumes:
+      - monero_wallets:/wallets
+    tmpfs:
+      - /run/monero-wallet:mode=0700,uid=1000,gid=1000
+      - /tmp:mode=0700,uid=1000,gid=1000
+    entrypoint: ["/usr/local/bin/monero-wallet-entrypoint"]
+    depends_on:
+      monero:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/monero-wallet-healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 5m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.31
+    dns:
+      - 127.0.0.1
+
   dashboard:
     # Prebuilt release image, with an explicit build target for development.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
@@ -166,6 +209,10 @@ services:
       MONERO_RPC_URL: ${MONERO_RPC_URL:-http://172.29.0.30:18085}
       MONERO_RPC_USER: ${MONERO_RPC_USER:-}
       MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:-}
+      MONERO_WALLET_RPC_URL: ${MONERO_WALLET_RPC_URL:-http://172.29.0.31:18082}
+      MONERO_WALLET_RPC_USER: ${MONERO_WALLET_RPC_USER:-}
+      MONERO_WALLET_RPC_PASSWORD: ${MONERO_WALLET_RPC_PASSWORD:-}
+      MONERO_WALLET_PASSWORD: ${MONERO_WALLET_PASSWORD:-}
       MONERO_DATA_DIR: /data-monero
       MONERO_RPC_EXPOSE: ${MONERO_RPC_EXPOSE:-0}
       MONERO_RPC_BIND_IP: ${MONERO_RPC_BIND_IP:-127.0.0.1}
@@ -218,3 +265,4 @@ networks:
 volumes:
   tor_data:
   dashboard_state:
+  monero_wallets:

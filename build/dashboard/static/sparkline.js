@@ -13,6 +13,11 @@ export function points(values, w, h, pad = 2) {
   }));
 }
 
+export function series(payload, key) {
+  const values = payload?.[key];
+  return Array.isArray(values) ? values.filter((value) => typeof value === "number" && Number.isFinite(value) && value > 0) : [];
+}
+
 if (typeof document !== "undefined") {
   const accent = () =>
     getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#f2a900";
@@ -43,14 +48,21 @@ if (typeof document !== "undefined") {
     ctx.fill();
   }
 
-  let cache = [];
-  const render = () => draw(document.getElementById("spark-fee"), cache);
+  const charts = [
+    { id: "spark-fee", url: "/api/fees", key: "fee" },
+    { id: "spark-monero-fee", url: "/api/monero/fees", key: "fee_xmr_per_kb" },
+  ];
+  const cache = new Map();
+  const render = () => {
+    for (const chart of charts) draw(document.getElementById(chart.id), cache.get(chart.id) || []);
+  };
 
-  async function refresh() {
+  async function refresh(chart) {
+    if (!document.getElementById(chart.id)) return;
     try {
-      const res = await fetch("/api/fees");
+      const res = await fetch(chart.url);
       if (!res.ok) return;
-      cache = (await res.json()).fee || [];
+      cache.set(chart.id, series(await res.json(), chart.key));
       render();
     } catch {
       /* offline; keep the last drawing */
@@ -59,6 +71,6 @@ if (typeof document !== "undefined") {
 
   // redraw into the fresh canvas after refresh.js swaps #live, without refetching
   window.addEventListener("live-updated", render);
-  refresh();
-  setInterval(refresh, 60000);
+  for (const chart of charts) refresh(chart);
+  setInterval(() => charts.forEach(refresh), 60000);
 }

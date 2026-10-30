@@ -1,10 +1,10 @@
 # Watch-only balances
 
-Add your public keys and the dashboard shows the balance of each, plus a total —
-read straight off **your own node**. No third-party block explorer ever sees your
-addresses, which is the whole reason to run a private node in the first place.
+Bitcoin accepts public keys only. Monero uses a private view key plus optional
+signed key images. In both cases balances are read from **your own node**, so no
+third-party block explorer receives your addresses.
 
-These are **watch-only** wallets: they hold public keys only. The node can see
+Bitcoin **watch-only** entries hold public keys only. The node can see
 your balance and derive your addresses, but it has no private keys and
 **cannot spend** anything.
 
@@ -55,7 +55,60 @@ Set `dashboard.password` in `config.json` to view personal wallets and add or re
 entries. Fresh installs include one clearly marked public example; see
 [Public example](#public-example-and-seeding-from-configjson).
 
-## The Genesis address is a special case
+## Monero view-only wallets
+
+A Monero address alone cannot reveal incoming outputs. Open the Monero card,
+then use **View-only wallets**:
+
+1. Enter a label, the primary mainnet address, the private view key, and an
+   optional restore height. Use `0` when unsure; it scans safely from genesis but
+   takes longer.
+2. Or paste JSON in this form:
+
+   ```json
+   {"name":"Cold storage","address":"4...","view_key":"...","restore_height":0}
+   ```
+
+3. Submit it and wait while the wallet scans. **Pending** is not a zero balance.
+
+The form never accepts a private spend key or seed phrase. The resulting wallet
+cannot sign or send transactions. The private view key is write-only in the UI:
+it creates an encrypted watch-only wallet file, then is not stored in dashboard
+metadata or returned by the API. Do not place it in `config.json`, Git, or a shell
+command. The label, address, scan state, and balance snapshots stay in private
+mode-600 dashboard state. Encrypted wallet files stay in the private
+`monero_wallets` Docker volume; removing a dashboard row stops monitoring but
+does not delete that encrypted file. Stack backups, release archives, and Debian
+packages do not copy this private volume. After a disaster restore, remove and
+add the Monero row again from your original address and private view key.
+
+### Received-only and current balances
+
+A view key detects incoming outputs but cannot determine by itself whether an
+output was later spent. Until complete key images are imported, the dashboard
+labels the amount **Received only**, not current balance. This follows Monero's
+[view-only wallet guide](https://www.getmonero.org/resources/user-guides/view_only.html),
+which says outgoing transactions require matching key images for a correct balance.
+
+Export signed key images from the spending wallet and paste the native wallet-RPC
+JSON object:
+
+```json
+{"offset":0,"signed_key_images":[{"key_image":"...","signature":"..."}]}
+```
+
+A wrapper response containing that object under `result` is accepted too. The
+GUI/CLI encrypted binary `.key_images` file is not accepted. Some hardware-wallet
+view-only flows cannot export key images; in that case keep using received-only
+amounts. Import key images again after receiving or spending, because new outputs
+need new coverage. A snapshot is marked verified/current only after the wallet is
+fully scanned and fresh key-image coverage is complete.
+
+The stack uses Monero's authenticated
+[`generate_from_keys`, `get_balance`, and `import_key_images` wallet RPCs](https://docs.getmonero.org/rpc-library/wallet-rpc/)
+inside Docker. That wallet service has no host port and no public internet route.
+
+## Bitcoin: the Genesis address is a special case
 
 The Genesis address `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` is not added automatically.
 It can be watched manually, but it is a poor reference for comparing balances:
@@ -155,12 +208,13 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 
-- **No signing keys.** Watch-only wallets have no private keys, and the add form
-  rejects private keys and seed phrases.
+- **No spending keys.** Bitcoin accepts public material only. Monero accepts a
+  private view key, but rejects private spend keys and seeds; neither path can sign
+  or send.
 - **An xpub is still sensitive.** Anyone who has it can follow the addresses and
   balances derived from that account. It's stored in the private wallet list;
   existing Core watch-wallet files can also contain it. Keep access to the box and dashboard
   controlled, and set a dashboard password if it's reachable beyond your LAN.
-- **Wallet data stays on the box.** Balances come directly from your node;
+- **Wallet data stays on the box.** Balances come directly from your nodes;
   wallet keys and addresses are never sent to external services. The separate BTC
-  price lookup sends only Bitcoin and currency names to CoinGecko through Tor.
+  and XMR price lookups send only asset and currency names to CoinGecko through Tor.

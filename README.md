@@ -12,7 +12,7 @@
 Run [Bitcoin Core](https://bitcoincore.org/), [Monero](https://www.getmonero.org/),
 or both, with a small Go dashboard. Pick the gold Bitcoin tower or the orange
 Monero tower to open its status card. Running services use Tor for public
-internet traffic; the dashboard and optional wallet RPC stay on your trusted LAN.
+internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
 
 <img src="./images/nodes.png" width="100%" alt="Node Starter Stack's gold Bitcoin tower and orange Monero tower; click either to open its status card" />
 
@@ -54,16 +54,19 @@ internet traffic; the dashboard and optional wallet RPC stay on your trusted LAN
   new-block alerts from the gear menu on localhost, your private LAN, or the onion dashboard.
   Saved values are visible in the settings panel, and a separate JSON override survives
   reboots and upgrades.
-- 👀 **Balances from your own node.** Import an address, `xpub`, `zpub`, or public
+- 👀 **Bitcoin balances from your own node.** Import an address, `xpub`, `zpub`, or public
   descriptor. A pruned node scans its live UTXO set without an external address indexer;
   new imports stay pending until that scan confirms and caches a balance. A clearly
   marked public Binance
   address gives fresh installs an example; it is excluded from your totals.
   [How watch-only works](docs/watch-only.md).
+- 👁️ **Monero view-only wallets.** Add a main address and private view key from the
+  password-protected Monero card. No private spend key or seed is accepted, and the
+  dashboard cannot sign or send. Optional signed key images make spent/current balance
+  tracking accurate; without them the amount is clearly labeled received-only.
 - 🔌 **Monero remote node for Pithead.** Independently enable restricted, authenticated
-  Monero RPC and the optional ZMQ publisher on your private LAN. Monero support is
-  node monitoring and remote-node access; it does not import wallet keys or show balances.
-- 💱 **BTC in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
+  Monero RPC and the optional ZMQ publisher on your private LAN.
+- 💱 **BTC and XMR in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
   CoinGecko quotes are fetched through Tor, cached, and labeled when stale.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
   applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
@@ -202,9 +205,11 @@ focus, and show a pulsing loading block on top. Names are hidden by default;
 enable **Label towers** in the gear panel to show them. That preference survives
 restarts. Disabled nodes show **Not configured** in their card.
 
-Both cards show node version, uptime, connections, sync progress, and chain
-storage. Monero also shows mempool size, disk capacity/free space, latest-block
-age, difficulty, and estimated network hashrate. Unavailable metrics show a dash.
+Both cards show node version, uptime, connections, sync progress, chain storage,
+native fee estimates with a 24-hour graph, and a nine-currency price selector.
+Monero also shows mempool size, disk capacity/free space, latest-block age,
+difficulty, estimated network hashrate, and view-only balances. Unavailable
+metrics show a dash.
 The **Open ports** section shows configured LAN RPC/ZMQ access or **Disabled**;
 it does not scan ports or expose the internal administration listener.
 The following extra features belong to the Bitcoin card:
@@ -231,6 +236,11 @@ The following extra features belong to the Bitcoin card:
   day is pushed down and a fresh one starts. Driven purely by the clock — no history or node
   lookups. Theme-aware and paused for `prefers-reduced-motion`.
 
+The Monero card has the same price, fee-history, status, disk, uptime, and wallet
+sections. Its fees are native XMR-per-kB estimates. Monero wallet rows remain
+pending during their first scan; amounts are verified as current only when fresh,
+complete key-image coverage is present. Notifications remain Bitcoin-only.
+
 The status page, notification gear, and public example can be used without a
 password; when configured, the password protects the whole dashboard. Personal
 wallet views, wallet changes, and upgrades require one. LAN HTTP is unencrypted:
@@ -247,6 +257,7 @@ flowchart LR
         Dashboard["📊 Dashboard<br/>:80"]
         Bitcoin["🟠 Bitcoin Core"]
         Monero["🟠 Monero"]
+        MoneroWallet["👁️ Monero view-only wallet"]
         Tor["🧅 Tor"]
     end
 
@@ -254,12 +265,15 @@ flowchart LR
     Tor -->|Fixed local relay| Dashboard
     Dashboard -.->|RPC| Bitcoin
     Dashboard -.->|Internal Digest RPC| Monero
+    Dashboard -.->|Internal authenticated RPC| MoneroWallet
+    MoneroWallet -.->|Internal Digest RPC| Monero
     Bitcoin ==>|SOCKS5| Tor
     Monero ==>|SOCKS5| Tor
     Tor <==> Net
 ```
 
-Three containers for one selected node, four for both. Nodes and the Go dashboard share an internal network;
+Bitcoin alone uses three containers, Monero alone uses four, and both use five.
+Nodes and the Go dashboard share an internal network;
 only Tor joins an external network. The Tor container also forwards the private
 LAN dashboard port to its fixed internal destination.
 [Architecture](docs/architecture.md) explains the layout; [Privacy](docs/privacy.md)
@@ -310,4 +324,5 @@ pending import. A single public address is not an exchange’s total reserves or
 proof of solvency.
 
 The dashboard runtime is Go; Python remains in the development test harness only.
-Only public keys, public descriptors, and addresses are accepted for watch-only imports.
+Bitcoin imports accept public material only. Monero view-only imports require a
+private view key, but never a private spend key, seed phrase, signing key, or send permission.

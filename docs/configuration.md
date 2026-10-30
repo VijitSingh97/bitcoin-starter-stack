@@ -115,9 +115,10 @@ strong random RPC credentials on first run (reused on later runs).
 Starting and applying use local images only. See [Tor-only networking](privacy.md)
 for the boundary between host downloads and Tor-only runtime traffic.
 
-Fresh installs generate independent dashboard, Bitcoin RPC, and Monero RPC
-passwords. Read them locally from the mode-600 `.env`; upgrades preserve
-existing credentials instead of forcing a rotation.
+Fresh installs generate independent dashboard, Bitcoin RPC, Monero daemon RPC,
+Monero wallet RPC, and encrypted-wallet-file passwords. Read them locally from
+the mode-600 `.env`; upgrades preserve existing credentials instead of forcing
+a rotation. The wallet RPC is internal-only and is not a LAN connection endpoint.
 
 The compact profile uses `bitcoin-starter-stack-resource-profile.timer`; it
 never runs inside the dashboard or mounts the Docker socket there. It may
@@ -130,7 +131,8 @@ upgrade. `off` stops future automatic changes; removing an already-applied
 Docker limit requires recreating the node with `bitcoin-stack apply`.
 
 Notification settings currently monitor Bitcoin only. A Monero-only install
-does not send Bitcoin Telegram alerts or Bitcoin Healthchecks pings.
+does not send Bitcoin Telegram alerts or Bitcoin Healthchecks pings. Monero
+status, fees, prices, and view-only balances still work in its dashboard card.
 
 The gear panel also includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
@@ -149,6 +151,12 @@ without restarting the node. It saves a separate persistent JSON override; see
 already managed by the watch-only card and require a dashboard password.
 Notification changes follow the dashboard's optional password and work from
 localhost, the private LAN, or the onion dashboard.
+
+Monero view-only wallets are also managed in the dashboard, not in `config.json`.
+Use the Monero card to submit a mainnet primary address and private view key, with
+an optional restore height and signed key-image JSON. Never place a view key,
+private spend key, seed phrase, or key images in this tracked configuration.
+See [Watch-only balances](watch-only.md#monero-view-only-wallets).
 
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials and LAN exposure, `inbound_onion`, and dashboard

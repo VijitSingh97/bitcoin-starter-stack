@@ -140,7 +140,8 @@ WantedBy=multi-user.target
 APT installations use `sudo bitcoin-stack backup` and write archives under
 `/var/lib/bitcoin-starter-stack/backups`; restore and apply with `sudo` as well.
 
-A backup holds everything that can't be re-derived — and nothing else:
+A backup holds the stack configuration and dashboard state, but excludes chain
+data and encrypted Monero wallet files:
 
 - `config.json` and `.env` (settings + credentials)
 - the node's inbound-onion key (`onion_v3_private_key`, if enabled)
@@ -149,6 +150,12 @@ A backup holds everything that can't be re-derived — and nothing else:
   history (including entries that still need a rescan), pending upgrade
   request, event log, and dashboard-saved notification settings
   (`notification_settings.json`)
+
+The `monero_wallets` volume is intentionally excluded because its encrypted
+wallet files contain private view-key material. After restoring onto a new
+machine, remove each unavailable Monero row and add it again with its address
+and private view key. Release archives and Debian packages never contain this
+runtime volume.
 
 Losing the onion keys means new `.onion` addresses, so back up after
 enabling either onion feature. The chain itself is re-derivable from the

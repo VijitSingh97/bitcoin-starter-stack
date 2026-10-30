@@ -442,10 +442,10 @@ func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
 
 	handler := a.routes()
 	index := request(t, handler, http.MethodGet, "/", "")
-	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") || strings.Contains(index.Body.String(), "/static/prices.js") {
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") {
 		t.Fatalf("disabled index = %d %q", index.Code, index.Body.String())
 	}
-	if !strings.Contains(index.Body.String(), `id="monero-panel"`) || !strings.Contains(index.Body.String(), `/static/nodes.js`) {
+	if !strings.Contains(index.Body.String(), `id="monero-panel"`) || !strings.Contains(index.Body.String(), `/static/nodes.js`) || !strings.Contains(index.Body.String(), `/static/prices.js`) {
 		t.Fatal("Bitcoin-disabled page omitted the independent Monero panel")
 	}
 	metrics := request(t, handler, http.MethodGet, "/metrics", "")

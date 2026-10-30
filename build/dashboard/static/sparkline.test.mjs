@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { points } from "./sparkline.js";
+import { points, series } from "./sparkline.js";
 
 test("points needs at least two values", () => {
   assert.deepEqual(points([], 100, 30), []);
@@ -25,4 +25,9 @@ test("points handle a flat series without dividing by zero", () => {
 test("points ignore non-numeric samples", () => {
   const pts = points([1, null, 2, undefined, 3], 100, 30);
   assert.equal(pts.length, 3);
+});
+
+test("series selects its API field and drops failed zero samples", () => {
+  assert.deepEqual(series({ fee_xmr_per_kb: [0.00008, 0, null, 0.00009] }, "fee_xmr_per_kb"), [0.00008, 0.00009]);
+  assert.deepEqual(series({ fee: [1, 2] }, "fee_xmr_per_kb"), []);
 });

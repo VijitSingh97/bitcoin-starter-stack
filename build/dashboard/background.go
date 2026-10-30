@@ -23,11 +23,6 @@ func (a *app) recordFee(value float64) {
 
 func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	a.ctx = ctx
-	if a.cfg.bitcoinDisabled {
-		done := make(chan struct{})
-		close(done)
-		return done
-	}
 	var workers sync.WaitGroup
 	start := func(worker func()) {
 		workers.Add(1)
@@ -35,6 +30,23 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 			defer workers.Done()
 			worker()
 		}()
+	}
+	if !a.cfg.bitcoinDisabled || a.cfg.moneroEnabled {
+		start(func() { a.prices.Run(ctx) })
+	}
+	if a.cfg.moneroWalletEnabled {
+		start(func() { a.moneroWatch.run(ctx) })
+	}
+	if a.cfg.moneroEnabled {
+		start(func() { a.runMoneroFees(ctx) })
+	}
+	if a.cfg.bitcoinDisabled {
+		done := make(chan struct{})
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+		return done
 	}
 	start(func() { a.scanner.run(ctx) })
 	entries := a.watch.Entries()
@@ -45,7 +57,6 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		return a.healthBlockchain(ctx)
 	}
 	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
-	start(func() { a.prices.Run(ctx) })
 	start(func() { a.monitor.Run(ctx, chain, network) })
 	start(func() {
 		a.every(ctx, time.Minute, func(ctx context.Context) {

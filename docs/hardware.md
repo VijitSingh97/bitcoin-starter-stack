@@ -19,6 +19,12 @@ Two selected nodes need separate budgets, plus shared Tor/dashboard and host
 overhead; a 2 GiB VPS cannot provide a full 2 GiB node allowance and operating
 system headroom. See [Nodes](nodes.md) for qualification status.
 
+The Monero wallet service is additional to the daemon budget. In a local idle
+smoke test it used about **13.2 MiB RAM and 0.03% CPU**; Compose caps it at
+**512 MiB and 0.5 CPU** so a large wallet scan cannot consume the daemon's full
+allowance. This single local measurement does not qualify the whole stack on a
+2 GiB VPS, and wallet size and scan activity can raise usage.
+
 ## Disk
 
 The default keeps 10 GB of recent block files after validating the whole chain.

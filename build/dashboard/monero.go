@@ -19,37 +19,45 @@ import (
 
 const maxMoneroRPCBody = 1 << 20
 
+var errMoneroRemoteUnknown = errors.New("Monero wallet RPC result is unknown")
+
 type moneroStatus struct {
-	Enabled               bool    `json:"enabled"`
-	Available             bool    `json:"available"`
-	Synced                bool    `json:"synced"`
-	Height                uint64  `json:"height"`
-	TargetHeight          uint64  `json:"target_height"`
-	SyncPercent           float64 `json:"sync_percent"`
-	Version               string  `json:"version"`
-	UptimeSeconds         uint64  `json:"uptime_seconds"`
-	IncomingConnections   uint64  `json:"incoming_connections"`
-	OutgoingConnections   uint64  `json:"outgoing_connections"`
-	Pruned                bool    `json:"pruned"`
-	DatabaseSizeBytes     uint64  `json:"database_size_bytes"`
-	MempoolTxs            uint64  `json:"mempool_txs"`
-	MempoolTxsAvailable   bool    `json:"mempool_txs_available"`
-	MempoolBytes          uint64  `json:"mempool_bytes"`
-	MempoolBytesAvailable bool    `json:"mempool_bytes_available"`
-	Difficulty            uint64  `json:"difficulty"`
-	NetworkHashrate       float64 `json:"network_hashrate"`
-	HashrateAvailable     bool    `json:"hashrate_available"`
-	LatestBlockTimestamp  uint64  `json:"latest_block_timestamp"`
-	LatestBlockAgeSeconds uint64  `json:"latest_block_age_seconds"`
-	LatestBlockAvailable  bool    `json:"latest_block_available"`
-	DiskTotalBytes        uint64  `json:"disk_total_bytes"`
-	DiskFreeBytes         uint64  `json:"disk_free_bytes"`
-	DiskAvailable         bool    `json:"disk_available"`
-	RPCExposureEnabled    bool    `json:"rpc_exposure_enabled"`
-	RPCEndpoint           string  `json:"rpc_endpoint"`
-	ZMQExposureEnabled    bool    `json:"zmq_exposure_enabled"`
-	ZMQEndpoint           string  `json:"zmq_endpoint"`
-	Error                 string  `json:"error"`
+	Enabled               bool     `json:"enabled"`
+	Available             bool     `json:"available"`
+	Synced                bool     `json:"synced"`
+	Height                uint64   `json:"height"`
+	TargetHeight          uint64   `json:"target_height"`
+	SyncPercent           float64  `json:"sync_percent"`
+	Version               string   `json:"version"`
+	UptimeSeconds         uint64   `json:"uptime_seconds"`
+	UptimeAvailable       bool     `json:"uptime_available"`
+	IncomingConnections   uint64   `json:"incoming_connections"`
+	OutgoingConnections   uint64   `json:"outgoing_connections"`
+	Pruned                bool     `json:"pruned"`
+	DatabaseSizeBytes     uint64   `json:"database_size_bytes"`
+	DatabaseSizeAvailable bool     `json:"database_size_available"`
+	MempoolTxs            uint64   `json:"mempool_txs"`
+	MempoolTxsAvailable   bool     `json:"mempool_txs_available"`
+	MempoolBytes          uint64   `json:"mempool_bytes"`
+	MempoolBytesAvailable bool     `json:"mempool_bytes_available"`
+	Difficulty            uint64   `json:"difficulty"`
+	DifficultyAvailable   bool     `json:"difficulty_available"`
+	NetworkHashrate       float64  `json:"network_hashrate"`
+	HashrateAvailable     bool     `json:"hashrate_available"`
+	LatestBlockTimestamp  uint64   `json:"latest_block_timestamp"`
+	LatestBlockAgeSeconds uint64   `json:"latest_block_age_seconds"`
+	LatestBlockAvailable  bool     `json:"latest_block_available"`
+	FeeEstimates          []uint64 `json:"fee_estimates_atomic_per_byte"`
+	FeesAvailable         bool     `json:"fees_available"`
+	DiskTotalBytes        uint64   `json:"disk_total_bytes"`
+	DiskFreeBytes         uint64   `json:"disk_free_bytes"`
+	DiskAvailable         bool     `json:"disk_available"`
+	RPCExposureEnabled    bool     `json:"rpc_exposure_enabled"`
+	RPCEndpoint           string   `json:"rpc_endpoint"`
+	ZMQExposureEnabled    bool     `json:"zmq_exposure_enabled"`
+	ZMQEndpoint           string   `json:"zmq_endpoint"`
+	Error                 string   `json:"error"`
+	UpdatedAt             int64    `json:"updated_at"`
 }
 
 type moneroInfo struct {
@@ -80,6 +88,11 @@ type moneroPoolStats struct {
 		BytesTotal *uint64 `json:"bytes_total"`
 		TxsTotal   *uint64 `json:"txs_total"`
 	} `json:"pool_stats"`
+}
+
+type moneroFeeEstimate struct {
+	Fees   []uint64 `json:"fees"`
+	Status string   `json:"status"`
 }
 
 type moneroRPC struct {
@@ -119,6 +132,7 @@ func (a *app) apiMonero(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status.Available = true
+	status.UpdatedAt = time.Now().Unix()
 	status.Synced = info.Synchronized && !info.BusySyncing
 	status.Height = info.Height
 	status.TargetHeight = info.TargetHeight
@@ -127,10 +141,12 @@ func (a *app) apiMonero(w http.ResponseWriter, r *http.Request) {
 	status.OutgoingConnections = info.OutgoingConnectionsCount
 	status.Pruned = info.PruningSeed != 0
 	status.DatabaseSizeBytes = info.DatabaseSize
+	status.DatabaseSizeAvailable = info.DatabaseSize > 0
 	if info.TxPoolSize != nil {
 		status.MempoolTxs, status.MempoolTxsAvailable = *info.TxPoolSize, true
 	}
 	status.Difficulty = info.Difficulty
+	status.DifficultyAvailable = info.Difficulty > 0
 	if info.Difficulty > 0 && info.Target > 0 {
 		status.NetworkHashrate = float64(info.Difficulty) / float64(info.Target)
 		status.HashrateAvailable = true
@@ -151,8 +167,12 @@ func (a *app) apiMonero(w http.ResponseWriter, r *http.Request) {
 		status.MempoolTxs, status.MempoolBytes = *pool.PoolStats.TxsTotal, *pool.PoolStats.BytesTotal
 		status.MempoolTxsAvailable, status.MempoolBytesAvailable = true, true
 	}
+	if fees, err := a.fetchMoneroFeeEstimate(ctx); err == nil {
+		status.FeeEstimates, status.FeesAvailable = fees, true
+	}
 	if info.StartTime > 0 && uint64(time.Now().Unix()) > info.StartTime {
 		status.UptimeSeconds = uint64(time.Now().Unix()) - info.StartTime
+		status.UptimeAvailable = true
 	}
 	target := info.TargetHeight
 	if target < info.Height {
@@ -242,6 +262,60 @@ func (m moneroRPC) do(ctx context.Context, method, path string, body []byte) ([]
 			return nil, err
 		}
 	}
+	return readMoneroRPCResponse(response)
+}
+
+func (m moneroRPC) doDigest(ctx context.Context, method, path string, body, probeBody []byte) ([]byte, error) {
+	endpoint, err := url.Parse(m.url)
+	if err != nil {
+		return nil, errors.New("invalid Monero RPC URL")
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + path
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	request := func(payload []byte, authorization string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		return m.client.Do(req)
+	}
+	probe, err := request(probeBody, "")
+	if err != nil {
+		if probe != nil && probe.Body != nil {
+			probe.Body.Close()
+		}
+		return nil, err
+	}
+	if probe.StatusCode != http.StatusUnauthorized {
+		probe.Body.Close()
+		return nil, errors.New("Monero wallet RPC did not require Digest authentication")
+	}
+	challenge := digestChallenge(probe.Header.Values("WWW-Authenticate"))
+	probe.Body.Close()
+	authorization, err := digestAuthorization(challenge, m.user, m.password, method, endpoint.RequestURI())
+	if err != nil {
+		return nil, err
+	}
+	response, err := request(body, authorization)
+	if err != nil {
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		return nil, fmt.Errorf("%w: authenticated request failed", errMoneroRemoteUnknown)
+	}
+	responseBody, err := readMoneroRPCResponse(response)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errMoneroRemoteUnknown, err)
+	}
+	return responseBody, nil
+}
+
+func readMoneroRPCResponse(response *http.Response) ([]byte, error) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Monero RPC returned HTTP %d", response.StatusCode)

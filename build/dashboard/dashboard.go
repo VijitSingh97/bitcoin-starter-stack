@@ -85,20 +85,22 @@ type pageData struct {
 }
 
 type app struct {
-	cfg      config
-	rpc      *rpcClient
-	template *template.Template
-	static   http.Handler
-	feesMu   sync.RWMutex
-	fees     []float64
-	syncMu   sync.RWMutex
-	lastSync *syncSnapshot
-	log      *log.Logger
-	watch    *WatchStore
-	monitor  *Monitor
-	prices   *PriceCache
-	scanner  *prunedScanner
-	ctx      context.Context
+	cfg         config
+	rpc         *rpcClient
+	template    *template.Template
+	static      http.Handler
+	feesMu      sync.RWMutex
+	fees        []float64
+	syncMu      sync.RWMutex
+	lastSync    *syncSnapshot
+	log         *log.Logger
+	watch       *WatchStore
+	monitor     *Monitor
+	prices      *PriceCache
+	scanner     *prunedScanner
+	moneroWatch *MoneroWatchStore
+	moneroFees  *MoneroFeeHistory
+	ctx         context.Context
 }
 
 type syncSnapshot struct {
@@ -124,6 +126,11 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 		a.log.Print("notification settings unavailable; alerts disabled until the state file is repaired and the dashboard restarts")
 	}
 	a.prices = NewPriceCache()
+	a.moneroWatch = NewMoneroWatchStore(cfg)
+	a.moneroFees = NewMoneroFeeHistory(cfg.stateDir)
+	if a.moneroWatch.Err() != nil {
+		a.log.Print("Monero watch-only wallet state unavailable until the state file is repaired and the dashboard restarts")
+	}
 	a.ctx = context.Background()
 	a.fees = []float64{}
 	return a, nil

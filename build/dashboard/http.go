@@ -21,6 +21,11 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/fees", a.apiFees)
 	mux.HandleFunc("GET /api/prices", a.apiPrices)
 	mux.HandleFunc("GET /api/monero", a.apiMonero)
+	mux.HandleFunc("GET /api/monero/fees", a.apiMoneroFees)
+	mux.HandleFunc("GET /api/monero/watch", a.apiMoneroWatchList)
+	mux.HandleFunc("POST /api/monero/watch", a.apiMoneroWatchAdd)
+	mux.HandleFunc("DELETE /api/monero/watch/{id}", a.apiMoneroWatchRemove)
+	mux.HandleFunc("POST /api/monero/watch/{id}/key-images", a.apiMoneroWatchKeyImages)
 	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
 	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
@@ -115,8 +120,8 @@ func (a *app) apiFees(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"fee": fees})
 }
 
-func (a *app) apiPrices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, a.prices.Snapshot())
+func (a *app) apiPrices(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, a.prices.SnapshotAsset(r.URL.Query().Get("asset")))
 }
 
 func (a *app) nodeRPC(method string, params []any) any {

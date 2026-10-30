@@ -36,6 +36,9 @@ bitcoin_enabled=$(jq -r 'if ((.bitcoin // {}) | has("enabled")) then if .bitcoin
 monero_enabled=$(jq -r 'if ((.monero // {}) | has("enabled")) then if .monero.enabled == true then 1 else 0 end else empty end' <<<"$config")
 monero_rpc_user=$(get '.monero.node_username')
 monero_rpc_password=$(get '.monero.node_password')
+monero_wallet_rpc_user=$(sed -n 's/^MONERO_WALLET_RPC_USER=//p' "$env_file" 2>/dev/null || true)
+monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
+monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 dashboard_password=$(get '.dashboard.password')
 dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
 had_env=0
@@ -51,8 +54,11 @@ had_env=0
 [ -n "$monero_enabled" ] || monero_enabled=0
 [ -n "$rpc_user" ] || rpc_user="admin"
 [ -n "$monero_rpc_user" ] || monero_rpc_user="admin"
+[ -n "$monero_wallet_rpc_user" ] || monero_wallet_rpc_user="admin"
 [ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24)
 [ -n "$monero_rpc_password" ] || monero_rpc_password=$(openssl rand -hex 24)
+[ -n "$monero_wallet_rpc_password" ] || monero_wallet_rpc_password=$(openssl rand -hex 24)
+[ -n "$monero_wallet_password" ] || monero_wallet_password=$(openssl rand -hex 24)
 if [ "$had_env" = "0" ] && [ "$dashboard_password_set" = "0" ] && [ -z "$dashboard_password" ]; then
   dashboard_password=$(openssl rand -hex 24)
 fi
@@ -152,6 +158,9 @@ check_alnum "node_username" "$rpc_user"
 check_alnum "node_password" "$rpc_password"
 check_alnum "monero node_username" "$monero_rpc_user"
 check_alnum "monero node_password" "$monero_rpc_password"
+check_alnum "monero wallet RPC username" "$monero_wallet_rpc_user"
+check_alnum "monero wallet RPC password" "$monero_wallet_rpc_password"
+check_alnum "monero wallet password" "$monero_wallet_password"
 check_alnum "dashboard password" "$dashboard_password"
 
 if [ "$rpc_expose" = "1" ] && ((${#rpc_password} < 24)); then
@@ -391,6 +400,10 @@ MONERO_ENABLED=$monero_enabled
 MONERO_RPC_URL=http://172.29.0.30:18085
 MONERO_RPC_USER=$monero_rpc_user
 MONERO_RPC_PASSWORD=$monero_rpc_password
+MONERO_WALLET_RPC_URL=http://172.29.0.31:18082
+MONERO_WALLET_RPC_USER=$monero_wallet_rpc_user
+MONERO_WALLET_RPC_PASSWORD=$monero_wallet_rpc_password
+MONERO_WALLET_PASSWORD=$monero_wallet_password
 MONERO_DATA_DIR=$monero_data_dir
 MONERO_RPC_EXPOSE=$monero_rpc_expose
 MONERO_RPC_BIND_IP=$monero_rpc_bind_ip

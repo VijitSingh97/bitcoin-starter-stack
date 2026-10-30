@@ -48,6 +48,8 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
   ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
   ./usr/lib/bitcoin-starter-stack/node-resource-profile \
   ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \

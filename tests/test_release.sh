@@ -24,6 +24,7 @@ for required in stack configure.sh docker-compose.yml docker-compose.rpc.yml con
   build/dashboard/index.html build/dashboard/static/watch.js \
   build/dashboard/static/prices.js build/dashboard/static/settings.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
   build/monero/Dockerfile build/monero/entrypoint.sh build/monero/healthcheck.sh \
+  build/monero/wallet-entrypoint.sh build/monero/wallet-healthcheck.sh \
   docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml \
   build/dashboard/static/nodes.js docs/nodes.md \
   docs/getting-started.md docs/configuration.md docs/operations.md docs/watch-only.md docs/privacy.md; do

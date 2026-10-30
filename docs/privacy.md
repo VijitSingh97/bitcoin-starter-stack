@@ -1,7 +1,8 @@
 # Tor-only runtime networking
 
-Bitcoin and the dashboard have no external network route. Their Docker network is
-internal; only the Tor container also joins an external network. Both applications
+Bitcoin, Monero, its wallet service, and the dashboard have no direct external
+network route. Their Docker network is
+internal; only the Tor container also joins an external network. These services
 use numeric addresses for local services, and local DNS forwarding is disabled.
 Prices, alerts, and release checks send hostnames to Tor for remote resolution.
 An unavailable Tor proxy causes those requests to fail, without a direct fallback.
@@ -25,6 +26,15 @@ binds are rejected. RPC is unencrypted, so keep it on a trusted LAN and do not
 forward it through a router. Exposed RPC requires a password of at least 24
 characters, and each host relay accepts at most 32 concurrent connections. See
 [LAN wallet RPC](configuration.md#lan-wallet-rpc-opt-in).
+
+Monero view-only monitoring does not publish another port. The password-protected
+dashboard sends a primary address and private view key to the internal wallet
+service at `172.29.0.31:18082`. That service stores only an encrypted watch-only
+wallet file in its private volume. Dashboard metadata is mode `600` and does not
+retain the raw view key. A private spend key or seed is never accepted, so this
+path cannot sign or send. Treat the private view key and signed key images as
+sensitive: use the trusted LAN dashboard or its authenticated onion service, and
+do not put them in `config.json`, Git, URLs, or command lines.
 
 ## Downloads and upgrades
 

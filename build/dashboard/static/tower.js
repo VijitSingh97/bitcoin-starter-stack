@@ -57,6 +57,27 @@ export function smooth(t) {
   return x * x * (3 - 2 * x);
 }
 
+export function nextHighlight(current, active, dtMs) {
+  const target = active ? 1 : 0;
+  const amount = 1 - Math.exp(-Math.max(0, dtMs) / 120);
+  return current + (target - current) * amount;
+}
+
+export function nextScene(scene, requested, progress, dtMs, reduce = false) {
+  if (reduce) return { node: requested, progress: requested ? 1 : 0 };
+  let node = scene;
+  let value = progress;
+  if (requested !== node && value <= 0.001) node = requested;
+  const opening = !!requested && requested === node;
+  value = nextHighlight(value, opening, dtMs);
+  if (opening && value >= 0.999) value = 1;
+  if (!opening && value <= 0.001) {
+    value = 0;
+    node = requested;
+  }
+  return { node, progress: value };
+}
+
 export function towerLayout(W, cols = GRID) {
   if (W < WIDE_MIN) {
     return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
@@ -133,14 +154,32 @@ if (typeof document !== "undefined") {
       ctx.shadowBlur = 0;
     }
 
-    function drawPreviewTower(node, ox, anchorY, tw, fill, pulse) {
+    function drawTowerGlow(p, depth, pal, highlight, opacity = 1) {
+      if (highlight <= 0.01 || opacity <= 0.01) return;
+      ctx.save();
+      ctx.globalAlpha = opacity * highlight * (effectiveLight() ? 0.45 : 0.7);
+      ctx.shadowBlur = 24 * highlight;
+      ctx.shadowColor = pal.top;
+      ctx.strokeStyle = pal.top;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p(0, 0, 0).x, p(0, 0, 0).y);
+      for (const point of [p(GRID, 0, 0), p(GRID, 0, -depth - 1), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1), p(0, GRID, 0)]) {
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawPreviewTower(node, ox, anchorY, tw, fill, pulse, highlight, opacity = 1) {
       const pal = palette(node);
       const bh = tw * 0.5;
       const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - layer * bh - GRID * (tw / 4));
       const depthCount = previewDepth(H, anchorY, tw);
       for (let depth = depthCount; depth >= 1; depth--) {
         const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
-        ctx.globalAlpha = pal.alpha * fade;
+        ctx.globalAlpha = opacity * pal.alpha * fade;
         for (let i = 0; i < GRID; i++) {
           poly([p(i, GRID, -depth), p(i + 1, GRID, -depth), p(i + 1, GRID, -depth - 1), p(i, GRID, -depth - 1)], pal.side, pal.edge, 0);
         }
@@ -153,21 +192,24 @@ if (typeof document !== "undefined") {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
         if (idx < done) {
-          ctx.globalAlpha = pal.alpha;
+          ctx.globalAlpha = opacity * pal.alpha;
           poly(face, pal.top, pal.edge, pal.glow);
         } else if (idx === done) {
-          ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
+          ctx.globalAlpha = opacity * pal.alpha * (0.2 + 0.7 * pulse);
           poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
         } else {
-          ctx.globalAlpha = pal.alpha * 0.35;
+          ctx.globalAlpha = opacity * pal.alpha * 0.35;
           poly(face, null, pal.grid, 0);
         }
       }
+      drawTowerGlow(p, depthCount, pal, highlight, opacity);
       ctx.globalAlpha = 1;
     }
 
     let displayed = null;   // eased fill of today's layer
     let pushStart = -1e9;   // time the last midnight push began
+    const previewHighlight = { bitcoin: 0, monero: 0 };
+    let scene = { node: "", progress: 0 };
     let prev = performance.now();
 
     function render(now) {
@@ -188,13 +230,48 @@ if (typeof document !== "undefined") {
 
       ctx.clearRect(0, 0, W, H);
       const selected = document.body.dataset.node;
-      if (!selected) {
-        const mobile = W <= 700;
-        const baseTw = mobile ? Math.max(12, Math.min(20, W / 28)) : Math.max(26, Math.min(46, W / 36));
-        const anchorY = H * 0.3;
-        const hovered = document.body.dataset.hoverNode;
-        drawPreviewTower("bitcoin", W * (mobile ? 0.27 : 0.32), anchorY, baseTw * (hovered === "bitcoin" ? 1.12 : 1), fill, pulse);
-        drawPreviewTower("monero", W * (mobile ? 0.73 : 0.68), anchorY, baseTw * (hovered === "monero" ? 1.12 : 1), fill, pulse);
+      scene = nextScene(scene.node, selected, scene.progress, dt, reduce);
+      const mobile = W <= 700;
+      const baseTw = mobile ? Math.max(12, Math.min(20, W / 28)) : Math.max(26, Math.min(46, W / 36));
+      const overviewY = H * 0.3;
+      const hovered = document.body.dataset.hoverNode;
+      if (!selected && scene.progress === 0) {
+        for (const node of ["bitcoin", "monero"]) {
+          previewHighlight[node] = reduce
+            ? (hovered === node ? 1 : 0)
+            : nextHighlight(previewHighlight[node], hovered === node, dt);
+        }
+        drawPreviewTower("bitcoin", W * (mobile ? 0.27 : 0.32), overviewY, baseTw * (1 + 0.12 * previewHighlight.bitcoin), fill, pulse, previewHighlight.bitcoin);
+        drawPreviewTower("monero", W * (mobile ? 0.73 : 0.68), overviewY, baseTw * (1 + 0.12 * previewHighlight.monero), fill, pulse, previewHighlight.monero);
+        if (label) {
+          label.hidden = true;
+          label.style.opacity = "0";
+        }
+        return;
+      }
+      if (scene.progress < 1 || selected !== scene.node) {
+        const amount = smooth(scene.progress);
+        const { ox: focusedX, tw: focusedTw } = towerLayout(W);
+        const focusedY = H * 0.6;
+        const overviewX = (node) => W * (mobile ? (node === "bitcoin" ? 0.27 : 0.73) : (node === "bitcoin" ? 0.32 : 0.68));
+        const other = scene.node === "bitcoin" ? "monero" : "bitcoin";
+        if (scene.node) {
+          const startHighlight = previewHighlight[scene.node];
+          const startTw = baseTw * (1 + 0.12 * startHighlight);
+          if (amount < 0.99) drawPreviewTower(other, overviewX(other), overviewY, baseTw, fill, pulse, 0, 1 - amount);
+          drawPreviewTower(
+            scene.node,
+            overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount,
+            overviewY + (focusedY - overviewY) * amount,
+            startTw + (focusedTw - startTw) * amount,
+            fill,
+            pulse,
+            startHighlight + (1 - startHighlight) * amount,
+          );
+        } else {
+          drawPreviewTower("bitcoin", overviewX("bitcoin"), overviewY, baseTw, fill, pulse, 0);
+          drawPreviewTower("monero", overviewX("monero"), overviewY, baseTw, fill, pulse, 0);
+        }
         if (label) {
           label.hidden = true;
           label.style.opacity = "0";
@@ -247,6 +324,7 @@ if (typeof document !== "undefined") {
         }
       }
       ctx.globalAlpha = 1;
+      drawTowerGlow(p, visible, pal, 1);
 
       // "loading block N" header above the tower's back corner
       if (label) {
@@ -275,6 +353,11 @@ if (typeof document !== "undefined") {
         render(now);
       };
       requestAnimationFrame(frame);
+    } else {
+      new MutationObserver(() => render(performance.now())).observe(document.body, {
+        attributes: true,
+        attributeFilter: ["data-hover-node", "data-node"],
+      });
     }
   }
 }

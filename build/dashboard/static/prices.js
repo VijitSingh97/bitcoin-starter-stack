@@ -9,18 +9,26 @@ export function normalizeCurrency(value) {
   return FIAT_CURRENCIES.includes(currency) ? currency : "USD";
 }
 
-export function loadCurrency(storage = browserStorage()) {
+export function storageKey(asset = "bitcoin") {
+  return asset === "monero" ? "monero-price-currency" : STORAGE_KEY;
+}
+
+export function priceURL(asset = "bitcoin") {
+  return asset === "monero" ? `${PRICE_URL}?asset=monero` : PRICE_URL;
+}
+
+export function loadCurrency(storage = browserStorage(), asset = "bitcoin") {
   try {
-    return normalizeCurrency(storage?.getItem(STORAGE_KEY));
+    return normalizeCurrency(storage?.getItem(storageKey(asset)));
   } catch {
     return "USD";
   }
 }
 
-export function saveCurrency(value, storage = browserStorage()) {
+export function saveCurrency(value, storage = browserStorage(), asset = "bitcoin") {
   const currency = normalizeCurrency(value);
   try {
-    storage?.setItem(STORAGE_KEY, currency);
+    storage?.setItem(storageKey(asset), currency);
   } catch {
     // The selector still works for this page when storage is unavailable.
   }
@@ -70,19 +78,19 @@ function defaultTime(unixSeconds) {
 }
 
 if (typeof document !== "undefined") {
-  const widget = document.getElementById("btc-price");
-  const value = document.getElementById("btc-price-value");
-  const currencySelect = document.getElementById("btc-price-currency");
-  const status = document.getElementById("btc-price-status");
-
-  if (widget && value && currencySelect && status) {
+  for (const widget of document.querySelectorAll("[data-price-asset]")) {
+    const asset = widget.dataset.priceAsset;
+    const value = widget.querySelector("[data-price-value]");
+    const currencySelect = widget.querySelector("[data-price-currency]");
+    const status = widget.querySelector("[data-price-status]");
+    if (!value || !currencySelect || !status) continue;
     for (const code of FIAT_CURRENCIES) {
       const option = document.createElement("option");
       option.value = option.textContent = code;
       currencySelect.append(option);
     }
 
-    let currency = loadCurrency();
+    let currency = loadCurrency(browserStorage(), asset);
     let latest = { available: false };
     currencySelect.value = currency;
 
@@ -95,14 +103,14 @@ if (typeof document !== "undefined") {
     };
 
     currencySelect.addEventListener("change", () => {
-      currency = saveCurrency(currencySelect.value);
+      currency = saveCurrency(currencySelect.value, browserStorage(), asset);
       currencySelect.value = currency;
       render();
     });
 
     const refresh = async () => {
       try {
-        const response = await fetch(PRICE_URL, {
+        const response = await fetch(priceURL(asset), {
           headers: { Accept: "application/json" },
           credentials: "same-origin",
         });

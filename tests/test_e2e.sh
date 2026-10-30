@@ -92,9 +92,18 @@ rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
 monero_rpc_user=$(sed -n 's/^MONERO_RPC_USER=//p' .env)
 monero_rpc_pass=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' .env)
-if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ] || [ -z "$monero_rpc_user" ] || [ -z "$monero_rpc_pass" ]; then
+monero_wallet_rpc_user=$(sed -n 's/^MONERO_WALLET_RPC_USER=//p' .env)
+monero_wallet_rpc_pass=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' .env)
+if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ] || [ -z "$monero_rpc_user" ] || [ -z "$monero_rpc_pass" ] ||
+  [ -z "$monero_wallet_rpc_user" ] || [ -z "$monero_wallet_rpc_pass" ]; then
   fail "configure.sh did not render separate node RPC credentials into .env"
 fi
+
+wallet_rpc() {
+  printf '%s' "$1" | docker exec -i monero-wallet curl --silent --show-error --fail --digest \
+    --user "$monero_wallet_rpc_user:$monero_wallet_rpc_pass" -H 'content-type: application/json' \
+    --data-binary @- http://127.0.0.1:18082/json_rpc
+}
 
 docker compose up -d --build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"
@@ -113,6 +122,10 @@ if [ "$test_lan_rpc" = true ]; then
 fi
 
 docker exec monero /usr/local/bin/monero-healthcheck || fail "Monero authenticated health check failed"
+docker exec monero-wallet /usr/local/bin/monero-wallet-healthcheck || fail "Monero wallet RPC health check failed"
+wallet_ports=$(docker inspect monero-wallet --format '{{json .HostConfig.PortBindings}}')
+[ "$wallet_ports" = "{}" ] || [ "$wallet_ports" = "null" ] ||
+  fail "Monero wallet RPC published a host port"
 monero_info=$(docker exec monero curl --silent --show-error --fail --digest \
   --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
   --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' http://127.0.0.1:18085/json_rpc) ||
@@ -166,6 +179,71 @@ dashboard_monero=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$d
   fail "dashboard Monero health API was unavailable"
 printf '%s' "$dashboard_monero" | jq -e '.enabled == true and .available == true and (.version | length > 0) and .uptime_seconds > 0 and (.pruned | type == "boolean")' >/dev/null ||
   fail "dashboard Monero health API omitted unrestricted node fields"
+
+wallet_fail() {
+  echo "FAIL: $1"
+  exit 1
+}
+
+fixture_name="_e2e_$(openssl rand -hex 6)"
+fixture_password=$(openssl rand -hex 24)
+create_request=$(jq -nc --arg name "$fixture_name" --arg password "$fixture_password" \
+  '{jsonrpc:"2.0",id:"e2e",method:"create_wallet",params:{filename:$name,password:$password,language:"English"}}')
+create_response=$(wallet_rpc "$create_request") || wallet_fail "throwaway Monero fixture wallet could not be created"
+printf '%s' "$create_response" | jq -e '.error == null and .result != null' >/dev/null ||
+  wallet_fail "throwaway Monero fixture wallet returned an error"
+source_address=$(wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"get_address"}' | jq -er '.result.address') ||
+  wallet_fail "throwaway Monero address was unavailable"
+source_view_key=$(wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"query_key","params":{"key_type":"view_key"}}' | jq -er '.result.key') ||
+  wallet_fail "throwaway Monero view key was unavailable"
+wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"close_wallet"}' >/dev/null ||
+  wallet_fail "throwaway Monero fixture wallet could not be closed"
+docker exec -e FIXTURE_NAME="$fixture_name" monero-wallet sh -c 'rm -f "/wallets/$FIXTURE_NAME" "/wallets/$FIXTURE_NAME.keys"' ||
+  wallet_fail "throwaway Monero fixture wallet could not be removed"
+
+watch_add=$(jq -nc --arg address "$source_address" --arg view_key "$source_view_key" \
+  '{name:"E2E view only",address:$address,view_key:$view_key,restore_height:0}')
+watch_response=$(printf '%s' "$watch_add" | curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 \
+  -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' --data-binary @- \
+  "$dashboard_url/api/monero/watch") || wallet_fail "real Monero watch-only API create failed"
+watch_id=$(printf '%s' "$watch_response" | jq -er '.id') || wallet_fail "watch-only API omitted its wallet ID"
+printf '%s' "$watch_response" | grep -Fq "$source_view_key" && wallet_fail "watch-only create response disclosed the private view key"
+
+for forbidden in seed spend_key; do
+  unsafe=$(printf '%s' "$watch_add" | jq -c --arg field "$forbidden" '. + {($field):"forbidden"}')
+  code=$(printf '%s' "$unsafe" | curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
+    -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+    --data-binary @- "$dashboard_url/api/monero/watch")
+  [ "$code" = 400 ] || wallet_fail "$forbidden field was not rejected before wallet RPC"
+done
+
+watch_list=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/monero/watch") ||
+  wallet_fail "watch-only API list failed"
+printf '%s' "$watch_list" | jq -e --arg id "$watch_id" '.wallets | length == 1 and .[0].id == $id and .[0].state == "pending" and .[0].balance_atomic == ""' >/dev/null ||
+  wallet_fail "initial-sync wallet did not remain safely pending"
+printf '%s' "$watch_list" | grep -Fq "$source_view_key" && wallet_fail "watch-only list disclosed the private view key"
+printf '%s' "$watch_list" | grep -Fq 'wallet_file' && wallet_fail "watch-only list disclosed its internal wallet filename"
+docker exec -e NEEDLE="$source_view_key" dashboard sh -c 'test "$(stat -c %a /state/monero_watch.json)" = 600 && ! grep -Fq "$NEEDLE" /state/monero_watch.json' ||
+  wallet_fail "watch-only state permissions or view-key retention are unsafe"
+if docker compose logs dashboard monero-wallet 2>&1 | grep -Fq "$source_view_key"; then
+  wallet_fail "watch-only services logged the private view key"
+fi
+
+docker compose restart dashboard >/dev/null || wallet_fail "dashboard restart failed with a managed watch wallet"
+restarted_watch=""
+for _ in $(seq 1 30); do
+  restarted_watch=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/monero/watch" || true)
+  printf '%s' "$restarted_watch" | jq -e --arg id "$watch_id" '.wallets | length == 1 and .[0].id == $id' >/dev/null 2>&1 && break
+  sleep 1
+done
+printf '%s' "$restarted_watch" | jq -e --arg id "$watch_id" '.wallets | length == 1 and .[0].id == $id' >/dev/null ||
+  wallet_fail "watch-only roster did not survive dashboard restart"
+printf '%s' "$restarted_watch" | grep -Fq "$source_view_key" && wallet_fail "restarted API disclosed the private view key"
+
+code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2eDashboardSharedPassword123 \
+  -H 'X-Requested-With: fetch' -X DELETE "$dashboard_url/api/monero/watch/$watch_id")
+[ "$code" = 200 ] || wallet_fail "throwaway watch-only row could not be removed"
+unset watch_add unsafe create_request create_response watch_response watch_list restarted_watch source_view_key source_address fixture_password
 
 # The inbound onion service registers with tor's control port: once
 # ADD_ONION succeeds, the .onion address appears in localaddresses.
@@ -316,7 +394,7 @@ done
 # containers must terminate inside the stack subnet (172.29.0.x renders as
 # xx001DAC in /proc/net/tcp little-endian hex) — i.e. everything goes to tor
 # or intra-stack RPC, and nothing dials clearnet directly.
-for c in bitcoin monero dashboard; do
+for c in bitcoin monero monero-wallet dashboard; do
   bad=$(docker exec "$c" awk 'NR>1 && $4=="01" {split($3,r,":"); if (r[1] !~ /001DAC$/) print r[1]":"r[2]}' /proc/net/tcp 2>/dev/null || true)
   [ -z "$bad" ] || fail "clearnet egress from $c: $bad"
   bad6=$(docker exec "$c" sh -c 'awk "NR>1 && \$4==\"01\" {print \$3}" /proc/net/tcp6 2>/dev/null' || true)

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, towerLayout, previewDepth, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, towerLayout, previewDepth, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -64,6 +64,34 @@ test("smooth clamps to [0,1] and eases the ends", () => {
   assert.equal(smooth(2), 1);
   assert.equal(smooth(0.5), 0.5);
   assert.ok(smooth(0.25) < 0.25);
+});
+
+test("nextHighlight eases both into and out of the highlighted state", () => {
+  const growing = nextHighlight(0, true, 60);
+  assert.ok(growing > 0 && growing < 1);
+  assert.ok(nextHighlight(growing, true, 60) > growing);
+  const shrinking = nextHighlight(1, false, 60);
+  assert.ok(shrinking > 0 && shrinking < 1);
+  assert.ok(nextHighlight(shrinking, false, 60) < shrinking);
+});
+
+test("nextScene reverses cleanly and changes towers through the overview", () => {
+  const opening = nextScene("", "bitcoin", 0, 60);
+  assert.equal(opening.node, "bitcoin");
+  assert.ok(opening.progress > 0 && opening.progress < 1);
+
+  const reversing = nextScene("bitcoin", "", opening.progress, 30);
+  assert.equal(reversing.node, "bitcoin");
+  assert.ok(reversing.progress < opening.progress);
+  assert.ok(nextScene("bitcoin", "bitcoin", reversing.progress, 30).progress > reversing.progress);
+
+  const switching = nextScene("bitcoin", "monero", 0, 16);
+  assert.equal(switching.node, "monero");
+  assert.ok(switching.progress > 0);
+  const pendingSwitch = nextScene("bitcoin", "monero", 0.8, 30);
+  assert.equal(pendingSwitch.node, "bitcoin");
+  assert.ok(pendingSwitch.progress < 0.8);
+  assert.deepEqual(nextScene("bitcoin", "monero", 1, 16, true), { node: "monero", progress: 1 });
 });
 
 test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {

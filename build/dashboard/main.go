@@ -16,25 +16,30 @@ import (
 )
 
 type config struct {
-	bitcoinDisabled    bool
-	rpcURL             string
-	rpcUser            string
-	rpcPassword        string
-	dashboardPassword  string
-	dataDir            string
-	stateDir           string
-	version            string
-	port               string
-	settingsPort       string
-	control            bool
-	moneroEnabled      bool
-	moneroRPCURL       string
-	moneroRPCUser      string
-	moneroRPCPassword  string
-	moneroDataDir      string
-	bitcoinRPCEndpoint string
-	moneroRPCEndpoint  string
-	moneroZMQEndpoint  string
+	bitcoinDisabled         bool
+	rpcURL                  string
+	rpcUser                 string
+	rpcPassword             string
+	dashboardPassword       string
+	dataDir                 string
+	stateDir                string
+	version                 string
+	port                    string
+	settingsPort            string
+	control                 bool
+	moneroEnabled           bool
+	moneroRPCURL            string
+	moneroRPCUser           string
+	moneroRPCPassword       string
+	moneroDataDir           string
+	moneroWalletEnabled     bool
+	moneroWalletRPCURL      string
+	moneroWalletRPCUser     string
+	moneroWalletRPCPassword string
+	moneroWalletPassword    string
+	bitcoinRPCEndpoint      string
+	moneroRPCEndpoint       string
+	moneroZMQEndpoint       string
 }
 
 func envConfig() (config, error) {
@@ -83,6 +88,23 @@ func envConfig() (config, error) {
 	cfg.moneroRPCUser = os.Getenv("MONERO_RPC_USER")
 	cfg.moneroRPCPassword = os.Getenv("MONERO_RPC_PASSWORD")
 	cfg.moneroDataDir = envOr("MONERO_DATA_DIR", "/data-monero")
+	cfg.moneroWalletRPCURL = strings.TrimSpace(os.Getenv("MONERO_WALLET_RPC_URL"))
+	if cfg.moneroWalletRPCURL == "" {
+		cfg.moneroWalletRPCURL = "http://172.29.0.31:18082"
+	}
+	cfg.moneroWalletRPCUser = os.Getenv("MONERO_WALLET_RPC_USER")
+	cfg.moneroWalletRPCPassword = os.Getenv("MONERO_WALLET_RPC_PASSWORD")
+	cfg.moneroWalletPassword = os.Getenv("MONERO_WALLET_PASSWORD")
+	walletValues := 0
+	for _, value := range []string{cfg.moneroWalletRPCUser, cfg.moneroWalletRPCPassword, cfg.moneroWalletPassword} {
+		if value != "" {
+			walletValues++
+		}
+	}
+	if walletValues != 0 && walletValues != 3 {
+		return config{}, errors.New("MONERO_WALLET_RPC_USER, MONERO_WALLET_RPC_PASSWORD, and MONERO_WALLET_PASSWORD must be set together")
+	}
+	cfg.moneroWalletEnabled = cfg.moneroEnabled && walletValues == 3
 	var exposureErr error
 	if !cfg.bitcoinDisabled {
 		if cfg.bitcoinRPCEndpoint, exposureErr = exposedLANEndpoint("BITCOIN_RPC_EXPOSE", "BITCOIN_RPC_BIND_IP", "BITCOIN_RPC_PORT", "8332"); exposureErr != nil {
@@ -95,6 +117,11 @@ func envConfig() (config, error) {
 		}
 		if cfg.moneroZMQEndpoint, exposureErr = exposedLANEndpoint("MONERO_ZMQ_EXPOSE", "MONERO_ZMQ_BIND_IP", "MONERO_ZMQ_PORT", "18083"); exposureErr != nil {
 			return config{}, exposureErr
+		}
+	}
+	if cfg.moneroWalletEnabled {
+		if parsed, err := url.Parse(cfg.moneroWalletRPCURL); err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil {
+			return config{}, errors.New("MONERO_WALLET_RPC_URL must be an HTTP URL without embedded credentials")
 		}
 	}
 	if cfg.moneroEnabled {
