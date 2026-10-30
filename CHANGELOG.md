@@ -44,6 +44,7 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Updated Tor to 0.4.9.15 so fresh image builds use Alpine's current security release.
 - Busy initial sync no longer inherits the page's short timeout for health
   checks; temporary misses show the last confirmed sync progress and alerts
   wait for sustained failure.
