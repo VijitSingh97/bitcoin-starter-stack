@@ -213,6 +213,7 @@ func request(t *testing.T, handler http.Handler, method, path, password string) 
 }
 
 func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
+	t.Setenv("NODE_NAME", "mini-1 <node>")
 	fixture := &rpcFixture{}
 	a, _ := testApp(t, fixture, "dashboard-secret")
 	a.cfg.bitcoinRPCEndpoint = "192.168.1.50:8332"
@@ -234,7 +235,7 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 		t.Fatalf("status = %d", got.Code)
 	}
 	body := got.Body.String()
-	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`, "192.168.1.50:8332 · LAN", "Configured LAN access"} {
+	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`, "192.168.1.50:8332 · LAN", "Configured LAN access", `class="node-set-title">mini-1 &lt;node&gt; Node Set</h1>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
@@ -248,6 +249,7 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 }
 
 func TestInvalidRPCRendersLoading(t *testing.T) {
+	t.Setenv("NODE_NAME", "mini-1")
 	fixture := &rpcFixture{invalid: true}
 	_, handler := testApp(t, fixture, "")
 	got := request(t, handler, http.MethodGet, "/", "")
@@ -259,6 +261,9 @@ func TestInvalidRPCRendersLoading(t *testing.T) {
 	}
 	if !strings.Contains(got.Body.String(), `id="monero-panel"`) || !strings.Contains(got.Body.String(), `/static/nodes.js`) {
 		t.Fatal("Bitcoin loading page omitted the independent Monero panel")
+	}
+	if !strings.Contains(got.Body.String(), `class="node-set-title">mini-1 Node Set</h1>`) {
+		t.Fatal("loading overview omitted the node set title")
 	}
 }
 

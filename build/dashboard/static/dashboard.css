@@ -63,6 +63,19 @@ body {
   z-index: 1;
 }
 
+.node-set-title {
+  position: absolute;
+  top: 26px;
+  inset-inline: 72px;
+  margin: 0;
+  color: var(--muted);
+  font: 400 0.85rem/1.5 monospace;
+  letter-spacing: 0.04em;
+  text-align: center;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
 .node-choice {
   position: absolute;
   inset-block: 0;

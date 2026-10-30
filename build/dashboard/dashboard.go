@@ -52,6 +52,7 @@ type diskInfo struct {
 }
 
 type pageData struct {
+	NodeName             string
 	BitcoinEnabled       bool
 	Loading              bool
 	LastKnownSync        bool
@@ -227,6 +228,7 @@ func (a *app) loadingPageData() pageData {
 }
 
 func (a *app) render(w http.ResponseWriter, data pageData) {
+	data.NodeName = a.monitor.nodeName
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := a.template.ExecuteTemplate(w, "index.html", data); err != nil {
 		a.log.Printf("render dashboard: %v", err)
