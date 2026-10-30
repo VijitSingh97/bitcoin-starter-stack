@@ -16,7 +16,7 @@ updates:
       interval: daily
 
   - package-ecosystem: pip
-    directory: /build/dashboard
+    directory: /build/dashboard/parity/reference
     schedule:
       interval: weekly
 
