@@ -66,6 +66,8 @@ def version_label():
 
 @app.before_request
 def check_auth():
+    if request.path == "/static/favicon.png" and request.method in ("GET", "HEAD"):
+        return None
     if not DASHBOARD_PASSWORD:
         return None
     auth = request.authorization
@@ -308,7 +310,7 @@ def index():
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <title>Bitcoin Node Status</title>
-                <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+                <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=tower-1">
                 <link rel="stylesheet" href="/static/dashboard.css">
                 <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
             </head>
@@ -388,7 +390,7 @@ def index():
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Bitcoin Node Status</title>
-                <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+                <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=tower-1">
         <link rel="stylesheet" href="/static/dashboard.css">
         <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
     </head>

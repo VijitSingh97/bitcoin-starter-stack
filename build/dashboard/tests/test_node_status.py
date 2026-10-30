@@ -320,11 +320,13 @@ def test_api_fees_respects_auth(monkeypatch):
 
 def test_favicon_linked_and_served(monkeypatch):
     monkeypatch.setattr(node_status, "get_rpc_data", lambda m, params=None: None)
+    monkeypatch.setattr(node_status, "DASHBOARD_PASSWORD", "hunter2")
     client = node_status.app.test_client()
-    assert 'rel="icon"' in client.get("/").data.decode()
-    icon = client.get("/static/favicon.svg")
+    assert '<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=tower-1">' in client.get("/", auth=("anyuser", "hunter2")).data.decode()
+    icon = client.get("/static/favicon.png?v=tower-1")
     assert icon.status_code == 200
-    assert b"<svg" in icon.data
+    assert icon.content_type == "image/png"
+    assert icon.data.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_tower_and_refresh_assets_served():
