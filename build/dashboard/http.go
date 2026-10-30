@@ -36,6 +36,10 @@ func (a *app) routes() http.Handler {
 
 func (a *app) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/static/favicon.png" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if a.cfg.dashboardPassword == "" {
 			next.ServeHTTP(w, r)
 			return

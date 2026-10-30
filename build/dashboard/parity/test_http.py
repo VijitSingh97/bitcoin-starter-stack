@@ -158,7 +158,7 @@ class DashboardContracts(unittest.TestCase):
         self.log.close()
         self.temp.cleanup()
 
-    def call(self, path, method='GET', data=None, csrf=True, auth=True):
+    def call(self, path, method='GET', data=None, csrf=True, auth=True, binary=False):
         headers = {}
         if auth and self.password:
             headers['Authorization'] = 'Basic ' + base64.b64encode(f'anything:{self.password}'.encode()).decode()
@@ -173,7 +173,8 @@ class DashboardContracts(unittest.TestCase):
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            return response.status, response.read().decode(), response.headers
+            body = response.read()
+            return response.status, body if binary else body.decode(), response.headers
 
     def body(self, path='/api/watch'):
         status, body, _ = self.call(path)
@@ -198,10 +199,21 @@ class DashboardContracts(unittest.TestCase):
         return 'watch_' + label
 
     def test_auth_covers_routes_and_static(self):
-        for path in ['/', '/metrics', '/api/watch', '/api/fees', '/api/upgrade', '/static/dashboard.css']:
+        for path in ['/', '/metrics', '/api/settings', '/api/watch', '/api/fees', '/api/upgrade',
+                     '/static/dashboard.css', '/static/theme.js', '/static/favicon.svg']:
             status, _, headers = self.call(path, auth=False)
             self.assertEqual(status, 401, path)
             self.assertIn('Basic', headers['WWW-Authenticate'])
+        icon_path = '/static/favicon.png?v=tower-1'
+        status, icon, headers = self.call(icon_path, auth=False, binary=True)
+        self.assertEqual(status, 200)
+        self.assertIn('image/png', headers['Content-Type'])
+        self.assertTrue(icon.startswith(b'\x89PNG\r\n\x1a\n'))
+        status, body, headers = self.call(icon_path, method='HEAD', auth=False, binary=True)
+        self.assertEqual(status, 200)
+        self.assertIn('image/png', headers['Content-Type'])
+        self.assertEqual(body, b'')
+        self.assertEqual(self.call(icon_path, method='POST', auth=False)[0], 401)
 
     def test_optional_password_compatibility(self):
         self.stop()
@@ -331,6 +343,10 @@ class DashboardContracts(unittest.TestCase):
         self.assertIn('text/css',headers['Content-Type'])
         self.assertIn('max-age=0',headers.get('Cache-Control',''))
         self.assertIn('--',body)
+        status, icon, headers=self.call('/static/favicon.png?v=tower-1', binary=True)
+        self.assertEqual(status,200)
+        self.assertIn('image/png',headers['Content-Type'])
+        self.assertTrue(icon.startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertIsInstance(self.body('/api/fees')['fee'],list)
         self.assertEqual(self.call('/metrics','POST')[0],405)
 
