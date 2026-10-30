@@ -10,11 +10,78 @@ import { points } from "./sparkline.js";
 
 const CSRF = { "X-Requested-With": "fetch" }; // blocks cross-site form posts
 const POLL_MS = 15000;
+const GENESIS_ADDRESS = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 
 export function balanceLabel(w) {
+  if (w.state === "pending" || w.state === "scanning") {
+    return w.balance_kind === "confirmed" ? "Pending balance…" : "Pending history…";
+  }
   if (w.state === "ok" || w.state === "stale") return `${w.btc} BTC`;
-  if (w.state === "scanning") return "scanning…";
   return "—"; // error / not ready
+}
+
+export function totalLabel(view) {
+  if (view.total_state === "pending") {
+    return view.wallets?.some(w => w.balance_kind === "confirmed")
+      ? "Pending balance…" : "Pending history…";
+  }
+  if (view.total_state === "unavailable") return "—";
+  return `${view.total} BTC`;
+}
+
+export function scanNote(w) {
+  if (w.balance_kind !== "confirmed") return "";
+  const parts = [w.state === "stale" ? "Last confirmed scan · updating" : "Confirmed balance"];
+  if (Number.isInteger(w.range?.start) && Number.isInteger(w.range?.end)) {
+    parts.push(`derived indexes ${w.range.start}–${w.range.end}`);
+  }
+  if (Number.isInteger(w.scan_height)) parts.push(`block ${w.scan_height}`);
+  if (w.scan_time && Number.isFinite(Date.parse(w.scan_time))) {
+    parts.push(`scanned ${new Date(w.scan_time).toLocaleString()}`);
+  }
+  return parts.join(" · ");
+}
+
+export function watchHint(pruned) {
+  return pruned
+    ? "Public information only; never enter a seed or private key. The first balance scan may take minutes. Results cover confirmed funds in the scanned range, without mempool transactions or full transaction history."
+    : "Public information only; never enter a seed or private key. For a bare xpub/tpub, choose its wallet's address type. Set the birthday to shorten the first rescan.";
+}
+
+export function walletView(w) {
+  return { label: w.example ? w.name : w.display_name || w.name, deleteName: w.name };
+}
+
+export function publicExampleNote(w) {
+  return w.example
+    ? "Public example: one disclosed Binance address, excluded from your totals; it is not Binance's total reserves."
+    : "";
+}
+
+export function genesisNote(w) {
+  return w.key === GENESIS_ADDRESS
+    ? "Bitcoin Core balance excludes the unspendable 50 BTC genesis reward"
+    : "";
+}
+
+export function editAccess(view) {
+  const enabled = !!view.has_password;
+  return {
+    enabled,
+    warning: enabled ? "" : "Set a dashboard password to add or remove watch-only wallets.",
+  };
+}
+
+export function isBareExtendedPublicKey(key) {
+  return /^(xpub|tpub)[1-9A-HJ-NP-Za-km-z]{107}$/.test(String(key || "").trim());
+}
+
+export function walletKeyForPost(key, scriptType = "legacy") {
+  const publicKey = String(key || "").trim();
+  if (!isBareExtendedPublicKey(publicKey)) return publicKey;
+  if (scriptType === "native") return `wpkh(${publicKey}/<0;1>/*)`;
+  if (scriptType === "nested") return `sh(wpkh(${publicKey}/<0;1>/*))`;
+  return publicKey;
 }
 
 // first 4 … last 4 of a key/address/descriptor; full string if it's short.
@@ -37,6 +104,7 @@ if (typeof document !== "undefined") {
   const list = el("div", "watch-list");
   const msg = el("div", "watch-msg");
   const warn = el("div", "watch-warn");
+  let editingEnabled = false;
 
   const form = el("form", "watch-add");
   const name = el("input");
@@ -44,26 +112,54 @@ if (typeof document !== "undefined") {
   name.maxLength = 40;
   name.setAttribute("aria-label", "Wallet label");
   const key = el("input");
-  key.placeholder = "xpub / zpub / address / descriptor";
-  key.setAttribute("aria-label", "Wallet key: xpub, zpub, address, or descriptor");
+  key.placeholder = "xpub / zpub / address / public descriptor";
+  key.setAttribute("aria-label", "Public wallet information: xpub, zpub, address, or public descriptor");
+  const scriptType = el("select", "watch-script");
+  scriptType.setAttribute("aria-label", "Bare xpub address type");
+  for (const [value, text] of [
+    ["legacy", "Bare xpub: Legacy (pkh)"],
+    ["native", "Bare xpub: Native SegWit (wpkh)"],
+    ["nested", "Bare xpub: Nested SegWit (sh-wpkh)"],
+  ]) {
+    const option = el("option", null, text);
+    option.value = value;
+    scriptType.append(option);
+  }
+  scriptType.disabled = true;
+  key.addEventListener("input", () => {
+    scriptType.disabled = !isBareExtendedPublicKey(key.value);
+  });
   const bday = el("input");
   bday.type = "date";
+  bday.max = new Date().toISOString().slice(0, 10);
   bday.title = "Wallet birthday (optional) — bounds the first rescan";
   bday.setAttribute("aria-label", "Wallet birthday (optional)");
   const add = el("button", null, "Add");
   add.type = "submit";
-  form.append(name, key, bday, add);
-  const hint = el("div", "watch-hint",
-    "Tip: set the birthday (the date the wallet was first used) to skip years of rescanning.");
+  form.append(name, key, scriptType, bday, add);
+  const hint = el("div", "watch-hint", watchHint(false));
 
   card.append(el("h2", null, "Watch-only wallets"), list, form, hint, msg, warn);
 
   const renderManager = (view) => {
+    const access = editAccess(view);
+    editingEnabled = access.enabled;
+    add.disabled = !editingEnabled;
+    bday.disabled = !!view.pruned;
+    if (view.pruned) bday.value = "";
+    hint.textContent = watchHint(!!view.pruned);
     list.textContent = "";
     for (const w of view.wallets) {
+      const identity = walletView(w);
       const row = el("div", "row");
       const left = el("div", "wk-cell");
-      left.append(el("span", "label", w.name));
+      const walletLabel = el("span", "label", identity.label);
+      const note = publicExampleNote(w);
+      if (note) {
+        walletLabel.title = note;
+        walletLabel.setAttribute("aria-label", `${identity.label}. ${note}`);
+      }
+      left.append(walletLabel);
       // truncated key, click to expand/collapse
       const k = el("span", "wk", shortKey(w.key));
       k.title = "click to expand";
@@ -74,14 +170,16 @@ if (typeof document !== "undefined") {
       row.append(left);
       const x = el("button", "watch-x", "✕");
       x.type = "button";
-      x.title = `Remove ${w.name}`;
-      x.setAttribute("aria-label", `Remove ${w.name}`);
-      x.addEventListener("click", () => remove(w.name));
+      x.disabled = !editingEnabled;
+      x.title = `Remove ${identity.label}`;
+      x.setAttribute("aria-label", `Remove ${identity.label}`);
+      x.addEventListener("click", () => remove(identity.deleteName));
       row.append(x);
       list.append(row);
     }
-    warn.textContent = view.has_password ? "" :
-      "No dashboard password set — anyone who can reach this page can add or remove wallets.";
+    warn.textContent = [access.warning, view.scan_cache_unavailable
+      ? "Saved balance cache unavailable. Check storage permissions and restart the dashboard."
+      : ""].filter(Boolean).join(" ");
   };
 
   // --- gold balances above the tower ---
@@ -93,24 +191,48 @@ if (typeof document !== "undefined") {
     // grid columns (CSS) so they line up across every row regardless of width.
     for (const w of view.wallets) {
       const row = el("div", "ws-row");
-      row.append(el("span", "ws-name", w.name));
+      const identity = walletView(w);
+      const walletName = el("span", "ws-name", identity.label);
+      const note = publicExampleNote(w) || genesisNote(w);
+      if (note) {
+        walletName.textContent += " ⓘ";
+        walletName.title = note;
+        walletName.setAttribute("aria-label", `${identity.label}. ${note}`);
+      }
+      row.append(walletName);
       if (w.history && w.history.length >= 2) {
         const spark = document.createElement("canvas");
         spark.className = "ws-spark";
+        spark.title = "Saved balance snapshots; not transaction history";
+        spark.setAttribute("aria-label", `${identity.label}: saved balance snapshots`);
         row.append(spark);
         drawSpark(spark, w.history);
       }
       const bal = el("span", "ws-bal", balanceLabel(w));
+      bal.setAttribute("aria-label", `${identity.label}: ${balanceLabel(w)}`);
       if (w.state === "stale") {
         bal.classList.add("stale");
-        bal.title = "last known balance — node unreachable";
+        bal.title = "Last known balance; waiting for a fresh result";
       }
       row.append(bal);
+      const scan = scanNote(w);
+      if (scan) row.append(el("span", "ws-note", scan));
       stats.append(row);
     }
     if (view.show_total) {
       const t = el("div", "ws-row ws-total-row");
-      t.append(el("span", "ws-name", "Total"), el("span", "ws-bal", `${view.total} BTC`));
+      const total = totalLabel(view);
+      const totalBalance = el("span", "ws-bal", total);
+      totalBalance.setAttribute("aria-label", `Total: ${total}`);
+      t.append(el("span", "ws-name", "Total"), totalBalance);
+      if (view.total_reason) {
+        const reason = view.total_reason === "mixed_sources"
+          ? "Wallet sources may overlap; a combined total is unavailable."
+          : view.total_reason === "scan_cache_unavailable"
+            ? "Saved balance cache unavailable; a current total cannot be verified."
+            : "Wallet outputs could not be combined reliably; showing individual balances.";
+        t.append(el("span", "ws-note", reason));
+      }
       stats.append(t);
     }
     placeStats();
@@ -152,6 +274,7 @@ if (typeof document !== "undefined") {
     }
   }
   let last = { wallets: [] };
+  let loadFailed = false;
   const render = (view) => { last = view; renderManager(view); renderStats(view); };
   // re-render on resize so the block re-centres and the sparklines redraw at the
   // width for the new breakpoint
@@ -160,7 +283,14 @@ if (typeof document !== "undefined") {
   async function refresh() {
     try {
       const res = await fetch("/api/watch", { headers: CSRF });
-      if (res.ok) render(await res.json());
+      if (res.ok) {
+        render(await res.json());
+        if (loadFailed) setMsg("");
+        loadFailed = false;
+      } else {
+        loadFailed = true;
+        setMsg(await res.text(), true);
+      }
     } catch { /* blip — next poll */ }
   }
 
@@ -184,22 +314,31 @@ if (typeof document !== "undefined") {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!editingEnabled) return;
     setMsg("");
     add.disabled = true;
     try {
       const res = await fetch("/api/watch", {
         method: "POST",
         headers: { ...CSRF, "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.value, key: key.value, birthday: bday.value }),
+        body: JSON.stringify({
+          name: name.value,
+          key: walletKeyForPost(key.value, scriptType.value),
+          birthday: bday.value,
+        }),
       });
       if (res.ok) {
         name.value = key.value = bday.value = "";
-        setMsg("Added — scanning the chain for its history…");
+        scriptType.value = "legacy";
+        scriptType.disabled = true;
+        setMsg(last.pruned
+          ? "Added — scanning for confirmed funds. This may take a few minutes…"
+          : "Added — scanning the chain for its history…");
       } else {
         setMsg(await res.text(), true);
       }
     } catch { setMsg("Network error.", true); }
-    add.disabled = false;
+    add.disabled = !editingEnabled;
     refresh();
   });
 

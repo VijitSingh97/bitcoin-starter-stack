@@ -10,7 +10,7 @@ with `scripts/release.sh --dry-run`.
 The stack is released as a single product. The components are upstream
 projects pinned by digest — Bitcoin Core (`bitcoin/bitcoin` in
 `docker-compose.yml`), the tor and dashboard base images (Dockerfiles),
-and the pinned pip packages. The first-party code is the dashboard, the
+  and the Go build toolchain. The first-party code is the dashboard, the
 orchestration (`docker-compose.yml`, `configure.sh`, `./stack`), and the
 configs. A release is one tag with one changelog and one upgrade path.
 
@@ -22,10 +22,10 @@ Multi-arch images (amd64 and arm64/Raspberry Pi) for the two first-party
 components — `tor` and `dashboard` — are built and published to GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) per release by the `images`
 job in the [Release workflow](../.github/workflows/release.yml).
-`docker compose up` pulls these prebuilt tags; it only builds locally as a
-fallback (e.g. on an unreleased commit with no matching published tag). The
-release artifact is also a source tarball, and the digest-pinned bases make
-the build reproducible if you do build.
+`./stack pull` downloads these tags through a verified host Tor proxy;
+`./stack up` starts only locally available images and never builds implicitly.
+The release artifact is also a source tarball. Source builds need a controlled
+build environment with its own Tor egress; see [Privacy](privacy.md).
 
 ## Single source of truth
 
@@ -65,7 +65,13 @@ Versioning rules:
    boot with the egress audit) runs against the tagged commit, and only
    then is the GitHub Release published — title, notes extracted from the
    changelog section, and a `bitcoin-starter-stack.tar.gz` source tarball
-   (`git archive`, so `.github` is excluded per `.gitattributes`).
+   (`git archive`, filtered by `.gitattributes`).
+
+The tarball contains runtime source and Docker inputs, configuration, the license,
+security policy, changelog, and user guides. Tests, Python parity references,
+benchmark experiments, screenshots, maintainer scripts, and development metadata
+stay in Git. The production dashboard image contains the compiled Go binary and
+runtime web assets; test modules are excluded from the Docker build context.
 
 Nothing is published until the gate is green. A red gate leaves the tag
 without a release — fix on `main`, bump the patch version, tag again
@@ -73,11 +79,10 @@ without a release — fix on `main`, bump the patch version, tag again
 
 ## How users get a release
 
-- **Tarball:** download `bitcoin-starter-stack.tar.gz` from the release,
-  unpack, `cp config.example.json config.json`, `./configure.sh`,
-  `docker compose up -d`.
-- **Git:** `git pull` (or `git checkout vX.Y.Z`), then `./stack apply` —
-  add `docker compose build` when `build/` changed.
+- **Tarball:** obtain `bitcoin-starter-stack.tar.gz` through Tor, unpack,
+  configure [Tor image downloads](privacy.md), then `./stack pull` and `./stack up`.
+- **Git:** `./stack upgrade` fetches and applies a release through the guarded
+  Tor download path. Source builds stay in a separately controlled environment.
 - Running stacks learn about new releases from the dashboard's daily
   update check (badge + optional Telegram 🆕 alert) — see
   [Notifications](notifications.md).

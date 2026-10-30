@@ -1,0 +1,183 @@
+package main
+
+import (
+	"context"
+	"math"
+	"sync"
+	"time"
+)
+
+const healthRPCTimeout = 60 * time.Second
+
+func (a *app) recordFee(value float64) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return
+	}
+	a.feesMu.Lock()
+	defer a.feesMu.Unlock()
+	a.fees = append(a.fees, value)
+	if len(a.fees) > maxFees {
+		a.fees = append([]float64{}, a.fees[len(a.fees)-maxFees:]...)
+	}
+}
+
+func (a *app) startBackground(ctx context.Context) <-chan struct{} {
+	a.ctx = ctx
+	var workers sync.WaitGroup
+	start := func(worker func()) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			worker()
+		}()
+	}
+	start(func() { a.scanner.run(ctx) })
+	entries := a.watch.Entries()
+	for _, entry := range entries {
+		a.watch.SetPending(entry.Key, true)
+	}
+	chain := func() map[string]any {
+		return a.healthBlockchain(ctx)
+	}
+	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
+	start(func() { a.prices.Run(ctx) })
+	start(func() { a.monitor.Run(ctx, chain, network) })
+	start(func() {
+		a.every(ctx, time.Minute, func(ctx context.Context) {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) != nil || info.InitialBlockDownload {
+				return
+			}
+			var estimate feeEstimate
+			if a.rpc.call(ctx, "estimatesmartfee", []any{1}, &estimate) == nil && estimate.FeeRate != nil {
+				a.recordFee(math.RoundToEven(*estimate.FeeRate*1000000) / 10)
+			}
+		})
+	})
+	start(func() {
+		a.every(ctx, 10*time.Minute, func(context.Context) {
+			info := chain()
+			if info != nil && info["initialblockdownload"] != true {
+				a.watch.Sample(a.walletRPC)
+			}
+		})
+	})
+	start(func() {
+		a.every(ctx, 30*time.Second, func(ctx context.Context) {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
+				a.scanner.refresh(a.watch.Entries(), info)
+			}
+		})
+	})
+	start(func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			var info blockchainInfo
+			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
+				for _, entry := range a.watch.Entries() {
+					a.watch.SetPending(entry.Key, true)
+					a.provisionForChain(entry, info)
+				}
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	})
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+	return done
+}
+
+func (a *app) healthBlockchain(parent context.Context) map[string]any {
+	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
+	defer cancel()
+	rpc := *a.rpc
+	client := *a.rpc.client
+	client.Timeout = 0
+	rpc.client = &client
+	var result map[string]any
+	if rpc.call(ctx, "getblockchaininfo", nil, &result) != nil {
+		return nil
+	}
+	ibd, ok := result["initialblockdownload"].(bool)
+	if !ok {
+		return result
+	}
+	if !ibd {
+		a.rememberSync(blockchainInfo{})
+		return result
+	}
+	blocks, blocksOK := integer(result["blocks"])
+	headers, headersOK := integer(result["headers"])
+	progress, progressOK := result["verificationprogress"].(float64)
+	if blocksOK && headersOK && progressOK {
+		a.rememberSync(blockchainInfo{Blocks: blocks, Headers: headers, VerificationProgress: progress, InitialBlockDownload: true})
+	}
+	return result
+}
+
+func (a *app) provision(entry WatchEntry, pruned bool) {
+	a.provisionState(entry, pruned, false)
+}
+
+func (a *app) provisionForChain(entry WatchEntry, chain blockchainInfo) {
+	if chain.Pruned && !chain.InitialBlockDownload && chain.BestBlockHash != "" {
+		if cache, _, ok := a.watch.scanSnapshot(entry); ok && cache.BestBlock == chain.BestBlockHash {
+			a.watch.ClearPendingIfCurrent(entry)
+			return
+		}
+	}
+	a.provisionState(entry, chain.Pruned, chain.InitialBlockDownload)
+}
+
+func (a *app) provisionState(entry WatchEntry, pruned, initialBlockDownload bool) {
+	if !a.watch.Contains(entry) {
+		return
+	}
+	name, ok := ProvisionOne(a.nodeRPC, a.walletRPC, entry, pruned)
+	if !ok {
+		if pruned {
+			if initialBlockDownload {
+				return
+			}
+			if a.watch.ScanErr() != nil {
+				a.watch.SetScanStateIfCurrent(entry, "error")
+				a.watch.ClearPendingIfCurrent(entry)
+				return
+			}
+			a.scanner.enqueue(entry, true)
+			return
+		}
+		a.watch.ClearPendingIfCurrent(entry)
+		return
+	}
+	a.watch.ClearPendingIfCurrent(entry)
+	if !a.watch.SetCoreWalletIfCurrent(entry, name) {
+		a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, name)
+	}
+}
+
+func (a *app) every(ctx context.Context, interval time.Duration, fn func(context.Context)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		fn(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

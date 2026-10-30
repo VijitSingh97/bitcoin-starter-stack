@@ -36,35 +36,69 @@ grep -q "^BITCOIN_RPC_USER=cliuser$" .env || fail "restore did not bring back .e
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l .env | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail "restored .env is not mode 600"
+# shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
+perms=$(ls -l config.json | cut -c1-10)
+[ "$perms" = "-rw-------" ] || fail "restored config.json is not mode 600"
 
 # restore without -y aborts on anything but yes
 echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded without confirmation"
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-# user[Enter] pass[Enter=random] dashpass=hunter2 onion=y control=y inbound=n clearnet=n prune=10 start=n
-printf '\n\nhunter2\ny\ny\nn\nn\n10\nn\n' | ./stack init >/dev/null
+printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric shared password"
+[ ! -f config.json ] || fail "failed init wrote config.json"
+# shared password, data dir, dashboard bind, control, LAN RPC, prune, start
+out=$(printf 'hunter2hunter2hunter2hunter2\n%s\n192.168.1.116\ny\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
-[ "$(jq -r '.dashboard.password' config.json)" = "hunter2" ] || fail "init: dashboard password"
-[ "$(jq -r '.dashboard.onion' config.json)" = "true" ] || fail "init: dashboard onion"
+[ "$(printf '%s' "$out" | grep -c 'Password: hunter2hunter2hunter2hunter2')" = "1" ] || fail "init did not print the new login exactly once"
+[ "$(printf '%s' "$out" | grep -c 'Username: admin')" = "1" ] || fail "init did not print the username exactly once"
+# shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
+perms=$(ls -l config.json | cut -c1-10)
+[ "$perms" = "-rw-------" ] || fail "init config.json is not mode 600"
+[ "$(jq -r '.dashboard.password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: dashboard password"
+[ "$(jq -r '.bitcoin.node_password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: shared RPC password"
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
-[ "$(jq -r '.bitcoin.inbound_onion' config.json)" = "false" ] || fail "init: declining inbound records false (default is on)"
-[ "$(jq -r '.bitcoin.sync_over_clearnet // false' config.json)" = "false" ] || fail "init: clearnet should be off"
+[ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: data directory"
+[ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: dashboard bind address"
+[ "$(jq -r '.dashboard.onion // false' config.json)" = "false" ] || fail "init: dashboard onion must default off"
+[ "$(jq -r '.bitcoin.inbound_onion // false' config.json)" = "false" ] || fail "init: inbound onion must default off"
+[ "$(jq -r '.bitcoin.rpc_expose' config.json)" = "true" ] || fail "init: RPC exposure"
+[ "$(jq -r '.bitcoin.rpc_bind_ip' config.json)" = "192.168.1.117" ] || fail "init: RPC bind address"
+[ "$(jq -r '.bitcoin.rpc_port' config.json)" = "18332" ] || fail "init: RPC host port"
+[ "$(jq -r 'has("sync_over_clearnet") or (.bitcoin | has("sync_over_clearnet"))' config.json)" = "false" ] || fail "init: clearnet setting should be absent"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
-[ "$(jq -r '.bitcoin.node_password // "unset"' config.json)" = "unset" ] || fail "init: random password should be omitted"
 # the generated config must feed configure.sh cleanly (creds auto-generated)
 ./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
-grep -q '^BITCOIN_RPC_USER=bitcoin$' .env || fail "wizard config: username default not applied"
-grep -q '^DASHBOARD_PASSWORD=hunter2$' .env || fail "wizard config: dashboard password not rendered"
+grep -q '^BITCOIN_RPC_USER=admin$' .env || fail "wizard config: username default not applied"
+grep -q '^BITCOIN_RPC_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: shared RPC password not rendered"
+grep -q '^DASHBOARD_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: dashboard password not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail "wizard config: RPC override not enabled"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
-# overwrite=y user pass dashpass[Enter=generate] onion=n control=n inbound=n clearnet=n prune start=n
-printf 'y\n\n\n\nn\nn\nn\nn\n\nn\n' | ./stack init >/dev/null
-jq -r '.dashboard.password' config.json | grep -qE '^[0-9a-f]{32}$' ||
-  fail "init: empty dashboard password should generate a 32-hex one"
+# Existing archival, path, and bind settings survive a wizard rewrite.
+jq '.bitcoin.prune_mb=0' config.json >config.next && mv config.next config.json
+out=$(printf 'y\n\n\n\n\nn\nn\n\nn\n' | ./stack init)
+generated=$(jq -r '.dashboard.password' config.json)
+printf '%s' "$generated" | grep -qE '^[0-9a-f]{48}$' ||
+  fail "init: empty password should generate a 48-hex one"
+[ "$(jq -r '.bitcoin.node_password' config.json)" = "$generated" ] || fail "init: generated password was not shared"
+[ "$(printf '%s' "$out" | grep -c "Password: $generated")" = "1" ] || fail "init did not print generated login exactly once"
+printf '%s' "$out" | grep -q 'hunter2hunter2hunter2hunter2' && fail "init printed the previous credential"
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
+[ "$(jq -r '.bitcoin.rpc_expose // false' config.json)" = "false" ] ||
+  fail "init: RPC exposure must default to off"
+[ "$(jq -r '.bitcoin.prune_mb' config.json)" = "0" ] || fail "init: existing archival setting was not preserved"
+[ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: existing data directory was not preserved"
+[ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: existing dashboard bind was not preserved"
+
+legacy_wizard="$tmp/legacy-wizard"
+mkdir "$legacy_wizard"
+cp stack configure.sh "$legacy_wizard/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\n' >"$legacy_wizard/.env"
+(cd "$legacy_wizard" && printf 'legacywizardpassword1234\n\n\nn\nn\n\nn\n' | ./stack init >/dev/null)
+[ "$(jq -r '.bitcoin.prune_mb' "$legacy_wizard/config.json")" = "0" ] || fail "init converted a pre-prune environment"
 
 # ensure_agent: up/apply must start the agent + install the @reboot cron entry
 # when dashboard.control is on, remove both when off, and defer to systemd.
@@ -79,6 +113,10 @@ if [ "${1:-}" = "-l" ]; then [ -f "$FAKE_CRON" ] && cat "$FAKE_CRON" || exit 1; 
 EOS
 cat >"$stub/docker" <<'EOS'
 #!/usr/bin/env bash
+echo "docker $*" >>"$FAKE_LOG"
+if [ "${1:-}" = info ]; then
+  if [ -n "${FAKE_DOCKER_INFO:-}" ]; then printf '%s\n' "$FAKE_DOCKER_INFO"; else printf '{}\n'; fi
+fi
 exit 0
 EOS
 cat >"$stub/pgrep" <<'EOS'
@@ -106,7 +144,7 @@ grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cro
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
 # the agent start is backgrounded — give the stub a moment to log the call
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  [ -f "$FAKE_LOG" ] && break
+  grep -q 'setsid ./stack upgrade-agent' "$FAKE_LOG" 2>/dev/null && break
   sleep 0.3
 done
 grep -q "setsid ./stack upgrade-agent" "$FAKE_LOG" || fail "ensure_agent: agent not started"
@@ -115,6 +153,50 @@ printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: sta
 # idempotent: a second apply must not duplicate the cron entry
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 [ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
+grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
+HOME="$tmp" PATH="$stub:$PATH" ./stack up --build >/dev/null 2>&1 && fail "up allows an implicit build"
+
+# Image downloads fail before contacting a registry unless the daemon uses Tor.
+rm -f "$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull accepted an unproxied daemon"
+grep -q 'docker compose pull' "$FAKE_LOG" && fail "unproxied pull reached the registry command"
+cat >"$stub/curl" <<'EOS'
+#!/usr/bin/env bash
+echo "curl $*" >>"$FAKE_LOG"
+printf '{"IsTor":true}\n'
+EOS
+chmod +x "$stub/curl"
+export FAKE_DOCKER_INFO='{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","NoProxy":"","RegistryConfig":{"Mirrors":[]}}'
+HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null || fail "verified Tor pull failed"
+grep -q 'curl .*--proxy socks5h://172.29.0.25:9050 --noproxy ' "$FAKE_LOG" || fail "Tor verification can bypass its proxy"
+grep -q 'docker compose pull' "$FAKE_LOG" || fail "verified pull did not run"
+for bad_info in \
+  '{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","NoProxy":"*"}' \
+  '{"HttpProxy":"http://proxy:3128","HttpsProxy":"http://proxy:3128"}' \
+  '{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","RegistryConfig":{"Mirrors":["https://mirror.example"]}}'; do
+  FAKE_DOCKER_INFO="$bad_info" HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull accepted an unsafe proxy configuration"
+done
+unset FAKE_DOCKER_INFO
+
+cat >"$stub/git" <<'EOS'
+#!/usr/bin/env bash
+case "$*" in
+  'rev-parse --is-inside-work-tree') exit 0 ;;
+  'remote get-url origin') printf '%s\n' "$FAKE_ORIGIN" ;;
+  'tag --list --sort=-v:refname') printf 'v1.2.3\n' ;;
+  *) printf 'git %s no_proxy=%s NO_PROXY=%s\n' "$*" "${no_proxy-unset}" "${NO_PROXY-unset}" >>"$FAKE_LOG" ;;
+esac
+EOS
+chmod +x "$stub/git"
+rm -f "$FAKE_LOG"
+FAKE_ORIGIN=https://github.com/example/stack.git NO_PROXY='*' no_proxy='*' PATH="$stub:$PATH" ./stack upgrade >/dev/null || fail "HTTPS upgrade check failed"
+grep -q 'http.proxy=socks5h://172.29.0.25:9050' "$FAKE_LOG" || fail "Git fetch has no Tor proxy"
+grep -q 'protocol.allow=never -c protocol.https.allow=always fetch' "$FAKE_LOG" || fail "Git fetch can switch protocols"
+grep -q 'no_proxy= NO_PROXY=$' "$FAKE_LOG" || fail "Git inherited a proxy bypass"
+rm -f "$FAKE_LOG"
+FAKE_ORIGIN=git@github.com:example/stack.git PATH="$stub:$PATH" ./stack upgrade >/dev/null 2>&1 && fail "SSH origin accepted"
+[ ! -f "$FAKE_LOG" ] || fail "SSH upgrade attempted a network fetch"
+rm -f "$stub/git" "$stub/curl"
 
 # control off -> cron entry removed, agent killed
 echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json
@@ -133,7 +215,7 @@ rm -f "$FAKE_LOG"
 echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 sleep 0.5
-[ -s "$FAKE_LOG" ] && fail "ensure_agent: touched the host despite an enabled systemd unit"
+grep -qE '^(pkill|setsid) ' "$FAKE_LOG" && fail "ensure_agent: touched the host despite an enabled systemd unit"
 grep -q "stack upgrade-agent" "$FAKE_CRON" 2>/dev/null && fail "ensure_agent: installed cron despite systemd"
 rm -f config.json .env "$FAKE_CRON" "$FAKE_LOG"
 
@@ -151,6 +233,7 @@ printf '9.9.9\n' >"$gtmp/VERSION"
   cd "$gtmp"
   git init -q && git config user.email t@t && git config user.name t
   git add -A && git commit -qm v && git tag v9.9.9
+  git remote add origin "$gtmp"
   ./stack upgrade 2>&1 | grep -q "Already on the latest release (v9.9.9)" || {
     echo "FAIL: upgrade should no-op when HEAD is the latest tag"
     exit 1

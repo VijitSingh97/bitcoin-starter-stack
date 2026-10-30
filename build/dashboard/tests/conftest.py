@@ -7,4 +7,4 @@ os.environ.setdefault("RPC_PASSWORD", "testpass")
 # keep tests from touching the real /state event log
 os.environ.setdefault("EVENTS_LOG", os.devnull)
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "parity", "reference"))

@@ -1,20 +1,26 @@
 # Hardware Requirements
 
-Reference deployment: a 4-core mini PC with 8 GB RAM and a 2 TB NVMe SSD
-running Ubuntu Server 24.04. It syncs and serves the full chain
-comfortably.
+Reference deployment and test host: a mini PC with 4 logical CPUs (2 physical
+cores), 8 GB RAM, and an NVMe SSD running Ubuntu Server 24.04.5.
+
+For deployment planning, use 2 CPUs and 4 GB RAM as the recommended target. A
+short container-capped trial supports 1 CPU/2 GB as a small-host target: during
+a 10-minute sample after warmup, the stack advanced 1,200 blocks with 15/15 RPC
+checks succeeding, no HTTP failures, and no application-container swap, OOM
+kills, or restarts. This trial did not cover a full initial sync, sustained full
+mempool, or wallet-scan load. See the
+[resource-cap experiment](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/5dc960cb91873bcc09f599805cdc5bf1d6ec103a/experiments/go-dashboard-results/mini-1-resource-caps-2026-10-29/README.md)
+for the method, exact temporary caps, and the 2 CPU/4 GB profile results.
 
 ## Disk
 
-The single number that matters most. As of mid-2026 the full chain is
-**~800 GB** and grows roughly 50–100 GB per year.
+The default keeps 10 GB of recent block files after validating the whole chain.
+That target does not include chainstate, indexes, wallet data, logs, or headroom.
 
-- **Minimum:** 1 TB free — works today, forces a resize within a year or two.
-- **Recommended:** 2 TB — years of headroom.
-- **Pruned alternative:** ~30 GB total. Set `prune_mb` in `config.json`
-  ([Configuration → Pruned node](configuration.md#pruned-node)) — full
-  validation, a fraction of the disk, at the cost of not serving
-  historical blocks.
+- **Default pruned node:** plan for 30–60 GB total. The live chainstate is
+  currently about 12 GB, in addition to the 10 GB block-retention target.
+- **Archival node:** roughly 900 GB today; 1 TB is tight and 2 TB provides
+  practical growth room. Enable it manually with `prune_mb: 0`.
 - **SSD required.** Chainstate access is random-I/O heavy; initial sync on a
   spinning disk takes weeks instead of days.
 
@@ -23,28 +29,37 @@ headroom shrink.
 
 ## RAM
 
-8 GB is comfortable. The main consumer is Bitcoin Core's UTXO cache,
-controlled by `dbcache_mb` in `config.json` (default **3000**):
+Fresh installs use a conservative **128 MiB** Bitcoin Core UTXO cache, controlled
+by `dbcache_mb` in `config.json`. Existing installs keep their configured or
+previously rendered value. Larger caches are optional tuning that can speed up
+initial sync and reindexing:
 
-| System RAM | Suggested `dbcache_mb` |
+| System RAM | `dbcache_mb` guidance |
 |---|---|
-| 4 GB | 1000 |
-| 8 GB | 3000 (default) |
-| 16 GB+ | 6000 — speeds up initial sync noticeably |
+| 2 GB small-host target | Use 128 MiB. Existing users moving to 2 GB must set `bitcoin.dbcache_mb` to `128` explicitly because upgrades preserve older, larger cache settings. |
+| 4 GB recommended target | Start with 128 MiB; raise it only if faster initial sync is worth the extra memory. |
+| 8 GB reference host | 128 MiB remains the default; 3000 MiB is an optional initial-sync tuning value. |
+| 16 GB+ | Larger values such as 6000 MiB are optional initial-sync tuning. |
 
-Larger is only better during initial block download and reindex; once
-synced, steady-state usage is far lower. Don't set it near your total RAM —
-Bitcoin Core needs overhead beyond the cache, and the OOM killer is not a
-graceful shutdown.
+Don't set the cache near total RAM. Bitcoin Core also uses memory outside the
+UTXO cache, and usage varies by workload; leave room for Tor, the dashboard,
+Docker, and the host operating system. The OOM killer is not a graceful
+shutdown. Bitcoin Core's pinned
+[memory-reduction guide](https://github.com/bitcoin/bitcoin/blob/v32.1/doc/reduce-memory.md)
+explains the cache tradeoff and other memory controls. The optional container
+memory cap remains disabled by default; the experiment's temporary caps are
+measurements, not deployment recommendations.
 
 ## CPU
 
-Anything 4-core from the last decade is fine. Signature validation
-parallelizes across cores during initial sync; after that the node mostly
-idles.
+Two CPUs are the recommended planning target. The short capped trial supports
+one CPU for a small host within the scope described above. Signature validation
+parallelizes across CPUs during initial sync; after that the node mostly idles.
 
 ## Network
 
-Initial sync pulls ~800 GB through Tor. Steady state is a few GB per day.
-No inbound host ports are needed — inbound arrives over the Tor onion service
-(`inbound_onion`, on by default), never a forwarded port.
+Initial sync still pulls the whole historical chain, currently roughly 900 GB,
+through Tor and can take days. Steady state is a few GB per day. Bitcoin P2P
+needs no inbound host port; the optional inbound onion service is disabled by
+default. The dashboard binds port 80 to
+loopback by default, or to an explicit private address for LAN access.

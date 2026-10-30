@@ -11,6 +11,25 @@ fail() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+for development_file in AGENTS.md docs/developer-bot.md tools; do
+  git check-attr export-ignore -- "$development_file" | grep -Fq ': export-ignore: set' ||
+    fail "$development_file is not excluded from release archives"
+done
+
+git archive --worktree-attributes HEAD >"$tmp/release.tar"
+tar -tf "$tmp/release.tar" >"$tmp/contents"
+for required in stack configure.sh docker-compose.yml docker-compose.rpc.yml config.example.json VERSION \
+  .dockerignore .gitignore README.md CHANGELOG.md LICENSE SECURITY.md \
+  build/dashboard/Dockerfile build/dashboard/go.mod build/dashboard/main.go build/dashboard/settings.go \
+  build/dashboard/index.html build/dashboard/static/watch.js \
+  build/dashboard/static/prices.js build/dashboard/static/settings.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
+  docs/getting-started.md docs/configuration.md docs/operations.md docs/watch-only.md docs/privacy.md; do
+  grep -Fxq "$required" "$tmp/contents" || fail "release archive is missing $required"
+done
+if grep -Eq '(^|/)(tests|parity|experiments|images)(/|$)|(_test\.go|\.test\.mjs|\.pyc)$|^(\.github/|\.gitattributes$|\.gitleaks\.toml$|AGENTS\.md$|CONTRIBUTING\.md$|scripts/|tools/|docs/(developer-bot|releasing)\.md$|build/dashboard/package\.json$)' "$tmp/contents"; then
+  fail "release archive includes development-only files"
+fi
+
 # --- release-notes.sh ---
 
 cat >"$tmp/CHANGELOG.md" <<'EOF'

@@ -4,11 +4,12 @@
 # defaults and the internal RPC credentials are auto-generated — zero setup.
 # Usually run for you by `./stack up`; safe to run directly and to re-run.
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
 
 for tool in jq openssl; do
   command -v "$tool" >/dev/null || {
-    echo "$tool is required: sudo apt install $tool"
+    echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
     exit 1
   }
 done
@@ -20,35 +21,72 @@ config='{}'
 get() { jq -r "$1 // \"${2:-}\"" <<<"$config"; }
 flag() { jq -r "if $1 == true then 1 else 0 end" <<<"$config"; }
 
-# Internal RPC credentials — used only between the dashboard and bitcoind on the
-# private Docker network; you never type or see these. Honour config.json if set,
-# otherwise reuse whatever is already in .env (so re-running is idempotent),
-# otherwise generate fresh strong random values.
+# Fresh installs share a generated RPC/dashboard password; upgrades reuse each
+# existing value independently.
 rpc_user=$(get '.bitcoin.node_username')
 rpc_password=$(get '.bitcoin.node_password')
+dashboard_password=$(get '.dashboard.password')
+dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
+had_env=0
+[ -f .env ] && had_env=1
 [ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env 2>/dev/null || true)
 [ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env 2>/dev/null || true)
-[ -n "$rpc_user" ] || rpc_user="bitcoin"                       # conventional default username
-[ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24) # strong random
+[ "$dashboard_password_set" = "1" ] || dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' .env 2>/dev/null || true)
+[ -n "$rpc_user" ] || rpc_user="admin"
+if [ "$had_env" = "0" ]; then
+  [ -n "$rpc_password" ] || rpc_password=$dashboard_password
+  [ -n "$dashboard_password" ] || dashboard_password=$rpc_password
+fi
+if [ -z "$rpc_password" ]; then
+  rpc_password=$(openssl rand -hex 24)
+  [ "$had_env" = "1" ] || dashboard_password=$rpc_password
+fi
 
 data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
-dbcache=$(jq -r '.bitcoin.dbcache_mb // 3000' <<<"$config")
-prune=$(jq -r '.bitcoin.prune_mb // 0' <<<"$config")
+dbcache=$(jq -r '.bitcoin.dbcache_mb // empty' <<<"$config")
+[ -n "$dbcache" ] || {
+  dbcache=$(sed -n 's/^BITCOIN_DBCACHE=//p' .env 2>/dev/null || true)
+  [ -n "$dbcache" ] || [ ! -f .env ] || dbcache=3000
+}
+[ -n "$dbcache" ] || dbcache=128
+prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$config")
+[ -n "$prune" ] || {
+  prune=$(sed -n 's/^BITCOIN_PRUNE=//p' .env 2>/dev/null || true)
+  [ -n "$prune" ] || [ ! -f .env ] || prune=0
+}
+[ -n "$prune" ] || prune=10000
 mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
-# default ON (encouraged): accept inbound over Tor unless explicitly disabled
-inbound_onion=$(jq -r 'if .bitcoin.inbound_onion == false then 0 else 1 end' <<<"$config")
+inbound_onion=$(jq -r 'if ((.bitcoin // {}) | has("inbound_onion")) then if .bitcoin.inbound_onion == true then 1 else 0 end else empty end' <<<"$config")
+[ -n "$inbound_onion" ] || inbound_onion=$(sed -n 's/^BITCOIN_INBOUND_ONION=//p' .env 2>/dev/null || true)
+[ -n "$inbound_onion" ] || inbound_onion=0
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
-sync_over_clearnet=$(flag '.bitcoin.sync_over_clearnet')
-dashboard_password=$(get '.dashboard.password')
-dashboard_onion=$(flag '.dashboard.onion')
+rpc_expose=$(flag '.bitcoin.rpc_expose')
+rpc_bind_ip=$(get '.bitcoin.rpc_bind_ip')
+rpc_port=$(jq -r '.bitcoin.rpc_port // 8332' <<<"$config")
+dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$config")
+[ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' .env 2>/dev/null || true)
+[ -n "$dashboard_onion" ] || dashboard_onion=0
 dashboard_control=$(flag '.dashboard.control')
+dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
 alert_new_block=$(flag '.notifications.alert_new_block')
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
-watch_wallets_b64=$(jq -cj '.wallets // []' <<<"$config" | base64 | tr -d '\n')
+watch_wallets_b64=$(jq -cej '
+  def public_key:
+    type == "string" and
+    (gsub("^\\s+|\\s+$"; "") |
+      (test("^(?:(?:bc1|tb1|bcrt1)[0-9a-z]{20,}|[13][1-9A-HJ-NP-Za-km-z]{25,34}|[xtyuzv]pub[1-9A-HJ-NP-Za-km-z]{107})$") or
+       (test("^(?:addr|pk|pkh|wpkh|sh|wsh|tr|rawtr|combo|raw|multi|sortedmulti)\\(") and
+        (test("\\s") | not) and
+        (test("(^|[^A-Za-z0-9])[xtyuzvXYZUV]prv[A-Za-z0-9]+|(^|[^1-9A-HJ-NP-Za-km-z])[5KL9c][1-9A-HJ-NP-Za-km-z]{50,51}($|[^1-9A-HJ-NP-Za-km-z])") | not))));
+  (if has("wallets") then .wallets else [{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}] end) |
+  if type != "array" then error("wallets must be an array")
+  elif all(.[]; type == "object" and (.key | public_key)) then .
+  else error("wallets accept only public addresses, extended public keys, or public descriptors; remove private or invalid material from config.json") end
+' <<<"$config" | base64 | tr -d '\n')
 
 check_alnum() {
   case "$2" in
@@ -61,6 +99,60 @@ check_alnum() {
 check_alnum "node_username" "$rpc_user"
 check_alnum "node_password" "$rpc_password"
 check_alnum "dashboard password" "$dashboard_password"
+
+if [ "$rpc_expose" = "1" ] && ((${#rpc_password} < 24)); then
+  echo "bitcoin.node_password must be at least 24 characters when bitcoin.rpc_expose is true."
+  exit 1
+fi
+
+check_bind_ip() {
+  local field=$1 ip=$2 allow_loopback=$3 a b c d octet expected="a private IPv4 address"
+  [ "$allow_loopback" = "1" ] && expected="a loopback or private IPv4 address"
+  if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "$field must be $expected."
+    exit 1
+  fi
+  IFS=. read -r a b c d <<<"$ip"
+  for octet in "$a" "$b" "$c" "$d"; do
+    if { ((${#octet} > 1)) && [[ "$octet" == 0* ]]; } || ((10#$octet > 255)); then
+      echo "$field must be $expected."
+      exit 1
+    fi
+  done
+  if ! (((allow_loopback == 1 && 10#$a == 127) || 10#$a == 10 || (10#$a == 172 && 10#$b >= 16 && 10#$b <= 31) || (10#$a == 192 && 10#$b == 168))); then
+    echo "$field must be $expected."
+    exit 1
+  fi
+}
+check_bind_ip dashboard.bind_ip "$dashboard_bind_ip" 1
+
+if [ -n "$rpc_bind_ip" ]; then
+  check_bind_ip bitcoin.rpc_bind_ip "$rpc_bind_ip" 0
+elif [ "$rpc_expose" = "1" ]; then
+  echo "bitcoin.rpc_bind_ip is required when bitcoin.rpc_expose is true."
+  exit 1
+fi
+case "$rpc_port" in '' | *[!0-9]*)
+  echo "bitcoin.rpc_port must be a whole number from 1 to 65535."
+  exit 1
+  ;;
+esac
+if ((10#$rpc_port < 1 || 10#$rpc_port > 65535)); then
+  echo "bitcoin.rpc_port must be a whole number from 1 to 65535."
+  exit 1
+fi
+if [ "$rpc_expose" = "1" ] && [ "$rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$rpc_port" = "80" ]; then
+  echo "bitcoin.rpc_port conflicts with the dashboard on $rpc_bind_ip:80."
+  exit 1
+fi
+
+compose_file=docker-compose.yml
+[ "$rpc_expose" = "1" ] && compose_file=docker-compose.yml:docker-compose.rpc.yml
+
+if jq -e '.bitcoin.sync_over_clearnet == true' >/dev/null <<<"$config"; then
+  echo "bitcoin.sync_over_clearnet is no longer supported; all public internet traffic must use Tor."
+  exit 1
+fi
 
 # Notification values pass through .env — reject anything env-file-unsafe
 check_envsafe() {
@@ -77,9 +169,9 @@ check_envsafe "healthchecks_url" "$healthchecks_url"
 
 if [ -n "$healthchecks_url" ]; then
   case "$healthchecks_url" in
-  http://* | https://*) ;;
+  https://*) ;;
   *)
-    echo "healthchecks_url must be a full URL (paste it from healthchecks.io)."
+    echo "healthchecks_url must be a full HTTPS URL (paste it from healthchecks.io)."
     exit 1
     ;;
   esac
@@ -93,13 +185,6 @@ fi
 if [ "$dashboard_control" = "1" ] && [ -z "$dashboard_password" ]; then
   echo "WARNING: dashboard.control is enabled without dashboard.password —"
   echo "         set a password so only you can trigger upgrades from the dashboard."
-fi
-
-if [ "$sync_over_clearnet" = "1" ]; then
-  echo "WARNING: sync_over_clearnet is ON — the initial sync connects to clearnet"
-  echo "         peers directly, which EXPOSES YOUR HOME IP (the opposite of the"
-  echo "         Tor-only default). Set it back to false and run ./stack apply once"
-  echo "         synced to return to Tor-only."
 fi
 
 # bitcoind rejects prune targets between 1 and 549 MB
@@ -172,21 +257,27 @@ else
   stack_version="$version" # release tarball (no .git)
 fi
 
-cat >.env <<EOF
+env_tmp=$(mktemp .env.tmp.XXXXXX)
+trap 'rm -f "$env_tmp"' EXIT
+cat >"$env_tmp" <<EOF
+COMPOSE_FILE=$compose_file
 BITCOIN_RPC_USER=$rpc_user
 BITCOIN_RPC_PASSWORD=$rpc_password
 BITCOIN_RPCAUTH_SALT=$rpcauth_salt
 BITCOIN_RPCAUTH_HASH=$rpcauth_hash
+BITCOIN_RPC_EXPOSE=$rpc_expose
+BITCOIN_RPC_BIND_IP=$rpc_bind_ip
+BITCOIN_RPC_PORT=$rpc_port
 BITCOIN_DATA_DIR=$data_dir
 BITCOIN_DBCACHE=$dbcache
 BITCOIN_PRUNE=$prune
 BITCOIN_INBOUND_ONION=$inbound_onion
 BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
-BITCOIN_SYNC_OVER_CLEARNET=$sync_over_clearnet
 BITCOIN_MEM_LIMIT=$bitcoin_mem_limit
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 DASHBOARD_CONTROL=$dashboard_control
+DASHBOARD_BIND_IP=$dashboard_bind_ip
 TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
@@ -195,10 +286,11 @@ NODE_NAME=$(hostname)
 STACK_VERSION=$stack_version
 WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
-chmod 600 .env
+chmod 600 "$env_tmp"
+mv -f "$env_tmp" .env
 
 # Create the data dir up front, or docker creates it root-owned
 # and bitcoind (uid 1000) can't write to it
 mkdir -p "$data_dir"
 
-echo "Done. Start the stack with: ./stack up   (or: docker compose up -d)"
+echo "Done. Start preloaded images with: ./stack up (downloads: ./stack pull; see docs/privacy.md)."

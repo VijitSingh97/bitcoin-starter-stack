@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bitcoin Node Status</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <script>(()=>{try{const t=localStorage.getItem("dashboardTheme");document.documentElement.setAttribute("data-theme",(t==="light"||t==="dark")?t:"auto");}catch{document.documentElement.setAttribute("data-theme","auto");}})();</script>
+</head>
+{{if .Loading}}
+<body class="center-screen">
+  <canvas id="tower"></canvas><div id="tower-label"></div>
+  <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+  <div id="live"><div class="loading-card{{if .LastKnownSync}} sync-card{{end}}">
+    {{if .LastKnownSync}}
+    <h2>Bitcoin Node Syncing</h2><div class="spinner"></div>
+    <p>Waiting for a fresh response from Bitcoin Core...</p>
+    <p class="sync-percentage" role="status">Last known: {{printf "%.2f" .Progress}}% synced</p>
+    <p>Last confirmed {{.LastSyncTime}} · block {{.Blocks}} of {{.Headers}}</p>
+    {{else}}
+    <h2>Bitcoin Node Initializing</h2><div class="spinner"></div>
+    <p>Connecting to the Bitcoin node...</p>
+    {{end}}
+    <p style="color: var(--muted); font-size: 0.8rem;">The dashboard will load automatically when the node is ready. Still stuck? Run ./stack doctor.</p>
+    <p style="color: var(--faint); font-size: 0.7rem;">{{.Version}}</p>
+  </div></div>
+{{else}}
+<body class="center">
+  <canvas id="tower"></canvas><div id="tower-label"></div>
+  <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+  <div class="stack-col">
+    <div id="tower-stats" class="tower-stats" hidden></div>
+    <div id="live" data-blocks="{{.Blocks}}" data-next-block="{{.NextBlock}}">
+      {{if .InitialBlockDownload}}<section class="card sync-card" aria-label="Initial blockchain synchronization">
+        <h2>Syncing Bitcoin Core</h2>
+        <p class="sync-percentage" role="status">{{printf "%.2f" .Progress}}% synced</p>
+        <p>Downloading and validating the blockchain. Pruning saves disk space as the sync continues.</p>
+      </section>{{end}}
+      <div class="card">
+        <h2>Bitcoin Node Status<span class="badge">{{if .Pruned}}Pruned · {{printf "%.1f" .PruneTargetGB}} GB{{else}}Full{{end}}</span></h2>
+        <div class="row"><span class="label">Bitcoin Core:</span> <span>{{.CoreVersion}}</span></div>
+        <div class="row"><span class="label">Uptime:</span> <span>{{.Uptime}}</span></div>
+        <div class="row"><span class="label">Total Connections:</span> <span>{{.TotalPeers}}</span></div>
+        <div class="peer-box"><div class="peer-tag">In: <span class="in">{{.Inbound}}</span></div><div class="peer-tag">Out: <span class="out">{{.Outbound}}</span></div></div>
+        <hr>
+        <div class="row"><span class="label">Blocks:</span> <span>{{.Blocks}} / {{.Headers}}</span></div>
+        <div class="progress-bg"><div class="progress-fill" style="width: {{printf "%.4f" .Progress}}%"></div></div>
+        <div class="row"><span class="label">Sync Progress:</span> <span>{{printf "%.4f" .Progress}}%</span></div>
+        <hr>
+        <div class="row"><span class="label">Node Data Size:</span> <span>{{printf "%.2f" .NodeGB}} GB</span></div>
+        <div class="row"><span class="label">Disk Capacity:</span> <span>{{printf "%.2f" .TotalGB}} GB</span></div>
+        <div class="row"><span class="label">Disk Usage:</span> <span>{{printf "%.2f" .DiskPercent}}%</span></div>
+        <div class="row"><span class="label">Disk Free:</span> <span {{if .DiskWarn}}class="warn"{{end}}>{{printf "%.2f" .FreeGB}} GB{{if .DiskWarn}} ⚠ LOW{{end}}</span></div>
+        {{if .ShowMempool}}<hr>
+        <div class="row"><span class="label">Mempool:</span> <span>{{.MempoolTxs}} tx · {{printf "%.1f" .MempoolMB}} MB</span></div>
+        <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{.FeeNext}} / {{.Fee30m}} / {{.FeeHour}}</span></div>
+        <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>{{end}}
+        <section id="btc-price" hidden>
+          <hr>
+          <div class="price-row">
+            <span class="price-label">Bitcoin price</span>
+            <strong id="btc-price-value">—</strong>
+            <select id="btc-price-currency" aria-label="Price currency"></select>
+            <span id="btc-price-status">Price unavailable</span>
+          </div>
+        </section>
+        <div id="upgrade" class="row" hidden></div>
+        <div class="footer"><span>Updated: {{.LastUpdate}}</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
+      </div>
+    </div>
+    <section id="watch" class="card watch-card" hidden></section>
+  </div>
+{{end}}
+  <button id="settings-open" class="settings-open" type="button" aria-label="Notification settings" title="Notification settings">⚙</button>
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="settings-heading"><h2 id="settings-title">Notifications</h2><button id="settings-close" type="button" aria-label="Close settings">✕</button></div>
+      <p>Configure alerts without restarting your Bitcoin node. Changes are saved on this node.</p>
+      <fieldset id="settings-telegram">
+        <legend>Telegram</legend>
+        <label class="settings-check"><input id="settings-telegram-enabled" type="checkbox"> Enable Telegram alerts</label>
+        <label>Bot token<input id="settings-telegram-token" type="text" autocomplete="off" maxlength="256"></label>
+        <label>Chat or channel ID<input id="settings-telegram-chat" type="text" autocomplete="off" maxlength="100"></label>
+      </fieldset>
+      <fieldset id="settings-healthchecks">
+        <legend>Healthchecks</legend>
+        <label class="settings-check"><input id="settings-healthchecks-enabled" type="checkbox"> Enable Healthchecks pings</label>
+        <label>HTTPS ping URL<input id="settings-healthchecks-url" type="url" autocomplete="off" maxlength="2048"></label>
+      </fieldset>
+      <label class="settings-check"><input id="settings-new-block" type="checkbox"> Alert on each new block (about 144 per day)</label>
+      <p class="settings-note">Node-down, recovery, sync-complete, and low-disk alerts are automatic when Telegram is enabled. Saved values are visible to anyone with dashboard access.</p>
+      <p id="settings-source" class="settings-note"></p>
+      <div class="settings-actions"><button id="settings-save" type="submit">Save</button><button id="settings-reset" type="button">Use server config</button></div>
+      <p id="settings-status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
+  <script type="module" src="/static/tower.js"></script>
+  <script type="module" src="/static/theme.js"></script>
+  <script type="module" src="/static/sparkline.js"></script>
+  <script type="module" src="/static/refresh.js"></script>
+  <script type="module" src="/static/prices.js"></script>
+  <script type="module" src="/static/settings.js"></script>
+  {{if not .Loading}}<script type="module" src="/static/watch.js"></script>
+  <script type="module" src="/static/upgrade.js"></script>{{end}}
+</body>
+</html>

@@ -8,8 +8,7 @@ x-logging: &logging
 
 services:
   tor:
-    # Prebuilt multi-arch image from GHCR (published per release). `up` pulls it
-    # when available and falls back to building locally from `build:` if not.
+    # Prebuilt release image; ./stack pull verifies Tor before downloading.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:-latest}
     build: ./build/tor
     container_name: tor
@@ -17,14 +16,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    pids_limit: 100
     environment:
       DASHBOARD_ONION: ${DASHBOARD_ONION:-0}
+      BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
     logging: *logging
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9050 && nc -z 127.0.0.1 8000"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -32,9 +33,14 @@ services:
     networks:
       btc_net:
         ipv4_address: 172.29.0.25
+        gw_priority: 0
+      tor_egress:
+        gw_priority: 1
+    ports:
+      - "${DASHBOARD_BIND_IP:-127.0.0.1}:80:8000"
 
   bitcoin:
-    image: bitcoin/bitcoin:31.1@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63
+    image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
     container_name: bitcoin
     user: "1000:1000"
     security_opt:
@@ -56,7 +62,6 @@ services:
       PRUNE: ${BITCOIN_PRUNE:-0}
       INBOUND_ONION: ${BITCOIN_INBOUND_ONION:-0}
       BLOCKFILTERINDEX: ${BITCOIN_BLOCKFILTERINDEX:-0}
-      SYNC_OVER_CLEARNET: ${BITCOIN_SYNC_OVER_CLEARNET:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
       - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
@@ -79,8 +84,8 @@ services:
         RPCAUTH=$$(printf '%s:%s$$%s' "$$RPC_USER" "$$RPCAUTH_SALT" "$$RPCAUTH_HASH")
         ONION_ARGS=""
         if [ "$$INBOUND_ONION" = "1" ]; then ONION_ARGS="-listen=1 -listenonion=1 -torcontrol=172.29.0.25:9051"; fi
-        if [ "$$SYNC_OVER_CLEARNET" = "1" ]; then NET_ARGS="-onion=172.29.0.25:9050"; else NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"; fi
-        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" $$NET_ARGS $$ONION_ARGS
+        NET_ARGS="-proxy=172.29.0.25:9050 -onion=172.29.0.25:9050 -onlynet=onion"
+        exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" -maxconnections=125 -inboundrelaypercent=100 $$NET_ARGS $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
     restart: unless-stopped
@@ -95,10 +100,11 @@ services:
     networks:
       btc_net:
         ipv4_address: 172.29.0.26
+    dns:
+      - 127.0.0.1
 
   dashboard:
-    # Prebuilt multi-arch image from GHCR (see tor above); builds locally if the
-    # tag isn't published (e.g. an unreleased commit).
+    # Prebuilt release image, with an explicit build target for development.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
     build:
       context: .
@@ -111,14 +117,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    ports:
-      # host port 80 -> container's dashboard on 8000
-      - "80:8000"
     environment:
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       DASHBOARD_CONTROL: ${DASHBOARD_CONTROL:-0}
+      SETTINGS_PORT: "8001"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       HEALTHCHECKS_URL: ${HEALTHCHECKS_URL:-}
@@ -134,7 +138,7 @@ services:
     logging: *logging
     healthcheck:
       # Any HTTP response means alive — 401 is expected when auth is enabled
-      test: ["CMD", "python", "-c", "import urllib.request,urllib.error\ntry: urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)\nexcept urllib.error.HTTPError: pass"]
+      test: ["CMD", "/app/dashboard", "healthcheck"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -142,6 +146,8 @@ services:
     networks:
       btc_net:
         ipv4_address: 172.29.0.27
+    dns:
+      - 127.0.0.1
     depends_on:
       - bitcoin
 
@@ -149,9 +155,13 @@ networks:
   btc_net:
     driver: bridge
     name: btc_net
+    internal: true
     ipam:
       config:
         - subnet: 172.29.0.0/24
+  tor_egress:
+    driver: bridge
+    name: tor_egress
 
 volumes:
   tor_data:

@@ -34,9 +34,11 @@ Please don't open public issues for security problems.
 
 **Accepted risks (by design — know them before deploying):**
 
-- **The dashboard defaults to no authentication** on host port `80`. It
-  is read-only status information, but it fingerprints the host as a
-  Bitcoin node. Keep it on your LAN and never port-forward it — or set
+- **The dashboard defaults to no authentication** on host port `80`, bound to
+  loopback. Setting `dashboard.bind_ip` to a private address opens it to that
+  LAN; wildcard and public binds are rejected. It is read-only status
+  information, but it fingerprints the host as a Bitcoin node. Never
+  port-forward it — or set
   `dashboard.password` in `config.json` to require HTTP basic auth (note:
   basic auth over plain HTTP is only as private as your LAN).
 - **Anyone with Docker access on the host can read the dashboard's RPC

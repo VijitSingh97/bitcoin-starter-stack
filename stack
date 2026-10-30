@@ -8,6 +8,7 @@ usage() {
 Usage: ./stack <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
+  pull                       Download images through the configured host Tor proxy
   init                       Interactive setup wizard (optional; up uses defaults)
   logs [svc]                 Follow logs (all services, or one)
   events                     Incident history (down/recovered, failed pings) — survives restarts
@@ -22,19 +23,22 @@ Usage: ./stack <command> [args]
 EOF
 }
 
-env_get() { sed -n "s/^$1=//p" .env 2>/dev/null; }
+env_get() { sed -n "s/^$1=//p" .env 2>/dev/null || true; }
 
 # Interactive setup: every prompt has a sensible default — press Enter to skip.
 # Writes config.json (only the values you change), then offers to start. Plain
 # `./stack up` needs none of this; it just uses the defaults.
 init() {
+  umask 077
   for tool in jq openssl; do
     command -v "$tool" >/dev/null || {
-      echo "$tool is required: sudo apt install $tool"
+      echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
       exit 1
     }
   done
 
+  old_config='{}'
+  [ -f config.json ] && old_config=$(cat config.json)
   if [ -f config.json ]; then
     printf "config.json already exists — overwrite it? [y/N] "
     read -r reply
@@ -46,48 +50,125 @@ init() {
   fi
 
   echo "Setup — press Enter to accept the [default]. Nothing here is required."
+  echo "The default keeps 10 GB of recent blocks and needs about 30–60 GB total disk."
+  echo "Bitcoin Core still downloads and validates the whole chain; over Tor, first sync can take days."
   echo
-  read -r -p "RPC username [bitcoin]: " w_user
-  read -rsp "RPC password [Enter = strong random]: " w_pass; echo
-  read -rsp "Dashboard web password [Enter = strong random]: " w_dashpass; echo
-  if [ -z "$w_dashpass" ]; then
-    w_dashpass=$(openssl rand -hex 16)
-    echo "  generated dashboard password: $w_dashpass  (log in with any username — save it)"
-  fi
-  read -r -p "Publish the dashboard as a Tor onion service (reach it from anywhere)? [y/N] " w_dashonion
-  read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
-  read -r -p "Accept inbound connections over Tor (helps the network, no IP exposure)? [Y/n] " w_inbound
-  read -r -p "Sync the initial download over clearnet first? Faster, but EXPOSES YOUR IP. [y/N] " w_clearnet
-  read -r -p "Prune the chain to save disk — size in GB, or Enter for a full node: " w_prune_gb
-
   yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
+  current_data_dir=$(jq -r '.bitcoin.data_dir // empty' <<<"$old_config")
+  [ -n "$current_data_dir" ] || current_data_dir=$(env_get BITCOIN_DATA_DIR)
+  [ -n "$current_data_dir" ] || current_data_dir=./data/bitcoin
+  current_bind_ip=$(jq -r '.dashboard.bind_ip // empty' <<<"$old_config")
+  [ -n "$current_bind_ip" ] || current_bind_ip=$(env_get DASHBOARD_BIND_IP)
+  [ -n "$current_bind_ip" ] || current_bind_ip=127.0.0.1
+  current_prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$old_config")
+  [ -n "$current_prune" ] || current_prune=$(env_get BITCOIN_PRUNE)
+  [ -n "$current_prune" ] || if [ -f .env ]; then current_prune=0; else current_prune=10000; fi
+  current_dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$old_config")
+  [ -n "$current_dashboard_onion" ] || current_dashboard_onion=$(env_get DASHBOARD_ONION)
+  [ -n "$current_dashboard_onion" ] || current_dashboard_onion=0
+  current_inbound_onion=$(jq -r 'if ((.bitcoin // {}) | has("inbound_onion")) then if .bitcoin.inbound_onion == true then 1 else 0 end else empty end' <<<"$old_config")
+  [ -n "$current_inbound_onion" ] || current_inbound_onion=$(env_get BITCOIN_INBOUND_ONION)
+  [ -n "$current_inbound_onion" ] || current_inbound_onion=0
+  read -rsp "Shared RPC and dashboard password (letters/numbers) [Enter = strong random]: " w_password; echo
+  if [ -z "$w_password" ]; then
+    w_password=$(openssl rand -hex 24)
+  fi
+  case "$w_password" in *[!a-zA-Z0-9]*) echo "Password must contain only letters and numbers."; return 1 ;; esac
+  read -r -p "Bitcoin data directory [$current_data_dir]: " w_data_dir
+  [ -n "$w_data_dir" ] || w_data_dir=$current_data_dir
+  read -r -p "Dashboard bind address (loopback or private LAN) [$current_bind_ip]: " w_bind_ip
+  [ -n "$w_bind_ip" ] || w_bind_ip=$current_bind_ip
+  read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
+  read -r -p "Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] " w_rpc_expose
+  w_rpc_bind_ip=
+  w_rpc_port=
+  if yes "$w_rpc_expose"; then
+    read -r -p "Private LAN address assigned to this host [required]: " w_rpc_bind_ip
+    read -r -p "Host RPC port [8332]: " w_rpc_port
+  fi
+  if [ "$current_prune" = "0" ]; then
+    prune_prompt="Recent-block retention in GB [keep existing archival node]: "
+  elif [ "$current_prune" -lt 1000 ]; then
+    prune_prompt="Recent-block retention in GB [keep existing $current_prune MB]: "
+  else
+    prune_prompt="Recent-block retention in GB [$((current_prune / 1000))]: "
+  fi
+  read -r -p "$prune_prompt" w_prune_gb
+
   cfg=$(jq -n '{}')
-  [ -n "$w_user" ] && [ "$w_user" != "bitcoin" ] && cfg=$(jq --arg v "$w_user" '.bitcoin.node_username=$v' <<<"$cfg")
-  [ -n "$w_pass" ] && cfg=$(jq --arg v "$w_pass" '.bitcoin.node_password=$v' <<<"$cfg")
-  [ -n "$w_dashpass" ] && cfg=$(jq --arg v "$w_dashpass" '.dashboard.password=$v' <<<"$cfg")
-  yes "$w_dashonion" && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
+  cfg=$(jq --arg v "$w_password" '.bitcoin.node_password=$v | .dashboard.password=$v' <<<"$cfg")
+  [ "$w_data_dir" != "./data/bitcoin" ] && cfg=$(jq --arg v "$w_data_dir" '.bitcoin.data_dir=$v' <<<"$cfg")
+  [ "$w_bind_ip" != "127.0.0.1" ] && cfg=$(jq --arg v "$w_bind_ip" '.dashboard.bind_ip=$v' <<<"$cfg")
+  [ "$current_dashboard_onion" = "1" ] && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
+  [ "$current_inbound_onion" = "1" ] && cfg=$(jq '.bitcoin.inbound_onion=true' <<<"$cfg")
   yes "$w_control" && cfg=$(jq '.dashboard.control=true' <<<"$cfg")
-  # inbound is default-on; only record a deviation when the user declines
-  case "$w_inbound" in n | N | no | NO) cfg=$(jq '.bitcoin.inbound_onion=false' <<<"$cfg") ;; esac
-  yes "$w_clearnet" && cfg=$(jq '.bitcoin.sync_over_clearnet=true' <<<"$cfg")
+  if yes "$w_rpc_expose"; then
+    cfg=$(jq --arg ip "$w_rpc_bind_ip" '.bitcoin.rpc_expose=true | .bitcoin.rpc_bind_ip=$ip' <<<"$cfg")
+    [ -n "$w_rpc_port" ] && cfg=$(jq --argjson port "$w_rpc_port" '.bitcoin.rpc_port=$port' <<<"$cfg")
+  fi
   if [ -n "$w_prune_gb" ]; then
     case "$w_prune_gb" in
-      *[!0-9]*) echo "  (prune must be a whole number of GB — ignoring)" ;;
-      *) cfg=$(jq --argjson v "$((w_prune_gb * 1000))" '.bitcoin.prune_mb=$v' <<<"$cfg") ;;
+      *[!0-9]*) echo "  (retention must be a whole number of GB — keeping the default)" ;;
+      *) current_prune=$((w_prune_gb * 1000)) ;;
     esac
   fi
+  cfg=$(jq --argjson v "$current_prune" '.bitcoin.prune_mb=$v' <<<"$cfg")
 
-  echo "$cfg" | jq . >config.json
+  printf '%s\n' "$cfg" | jq . >config.json
+  chmod 600 config.json
   echo
-  echo "Wrote config.json:"
-  sed 's/^/  /' config.json
+  echo "Wrote private config.json (mode 600)."
   echo
   printf "Start the stack now? [Y/n] "
   read -r reply
   case "$reply" in n | N) echo "Later: ./stack up" ;; *)
-    ./configure.sh && docker compose up -d && ensure_agent
+    ./configure.sh && offline_up && ensure_agent
     ;;
   esac
+  echo
+  echo "Dashboard login (shown once):"
+  echo "  Username: admin"
+  echo "  Password: $w_password"
+}
+
+offline_up() {
+  for arg in "$@"; do
+    case "$arg" in
+      tor | bitcoin | dashboard) ;;
+      *) echo "up accepts service names only; image downloads are separate: ./stack pull (see docs/privacy.md)."; return 1 ;;
+    esac
+  done
+  docker compose up -d --pull never --no-build "$@" || {
+    echo "Start failed. Missing images? Configure host Tor, then run ./stack pull. See docs/privacy.md."
+    return 1
+  }
+}
+
+pull_images() {
+  local proxy='socks5h://172.29.0.25:9050'
+  if ! docker info --format '{{json .}}' | jq -e '
+    (.HttpProxy == "socks5h://172.29.0.25:9050" or .HttpProxy == "socks5://172.29.0.25:9050") and
+    (.HttpsProxy == "socks5h://172.29.0.25:9050" or .HttpsProxy == "socks5://172.29.0.25:9050") and
+    ((.NoProxy // "") == "") and
+    ((.RegistryConfig.Mirrors // []) | length == 0)' >/dev/null; then
+    echo "Image download blocked: Docker must use the stack's Tor SOCKS proxy, with no bypasses or mirrors."
+    echo "See docs/privacy.md; preloaded images can start with ./stack up."
+    return 1
+  fi
+  if ! command -v curl >/dev/null || ! curl --fail --silent --show-error --max-time 60 \
+    --proxy "$proxy" --noproxy '' https://check.torproject.org/api/ip | jq -e '.IsTor == true' >/dev/null; then
+    echo "Image download blocked: the Tor proxy could not be verified."
+    return 1
+  fi
+  docker compose pull
+}
+
+images_available() {
+  local images image
+  images=$(docker compose config --images) || return 1
+  while IFS= read -r image; do
+    [ -z "$image" ] || docker image inspect "$image" >/dev/null 2>&1 || return 1
+  done <<<"$images"
 }
 
 status() {
@@ -169,17 +250,17 @@ do_backup() {
   # the dashboard onion keys live in the tor volume
   docker compose cp tor:/var/lib/tor/dashboard_onion "$tmp/dashboard_onion" >/dev/null 2>&1 ||
     echo "WARN: dashboard onion keys not captured (is the tor container up?)"
-  # the watch-only roster (wallets.json) + balance history live in the dashboard
-  # state volume — UI-managed and not otherwise re-derivable
+  # UI-managed dashboard state is not otherwise re-derivable.
   docker compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
-    echo "WARN: watch-only roster not captured (is the dashboard container up?)"
+    echo "WARN: dashboard state not captured (is the dashboard container up?)"
   out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
   chmod 600 "$out"
-  echo "Wrote $out (config, credentials, onion keys, watch-only roster — chain data excluded, it's re-derivable)"
+  echo "Wrote $out (config, credentials, onion keys, dashboard state — chain data excluded, it's re-derivable)"
 }
 
 do_restore() {
+  umask 077
   yes=0
   if [ "${1:-}" = "-y" ]; then
     yes=1
@@ -202,8 +283,14 @@ do_restore() {
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   tar xzf "$archive" -C "$tmp"
-  [ -f "$tmp/config.json" ] && cp "$tmp/config.json" config.json && echo "Restored config.json"
+  if [ -f "$tmp/config.json" ]; then
+    chmod 600 config.json 2>/dev/null || true
+    cp "$tmp/config.json" config.json
+    chmod 600 config.json
+    echo "Restored config.json"
+  fi
   if [ -f "$tmp/.env" ]; then
+    chmod 600 .env 2>/dev/null || true
     cp "$tmp/.env" .env && chmod 600 .env && echo "Restored .env"
   fi
   data_dir=$(env_get BITCOIN_DATA_DIR)
@@ -220,13 +307,13 @@ do_restore() {
     fi
   fi
   if [ -d "$tmp/dashboard_state" ]; then
-    # restore the roster into the volume; chown to the dashboard's uid (1000) in
-    # case the backup came from an older root-owned /state
-    if docker compose cp "$tmp/dashboard_state/." dashboard:/state >/dev/null 2>&1; then
-      docker compose exec -u root dashboard chown -R 1000:1000 /state >/dev/null 2>&1 || true
-      echo "Restored watch-only roster"
+    # Extract as the dashboard user so private files keep the correct owner.
+    if tar -cf - -C "$tmp/dashboard_state" . |
+      docker compose exec -T -u 1000 dashboard tar -xof - -C /state; then
+      echo "Restored dashboard state"
     else
-      echo "WARN: could not restore watch-only roster (is the dashboard container up?)"
+      echo "ERROR: could not restore dashboard state (is the dashboard container up and writable by uid 1000?)"
+      exit 1
     fi
   fi
   echo "Done. Apply with: ./stack apply"
@@ -242,10 +329,30 @@ do_upgrade() {
   fi
   current=$(cat VERSION 2>/dev/null || echo 0)
   echo "Current: v$current — fetching release tags..."
-  git fetch --tags --quiet 2>/dev/null || {
-    echo "git fetch failed — check your network, then retry."
-    exit 1
-  }
+  origin=$(git remote get-url origin 2>/dev/null || true)
+  case "$origin" in
+    https://*)
+      NO_PROXY='' no_proxy='' GIT_SSL_NO_VERIFY=false git \
+        -c http.proxy=socks5h://172.29.0.25:9050 -c "http.$origin.proxy=socks5h://172.29.0.25:9050" \
+        -c http.sslVerify=true -c "http.$origin.sslVerify=true" \
+        -c http.followRedirects=false -c "http.$origin.followRedirects=false" \
+        -c protocol.allow=never -c protocol.https.allow=always \
+        fetch --tags --quiet "$origin" 2>/dev/null || {
+        echo "git fetch through Tor failed — check Tor, then retry."
+        exit 1
+      }
+      ;;
+    /* | file:///*)
+      git -c protocol.allow=never -c protocol.file.allow=always fetch --tags --quiet "$origin" 2>/dev/null || {
+        echo "Local git fetch failed."
+        exit 1
+      }
+      ;;
+    *)
+      echo "Upgrade requires an HTTPS origin (fetched through Tor) or an absolute local repository path."
+      exit 1
+      ;;
+  esac
   latest=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
   latest=${latest#v}
   [ -n "$latest" ] || {
@@ -270,7 +377,8 @@ do_upgrade() {
   }
   echo "== Applying (pull new images, recreate changed containers)"
   ./configure.sh
-  docker compose up -d
+  images_available || pull_images
+  offline_up
   echo
   echo "Upgraded to v$latest. Verify with: ./stack status"
   echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
@@ -329,7 +437,7 @@ cmd=${1:-help}
 case "$cmd" in
   up)
     [ -f .env ] || ./configure.sh   # first run: generate .env (auto-config)
-    docker compose up -d "$@"
+    offline_up "$@"
     ensure_agent
     ;;
   init) init ;;
@@ -339,10 +447,14 @@ case "$cmd" in
   events) docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
     ./configure.sh
-    docker compose up -d
+    offline_up
     ensure_agent
     ;;
   upgrade) do_upgrade ;;
+  pull)
+    [ -f .env ] || ./configure.sh
+    pull_images
+    ;;
   upgrade-agent) upgrade_agent ;;
   status) status ;;
   doctor) doctor ;;

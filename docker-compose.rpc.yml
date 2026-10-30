@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${BITCOIN_RPC_BIND_IP:?set bitcoin.rpc_bind_ip in config.json}:${BITCOIN_RPC_PORT:-8332}:8332"

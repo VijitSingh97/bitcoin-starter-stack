@@ -1,5 +1,28 @@
 # Notifications & Remote Access
 
+## Dashboard settings
+
+The gear at the bottom right opens Telegram, Healthchecks, and new-block alert
+settings. Changes apply immediately without restarting Bitcoin. A dashboard
+password protects the gear when configured; without one, it follows the same
+access policy as the rest of the dashboard. The gear works from localhost, a
+configured private LAN address, or the Tor onion dashboard (enable
+`dashboard.onion` in `config.json` and open the address shown by `./stack doctor`
+in Tor Browser). Without a password, use a private IP or local hostname; custom
+hostnames require a dashboard password.
+
+Dashboard changes are written atomically to `notification_settings.json` in the
+persistent `dashboard_state` volume, with owner-only permissions. They survive
+reboots, container recreation, and upgrades, and the existing stack backup/restore
+includes them. Saved overrides take priority over the notification values in
+`config.json`. **Use server config** removes the override and restores those
+values. After editing the server file, apply it and reset the override if needed.
+
+The gear displays the saved bot token and Healthchecks ping URL so they can be
+edited directly. Anyone with dashboard access can view those values. Disabling a
+service clears its credentials from the dashboard override; the server
+configuration is unchanged.
+
 Three opt-in ways to keep an eye on the node when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access
 over Tor. All three are off until configured, and every outbound
@@ -21,16 +44,20 @@ read alerts but never change anything.
 
 | Alert | When it fires |
 |---|---|
-| 🚀 **Monitor online** | The dashboard started — confirms the bot works after setup. |
+| 🚀 **Monitor online** | The dashboard started with an already-synced node — confirms the bot works after setup. |
 | 🔴 **Node down** | RPC unreachable for 3 consecutive minutes. |
 | 🟢 **Node recovered** | RPC answering again after a down alert. |
 | ✅ **Sync complete** | Initial block download finished — handy on first run, when it takes days. |
 | 💾 **Disk low** | Free space fell below 50 GB. Re-arms if space is freed. |
-| 🆕 **Update available** | A new Bitcoin Core or stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
+| 🆕 **Update available** | A new stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
 | 🟧 **New block** | The node accepted a new block (synced only). **Off by default** — a synced node finds ~144 a day. Enable with `notifications.alert_new_block: true`. |
 
 Every message is prefixed with the host's name (`NODE_NAME`, the box's
 hostname by default), so several nodes can share one chat.
+
+Automatic Telegram alerts stay quiet during initial sync. When syncing
+finishes, the bot sends the single ✅ sync-complete message; normal node,
+disk, release, and optional new-block alerts begin after that.
 
 ### 1. Create a bot and get its token
 
@@ -54,11 +81,13 @@ is positive.
 }
 ```
 
-`./stack apply`, and you'll get the 🚀 message within a minute.
+`./stack apply`, and an already-synced node sends the 🚀 message within a
+minute. A new node stays quiet until it sends ✅ sync complete.
 
 > NOTE: The bot token can send messages as your bot if leaked, but it can't
-> read other chats or touch the node. It lives only in the gitignored `.env`
-> and the dashboard container's environment.
+> read other chats or touch the node. Server-configured tokens live in the
+> gitignored configuration and environment; dashboard overrides live in the
+> private persistent settings JSON. Backups contain these credentials too.
 
 ---
 
@@ -133,7 +162,8 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname
 Open that `.onion` in [Tor Browser](https://www.torproject.org/). The address
 is unguessable (an ed25519 key), but treat it as a secret and **set
 `dashboard.password`** — `configure.sh` warns if you enable the onion without
-one. No host port is opened; inbound arrives only through Tor.
+one. The onion adds no host port; the ordinary dashboard port keeps its
+configured loopback or private-LAN bind.
 
 > NOTE: The onion keys live in the `tor_data` volume. Recreating it (e.g.
 > `docker compose down -v`) generates a **new** address — back it up with

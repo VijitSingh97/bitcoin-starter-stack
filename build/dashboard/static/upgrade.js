@@ -2,9 +2,8 @@
 // `dashboard.control` AND a newer release is available. Clicking asks the
 // host-side `./stack upgrade-agent` to run the upgrade — the dashboard itself
 // has no host/docker access; it only drops a request marker.
-const box = document.getElementById("upgrade");
-
 async function refresh() {
+  const box = document.getElementById("upgrade");
   if (!box) return;
   let s;
   try {
@@ -12,7 +11,7 @@ async function refresh() {
   } catch {
     return; // node/dashboard busy — try again next tick
   }
-  if (!s.enabled || (!s.update && !s.pending)) {
+  if (!s.update && !s.pending) {
     box.hidden = true;
     return;
   }
@@ -25,6 +24,7 @@ async function refresh() {
   // an update is available and nothing is pending → offer the button
   box.textContent = "";
   box.appendChild(document.createTextNode(`🆕 ${s.update} `));
+  if (!s.enabled) return;
   const btn = document.createElement("button");
   btn.textContent = "Upgrade now";
   btn.className = "upgrade-btn";
@@ -50,3 +50,4 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 15000);
+window.addEventListener("live-updated", refresh);

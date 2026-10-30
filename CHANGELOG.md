@@ -4,6 +4,65 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Fresh installs default Bitcoin Core's UTXO cache to 128 MiB. Existing installs
+  retain their rendered cache setting when no explicit override is configured.
+- Replaced the Python dashboard runtime with a standard-library Go server while
+  retaining the Python reference tests and shared HTTP parity checks.
+- Incomplete wallet imports display pending history above the block tower.
+- Saved wallet views and wallet/upgrade changes require a dashboard password;
+  public node status remains available on the trusted LAN.
+- Release downloads contain runtime source and user documentation only. Tests,
+  parity references, benchmark experiments, screenshots, and maintainer tools
+  remain in Git and are excluded from release archives and image build inputs.
+- Bitcoin and dashboard networking is externally isolated, with local DNS
+  forwarding disabled. Only Tor has an internet route; the optional clearnet
+  sync setting is removed. Dashboard access binds to loopback or a private IPv4.
+- Starts use preloaded images. Downloads and upgrades require Tor-routed Git
+  and Docker; an unavailable or unverified proxy blocks image downloads.
+- Updated the digest-pinned Bitcoin Core image to 32.1, retaining the existing
+  connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
+- Update notices and Telegram release alerts track stack releases only, with
+  notification state preserved across dashboard restarts.
+- Automatic Telegram alerts stay quiet during initial sync, then send the
+  existing one-time sync-complete message when the node is ready.
+
+### Added
+
+- A notification settings menu with persistent JSON overrides, live updates,
+  visible saved values, and the dashboard's optional password on LAN or onion access.
+- Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
+  and explicit unavailable/stale states.
+- An address-type selector for wallets that export a bare xpub for SegWit accounts.
+- A public Binance address example for fresh installs, excluded from personal
+  totals, with persistent removal and an explicit empty-list opt-out.
+- Opt-in authenticated LAN RPC access for wallet applications, disabled by default.
+- A repository-scoped GitHub App helper for bot-authored commits and pull requests.
+
+### Fixed
+
+- Busy initial sync no longer inherits the page's short timeout for health
+  checks; temporary misses show the last confirmed sync progress and alerts
+  wait for sustained failure.
+- Failed Telegram release alerts retry until delivery succeeds, Healthchecks
+  failure pings preserve query strings, and future wallet birthdays are rejected.
+- Refreshed the dashboard screenshot and wallet selector theme styling.
+- Failed initial wallet imports can recover after a restart without deleting
+  the existing watch-only wallet or accepting unrelated descriptors.
+- The dashboard upgrade control survives automatic status-panel refreshes.
+- Reusing a watch-only label with a different public key no longer reads the old
+  Core wallet's balance. Existing matching imports and history are preserved.
+- Private keys are rejected before wallet persistence; legacy files containing
+  private material are secured and preserved for operator recovery.
+- Failed roster writes are reported instead of confirming an unsaved wallet
+  change; unreadable or malformed roster files are preserved.
+- Core 31 inactive descriptors can omit optional `internal` metadata without
+  preventing safe reuse of an exact matching watch-only wallet.
+- Healthchecks pings require HTTPS, and external API redirects are not followed.
+
 ## [1.31.1] - 2026-10-27
 
 ### Changed
@@ -829,6 +888,7 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
+[Unreleased]: https://github.com/VijitSingh97/bitcoin-starter-stack/compare/v1.31.1...HEAD
 [1.31.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.1
 [1.31.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.0
 [1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0
