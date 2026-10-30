@@ -14,6 +14,7 @@ fail() {
 
 # 1. Runs with NO config.json — defaults applied, RPC credentials auto-generated
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
+[ -f "$tmp/.config.lock" ] || fail "standalone configure did not use the shared config lock"
 grep -q '^BITCOIN_RPC_USER=admin$' "$tmp/.env" || fail "RPC user default is not 'admin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
@@ -37,6 +38,10 @@ grep -q '^BITCOIN_RPC_PORT=8332$' "$tmp/.env" || fail "LAN RPC port default not 
 grep -q '^BITCOIN_DBCACHE=128$' "$tmp/.env" || fail "fresh install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$tmp/.env" || fail "fresh install prune default is not 10000 MB"
 grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "fresh install inbound onion default is not off"
+grep -q '^BITCOIN_STEADY_CPUS=1$' "$tmp/.env" || fail "Bitcoin steady CPU default is not 1"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Bitcoin steady memory default is not 2048 MB"
+grep -q '^MONERO_STEADY_CPUS=1$' "$tmp/.env" || fail "Monero steady CPU default is not 1"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Monero steady memory default is not 2048 MB"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "fresh install dashboard onion default is not off"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
@@ -99,6 +104,16 @@ printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\nBITCOIN_DBCACHE=5
 (cd "$existing_custom" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DBCACHE=512$' "$existing_custom/.env" || fail "custom existing dbcache was replaced"
 
+legacy_limits="$tmp/legacy-limits"
+mkdir "$legacy_limits"
+cp configure.sh "$legacy_limits/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\nBITCOIN_STEADY_CPUS=0.75\nBITCOIN_STEADY_MEM_LIMIT_MB=1536\nMONERO_STEADY_CPUS=1.25\nMONERO_STEADY_MEM_LIMIT_MB=3072\n' >"$legacy_limits/.env"
+(cd "$legacy_limits" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_STEADY_CPUS=0.75$' "$legacy_limits/.env" || fail "existing Bitcoin steady CPU limit was replaced"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=1536$' "$legacy_limits/.env" || fail "existing Bitcoin steady memory limit was replaced"
+grep -q '^MONERO_STEADY_CPUS=1.25$' "$legacy_limits/.env" || fail "existing Monero steady CPU limit was replaced"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=3072$' "$legacy_limits/.env" || fail "existing Monero steady memory limit was replaced"
+
 echo '{"bitcoin":{"dbcache_mb":"256","prune_mb":0,"inbound_onion":false},"dashboard":{"onion":false}}' >"$legacy/config.json"
 (cd "$legacy" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DBCACHE=256$' "$legacy/.env" || fail "explicit dbcache did not override the existing rendered value"
@@ -158,6 +173,7 @@ grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind defa
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
+grep -q '^ALERT_NEW_BLOCK_MONERO=0$' "$tmp/.env" || fail "Monero new-block alert default not applied"
 grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | jq -e '.[0].name == "Binance (public)"' >/dev/null ||
@@ -204,7 +220,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
  "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
- "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
+ "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true, "alert_new_block_monero": true},
  "wallets": [{"name": "Cold storage", "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "birthday": "2021-01-01"}]}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
@@ -223,6 +239,7 @@ grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token n
 grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
 grep -q '^ALERT_NEW_BLOCK=1$' "$tmp/.env" || fail "new-block alert not rendered"
+grep -q '^ALERT_NEW_BLOCK_MONERO=1$' "$tmp/.env" || fail "Monero new-block alert not rendered"
 # wallets round-trip through the base64 blob (decode and check the name survived)
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | grep -q '"name":"Cold storage"' ||
@@ -445,6 +462,26 @@ echo '{"bitcoin":{"resource_profile":"compact"},"monero":{"resource_profile":"co
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Bitcoin compact resource profile not rendered"
 grep -q '^MONERO_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Monero compact resource profile not rendered"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"resource_profile":"compact","steady_cpus":0.5,"steady_mem_limit_mb":1536},"monero":{"resource_profile":"compact","steady_cpus":1.5,"steady_mem_limit_mb":3072}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_STEADY_CPUS=0.5$' "$tmp/.env" || fail "custom Bitcoin steady CPU limit not rendered"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=1536$' "$tmp/.env" || fail "custom Bitcoin steady memory limit not rendered"
+grep -q '^MONERO_STEADY_CPUS=1.5$' "$tmp/.env" || fail "custom Monero steady CPU limit not rendered"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=3072$' "$tmp/.env" || fail "custom Monero steady memory limit not rendered"
+for invalid in \
+  '{"bitcoin":{"steady_cpus":0}}' \
+  '{"bitcoin":{"steady_cpus":0.001}}' \
+  '{"bitcoin":{"steady_cpus":1.234}}' \
+  '{"bitcoin":{"steady_cpus":"1"}}' \
+  '{"bitcoin":{"steady_cpus":1.2.3}}' \
+  '{"monero":{"steady_mem_limit_mb":256}}' \
+  '{"monero":{"steady_mem_limit_mb":512.5}}' \
+  '{"monero":{"steady_mem_limit_mb":"2048"}}'; do
+  printf '%s\n' "$invalid" >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "invalid steady resource limit was accepted: $invalid"
+done
 echo '{"bitcoin":{"resource_profile":"tiny"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unknown Bitcoin resource profile was accepted"
 echo '{"monero":{"resource_profile":"tiny"}}' >"$tmp/config.json"

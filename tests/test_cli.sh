@@ -120,6 +120,10 @@ printf '1.2.3\n' >"$multi_wizard/VERSION"
 [ "$(jq -r '.monero.zmq_expose' "$multi_wizard/config.json")" = "true" ] || fail "init: Monero ZMQ exposure"
 [ "$(jq -r '.bitcoin.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Bitcoin compact profile"
 [ "$(jq -r '.monero.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Monero compact profile"
+[ "$(jq -r '.bitcoin.steady_cpus' "$multi_wizard/config.json")" = "1" ] || fail "init: Bitcoin steady CPU default was not written"
+[ "$(jq -r '.bitcoin.steady_mem_limit_mb' "$multi_wizard/config.json")" = "2048" ] || fail "init: Bitcoin steady memory default was not written"
+[ "$(jq -r '.monero.steady_cpus' "$multi_wizard/config.json")" = "1" ] || fail "init: Monero steady CPU default was not written"
+[ "$(jq -r '.monero.steady_mem_limit_mb' "$multi_wizard/config.json")" = "2048" ] || fail "init: Monero steady memory default was not written"
 (cd "$multi_wizard" && ./configure.sh >/dev/null)
 grep -q '^COMPOSE_PROFILES=bitcoin,monero$' "$multi_wizard/.env" || fail "init: both-node profiles not rendered"
 grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.monero-rpc.yml:docker-compose.monero-zmq.yml$' "$multi_wizard/.env" || fail "init: Monero LAN overrides not rendered"
@@ -137,8 +141,8 @@ printf '%s' "$monero_out" | grep -q 'Bitcoin RPC —' && fail "init: Monero-only
 (cd "$monero_wizard" && ./configure.sh >/dev/null)
 grep -q '^COMPOSE_PROFILES=monero$' "$monero_wizard/.env" || fail "init: Monero-only profile not rendered"
 
-# ensure_agent: up/apply must start the agent + install the @reboot cron entry
-# when dashboard.control is on, remove both when off, and defer to systemd.
+# ensure_agent: up/apply must start the host-control agent + install the @reboot
+# cron entry when a dashboard password is set, and defer to systemd.
 # Everything host-touching (crontab, docker, pgrep/pkill, setsid, systemctl) is
 # stubbed onto PATH so the real machine is never modified.
 stub=$tmp/stubs
@@ -173,6 +177,10 @@ EOS
 cat >"$stub/systemctl" <<'EOS'
 #!/usr/bin/env bash
 exit 1
+EOS
+cat >"$stub/flock" <<'EOS'
+#!/usr/bin/env bash
+echo "flock $*" >>"$FAKE_LOG"
 EOS
 chmod +x "$stub"/*
 
@@ -210,7 +218,10 @@ grep -q 'docker compose up -d' "$FAKE_LOG" && fail "init started after a failed 
 echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 
 # control on -> cron entry installed, agent started
+: >"$FAKE_LOG"
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+  fail "apply did not hold the config lock through Compose"
 grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
 # the agent start is backgrounded — give the stub a moment to log the call
@@ -225,6 +236,10 @@ printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: sta
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 [ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
+: >"$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack up >/dev/null
+awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+  fail "up did not hold the config lock through Compose"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up --build >/dev/null 2>&1 && fail "up allows an implicit build"
 
 # Explicit pulls use the host Docker configuration and report pull failures.
@@ -254,8 +269,14 @@ FAKE_ORIGIN=git@github.com:example/stack.git PATH="$stub:$PATH" ./stack upgrade 
 [ ! -f "$FAKE_LOG" ] || fail "SSH upgrade attempted a network fetch"
 rm -f "$stub/git"
 
-# control off -> cron entry removed, agent killed
+# Upgrade control can be off while close-only LAN port controls keep the agent.
 echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: control-off dashboard lost LAN port controls"
+grep -q "pkill" "$FAKE_LOG" && fail "ensure_agent: control-off dashboard stopped the host-control agent"
+
+# No dashboard password means the host-control API is unavailable.
+echo '{"dashboard": {"password": "", "control": false}}' >config.json
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: cron entry not removed"
 grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: agent not stopped"

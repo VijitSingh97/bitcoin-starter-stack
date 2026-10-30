@@ -1,0 +1,175 @@
+#!/bin/sh
+set -eu
+
+stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+state_root=${BITCOIN_STACK_STATE_DIR:-$stack_root}
+config_root=${BITCOIN_STACK_CONFIG_DIR:-$state_root}
+env_file=$state_root/.env
+config_file=$config_root/config.json
+config_lock=$state_root/.config.lock
+docker_bin=${DOCKER_BIN:-docker}
+control_state=$state_root/port-control
+request_path=/state/port-control.request
+processing_path=/state/port-control.processing
+capability_path=/state/port-control.capability
+now=${PORT_CONTROL_NOW_EPOCH:-$(date +%s)}
+
+[ -r "$env_file" ] || exit 0
+mkdir -p "$control_state"
+chmod 700 "$control_state"
+exec 9>"$control_state/.lock"
+flock -n 9 || exit 0
+
+env_get() {
+  sed -n "s/^$1=//p" "$env_file" | tail -n 1
+}
+
+dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
+[ -n "$dashboard_id" ] || exit 0
+config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
+case ",$config_files," in
+  *",$stack_root/docker-compose.yml,"*) ;;
+  *) exit 0 ;;
+esac
+
+dashboard_exec() {
+  "$docker_bin" exec -u 1000 dashboard "$@"
+}
+
+write_status() {
+  status=$(jq -nc --arg id "$1" --arg state "$2" --arg message "$3" '{id:$id,state:$state,message:$message}')
+  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c 'umask 077; cat >/state/.port-control.status.tmp; mv /state/.port-control.status.tmp /state/port-control.status' >/dev/null
+}
+
+clear_processing() {
+  dashboard_exec rm -f "$processing_path" >/dev/null 2>&1 || true
+}
+
+password=$(env_get DASHBOARD_PASSWORD)
+if [ -z "$password" ]; then
+  dashboard_exec rm -f "$capability_path" >/dev/null 2>&1 || true
+  exit 0
+fi
+dashboard_exec sh -c 'umask 077; printf "ready\n" > /state/.port-control.capability.tmp; mv /state/.port-control.capability.tmp /state/port-control.capability' >/dev/null
+
+if ! dashboard_exec test -f "$processing_path" >/dev/null 2>&1; then
+  dashboard_exec test -f "$request_path" >/dev/null 2>&1 || exit 0
+  dashboard_exec mv "$request_path" "$processing_path" >/dev/null 2>&1 || exit 0
+fi
+
+size=$(dashboard_exec sh -c 'wc -c < /state/port-control.processing' 2>/dev/null | tr -d ' ' || true)
+case "$size" in '' | *[!0-9]*) size=4097 ;; esac
+if [ "$size" -gt 4096 ]; then
+  write_status "" rejected "Invalid request."
+  clear_processing
+  exit 0
+fi
+request=$(dashboard_exec cat "$processing_path" 2>/dev/null || true)
+if ! printf '%s' "$request" | jq -e --argjson now "$now" '
+  type == "object" and
+  keys == ["id", "ports", "requested_at"] and
+  (.id | type == "string" and test("^[0-9a-f]{32}$")) and
+  (.requested_at | type == "number" and floor == . and . >= $now - 300 and . <= $now + 30) and
+  (.ports | type == "array" and length >= 1 and length <= 3) and
+  ((.ports | unique | length) == (.ports | length)) and
+  all(.ports[]; . == "bitcoin_rpc" or . == "monero_rpc" or . == "monero_zmq")
+' >/dev/null 2>&1; then
+  write_status "" rejected "Invalid request."
+  clear_processing
+  exit 0
+fi
+
+request_id=$(printf '%s' "$request" | jq -r .id)
+seen_file=$control_state/seen
+if [ -r "$seen_file" ] && grep -Fxq "$request_id" "$seen_file"; then
+  write_status "$request_id" rejected "Request already processed."
+  clear_processing
+  exit 0
+fi
+remember_seen() {
+  printf '%s\n' "$request_id" >>"$seen_file"
+  chmod 600 "$seen_file"
+  seen_tmp=$(mktemp "$control_state/.seen.tmp.XXXXXX")
+  tail -n 256 "$seen_file" >"$seen_tmp"
+  chmod 600 "$seen_tmp"
+  mv "$seen_tmp" "$seen_file"
+}
+
+ports=$(printf '%s' "$request" | jq -c .ports)
+inflight_file=$control_state/inflight
+inflight=$(cat "$inflight_file" 2>/dev/null || true)
+mkdir -p "$config_root"
+exec 8>"$config_lock"
+flock 8
+
+recovering=0
+if [ "$inflight" = "$request_id" ]; then
+  recovering=1
+else
+  printf '%s\n' "$request_id" >"$inflight_file"
+  chmod 600 "$inflight_file"
+fi
+committed=0
+attempt=0
+while [ "$attempt" -lt 3 ]; do
+    attempt=$((attempt + 1))
+    config_snapshot=$(mktemp "$control_state/.config.snapshot.XXXXXX")
+    config_tmp=$(mktemp "$config_root/.config.port-control.XXXXXX")
+    chmod 600 "$config_snapshot" "$config_tmp"
+    if [ -f "$config_file" ]; then
+      had_config=1
+      cat "$config_file" >"$config_snapshot"
+    else
+      had_config=0
+      printf '{}\n' >"$config_snapshot"
+    fi
+    if ! jq -e --argjson ports "$ports" --argjson recovering "$recovering" '
+      . as $config | type == "object" and ($recovering or all($ports[];
+        if . == "bitcoin_rpc" then $config.bitcoin.rpc_expose == true
+        elif . == "monero_rpc" then $config.monero.rpc_expose == true
+        else $config.monero.zmq_expose == true end))
+    ' "$config_snapshot" >/dev/null 2>&1; then
+      rm -f "$config_snapshot" "$config_tmp"
+      rm -f "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" rejected "Requested port is already closed."
+      exit 0
+    fi
+    jq --argjson ports "$ports" '
+      reduce $ports[] as $port (.;
+        if $port == "bitcoin_rpc" and .bitcoin.rpc_expose == true then .bitcoin.rpc_expose = false
+        elif $port == "monero_rpc" and .monero.rpc_expose == true then .monero.rpc_expose = false
+        elif $port == "monero_zmq" and .monero.zmq_expose == true then .monero.zmq_expose = false
+        else . end)
+    ' "$config_snapshot" >"$config_tmp"
+    if { [ "$had_config" = 1 ] && [ -f "$config_file" ] && cmp -s "$config_snapshot" "$config_file"; } ||
+      { [ "$had_config" = 0 ] && [ ! -e "$config_file" ]; }; then
+      mv "$config_tmp" "$config_file"
+      rm -f "$config_snapshot"
+      committed=1
+      break
+    fi
+    rm -f "$config_snapshot" "$config_tmp"
+done
+if [ "$committed" != 1 ]; then
+    rm -f "$inflight_file"
+    remember_seen
+    clear_processing
+    write_status "$request_id" failed "Port close could not be saved."
+    exit 0
+fi
+
+if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+  BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+  "$stack_root/stack" apply >/dev/null 2>&1; then
+  final_state=applied
+  final_message="LAN port closed."
+else
+  final_state=failed
+  final_message="Port close is saved but could not be applied."
+fi
+remember_seen
+rm -f "$inflight_file"
+clear_processing
+write_status "$request_id" "$final_state" "$final_message"

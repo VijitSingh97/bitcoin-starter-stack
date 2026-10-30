@@ -9,6 +9,8 @@
         "blockfilterindex": false,
         "mem_limit_mb": 0,
         "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048,
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 8332
@@ -18,6 +20,8 @@
         "node_username": "admin",
         "data_dir": "./data/monero",
         "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048,
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 18081,
@@ -35,7 +39,8 @@
         "telegram_bot_token": "",
         "telegram_chat_id": "",
         "healthchecks_url": "",
-        "alert_new_block": false
+        "alert_new_block": false,
+        "alert_new_block_monero": false
     },
     "wallets": [
         {

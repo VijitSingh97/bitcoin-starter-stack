@@ -30,6 +30,9 @@ and validate historical data; pruning reduces retained disk data, not the
 validation work. Tor throughput, disk latency, CPU, and starting height make
 sync times vary from hours to days or longer. Temperature protection remains
 the host operator's responsibility; unlimited containers cannot override it.
+For initial sync, budget around 2 CPU cores and 4 GiB RAM per node as a planning
+estimate, not a fixed minimum. See [sync versus normal operation](hardware.md#sync-versus-normal-operation)
+for estimates, measured evidence, and shared-service overhead.
 
 ## Wizard
 
@@ -56,6 +59,9 @@ the paths shown by the wizard are the paths it will actually use.
 Fresh package wizard installs select the experimental `compact` profile for
 each selected node: unlimited sync, then a host timer qualifies three healthy,
 current sync checks before applying 1 CPU and 2048 MiB with no extra swap.
+Those defaults are saved as `steady_cpus` and `steady_mem_limit_mb` in each
+selected node's config section; edit them and run `sudo bitcoin-stack apply`
+to change the budget. Initial sync stays uncapped.
 Existing and source installs leave this off. The timer preserves explicit
 operator limits and refuses an unsafe handoff when memory stays too high.
 It requalifies recreated containers; an application upgrade can briefly return

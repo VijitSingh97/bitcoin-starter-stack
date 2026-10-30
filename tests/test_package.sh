@@ -52,8 +52,11 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
   ./usr/lib/bitcoin-starter-stack/node-resource-profile \
+  ./usr/lib/bitcoin-starter-stack/node-port-control \
   ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \
   ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.timer \
   ./usr/share/doc/bitcoin-starter-stack/README.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/nodes.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/privacy.md; do
@@ -144,6 +147,8 @@ printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wiz
 printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wizard did not generate a Monero RPC password"
 [ "$bitcoin_password" != "$monero_password" ] || fail "package wizard reused a node password"
 [ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
+[ "$(jq -r '.bitcoin.steady_cpus' "$config_dir/config.json")" = 1 ] || fail "package wizard did not write the Bitcoin steady CPU default"
+[ "$(jq -r '.bitcoin.steady_mem_limit_mb' "$config_dir/config.json")" = 2048 ] || fail "package wizard did not write the Bitcoin steady memory default"
 [ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
 [ "$(printf '%s' "$wizard_out" | grep -c 'username: admin  password:')" = 2 ] || fail "package wizard did not print the selected node and dashboard credentials"
 printf '%s' "$wizard_out" | grep -q 'Monero RPC' && fail "package wizard printed credentials for an unselected node"
@@ -157,6 +162,7 @@ printf 'packagepassword1234567890\nbitcoin\n\n\nn\n\n\n' |
 grep -q -- 'compose .* pull' "$log" || fail "package wizard did not pull missing images"
 grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wizard start allows implicit pulls or builds"
 grep -q 'systemctl enable --now bitcoin-starter-stack-resource-profile.timer' "$log" || fail "package wizard did not start the resource profile timer"
+grep -q 'systemctl enable --now bitcoin-starter-stack-port-control.timer' "$log" || fail "package wizard did not start the LAN port-control timer"
 
 "$wrapper" apply >/dev/null
 env_file=$state_dir/.env
@@ -169,6 +175,8 @@ grep -q '^MONERO_ENABLED=0$' "$env_file" || fail "fresh package install enabled 
 grep -q '^COMPOSE_PROFILES=bitcoin$' "$env_file" || fail "fresh package install did not select Bitcoin"
 grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$env_file" || fail "wizard did not enable the compact Bitcoin profile"
 grep -q '^MONERO_RESOURCE_PROFILE=off$' "$env_file" || fail "wizard enabled the compact profile for an unselected node"
+grep -q '^BITCOIN_STEADY_CPUS=1$' "$env_file" || fail "wizard did not render the Bitcoin steady CPU default"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$env_file" || fail "wizard did not render the Bitcoin steady memory default"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$env_file" || fail "fresh package install enabled an optional Compose override"
 grep -q "^STACK_ROOT=$runtime$" "$env_file" || fail "immutable payload path was not rendered"
 wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)

@@ -7,21 +7,16 @@ env_file=${BITCOIN_STACK_ENV_FILE:-$state_root/.env}
 docker_bin=${DOCKER_BIN:-docker}
 profile_state=$state_root/resource-profile
 stable_checks=${RESOURCE_STABLE_CHECKS:-3}
-memory_limit_mb=${RESOURCE_MEMORY_LIMIT_MB:-2048}
 memory_headroom_mb=${RESOURCE_MEMORY_HEADROOM_MB:-256}
 minimum_check_interval=${RESOURCE_MIN_CHECK_INTERVAL_SECONDS:-45}
 
-for value in "$stable_checks" "$memory_limit_mb" "$memory_headroom_mb" "$minimum_check_interval"; do
+for value in "$stable_checks" "$memory_headroom_mb" "$minimum_check_interval"; do
   case "$value" in '' | 0 | *[!0-9]*)
     echo "resource-profile: invalid numeric settings" >&2
     exit 1
     ;;
   esac
 done
-[ "$memory_headroom_mb" -lt "$memory_limit_mb" ] || {
-  echo "resource-profile: memory headroom must be smaller than the limit" >&2
-  exit 1
-}
 [ -r "$env_file" ] || exit 0
 mkdir -p "$profile_state"
 chmod 700 "$profile_state"
@@ -108,7 +103,7 @@ profile_enabled() {
 }
 
 already_capped() {
-  [ "$(current_limits "$1")" = "1000000000 2147483648 2147483648" ]
+  [ "$(current_limits "$1")" = "$2 $3 $3" ]
 }
 
 current_limits() {
@@ -133,6 +128,8 @@ apply_profile() {
   service=$1
   profile_var=$2
   sync_check=$3
+  cpu_var=$4
+  memory_var=$5
   profile_file=$profile_state/$service
 
   if ! profile_enabled "$profile_var"; then
@@ -141,6 +138,26 @@ apply_profile() {
   id=$(container_id "$service")
   [ -n "$id" ] || return 0
   container_healthy "$id" || return 0
+
+  steady_cpus=$(env_get "$cpu_var")
+  memory_limit_mb=$(env_get "$memory_var")
+  [ -n "$steady_cpus" ] || steady_cpus=1
+  [ -n "$memory_limit_mb" ] || memory_limit_mb=2048
+  if ! awk -v value="$steady_cpus" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9][0-9]?)?$/ && value >= 0.01 && value <= 256) }'; then
+    echo "resource-profile: invalid $service CPU limit" >&2
+    return 1
+  fi
+  case "$memory_limit_mb" in '' | *[!0-9]*)
+    echo "resource-profile: invalid $service memory limit" >&2
+    return 1
+    ;;
+  esac
+  if [ "$memory_limit_mb" -le "$memory_headroom_mb" ] || [ "$memory_limit_mb" -gt 1048576 ]; then
+    echo "resource-profile: invalid $service memory limit" >&2
+    return 1
+  fi
+  cpu_nanos=$(awk -v value="$steady_cpus" 'BEGIN { printf "%.0f\n", value * 1000000000 }')
+  memory_bytes=$((memory_limit_mb * 1024 * 1024))
 
   old_id=
   checks=0
@@ -156,7 +173,7 @@ apply_profile() {
     checks=0
     phase=pending
   fi
-  if already_capped "$id"; then
+  if already_capped "$id" "$cpu_nanos" "$memory_bytes"; then
     save_state "$service" "$id" "$stable_checks" capped "$current_time"
     return 0
   fi
@@ -182,8 +199,8 @@ apply_profile() {
   if [ "$service" = bitcoin ]; then
     dbcache=$(env_get BITCOIN_DBCACHE)
     case "$dbcache" in '' | *[!0-9]*) dbcache=0 ;; esac
-    if [ "$dbcache" -gt 512 ]; then
-      echo "resource-profile: bitcoin dbcache ${dbcache} MiB is too high for the compact profile; set it to 512 MiB or less" >&2
+    if [ "$dbcache" -gt $((memory_limit_mb - memory_headroom_mb)) ]; then
+      echo "resource-profile: bitcoin dbcache ${dbcache} MiB leaves less than ${memory_headroom_mb} MiB below its memory limit" >&2
       save_state "$service" "$id" "$stable_checks" blocked "$current_time"
       return 0
     fi
@@ -210,15 +227,15 @@ apply_profile() {
     return 0
   fi
 
-  "$docker_bin" update --cpus 1 --memory "${memory_limit_mb}m" --memory-swap "${memory_limit_mb}m" "$id" >/dev/null
-  if ! already_capped "$id"; then
+  "$docker_bin" update --cpus "$steady_cpus" --memory "${memory_limit_mb}m" --memory-swap "${memory_limit_mb}m" "$id" >/dev/null
+  if ! already_capped "$id" "$cpu_nanos" "$memory_bytes"; then
     echo "resource-profile: Docker did not apply the $service limits" >&2
     return 1
   fi
   save_state "$service" "$id" "$stable_checks" capped "$current_time"
-  echo "resource-profile: capped synced $service at 1 CPU and ${memory_limit_mb} MiB memory"
+  echo "resource-profile: capped synced $service at ${steady_cpus} CPU and ${memory_limit_mb} MiB memory"
 }
 
 current_time=${RESOURCE_NOW_EPOCH:-$(date +%s)}
-apply_profile bitcoin BITCOIN_RESOURCE_PROFILE bitcoin_synced
-apply_profile monero MONERO_RESOURCE_PROFILE monero_synced
+apply_profile bitcoin BITCOIN_RESOURCE_PROFILE bitcoin_synced BITCOIN_STEADY_CPUS BITCOIN_STEADY_MEM_LIMIT_MB
+apply_profile monero MONERO_RESOURCE_PROFILE monero_synced MONERO_STEADY_CPUS MONERO_STEADY_MEM_LIMIT_MB

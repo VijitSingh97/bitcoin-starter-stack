@@ -3,8 +3,40 @@
 Reference deployment and test host: a mini PC with 4 logical CPUs (2 physical
 cores), 8 GB RAM, and an NVMe SSD running Ubuntu Server 24.04.5.
 
-For a Bitcoin host, 2 CPUs and 4 GB RAM is a conservative planning target. A
-short container-capped trial supports 1 CPU/2 GB as a small-host target: during
+## Sync versus normal operation
+
+Use these **per-node planning estimates** when choosing a server. They are
+headroom budgets, not measured average consumption or hard minimums:
+
+| Node and phase | CPU estimate / budget | RAM estimate / budget | Default behavior |
+|---|---|---|---|
+| Bitcoin initial sync | Plan for 2 cores; validation can keep available cores busy. | Allow 4 GiB for headroom with the default 128 MiB cache. | No container CPU or RAM cap. |
+| Monero initial sync | Plan for 2 cores; additional cores can help validation. | Allow 4 GiB for headroom. | No container CPU or RAM cap. |
+| Bitcoin after sync | 1 core of capacity; usually idle between validation and RPC work. | 2 GiB container budget. | Fresh APT wizard installs apply the cap after healthy sync checks. |
+| Monero after sync | 1 core of capacity; wallet/RPC activity adds work. | 2 GiB container budget, still experimental. | Fresh APT wizard installs apply the cap after healthy sync checks. |
+
+Smaller machines can work, with slower sync and less room for bursts. Uncapped
+sync can use more than the planning estimate; it does not reserve memory or
+protect the host from memory pressure. For two nodes syncing together, add
+their budgets, or sync one at a time. Add space for the operating system,
+Docker, Tor, dashboard, filesystem cache, and any view-only wallet scans.
+
+The Monero RAM estimate follows its
+[upstream recommendation of 4 GB or more](https://docs.getmonero.org/running-node/monerod-systemd/#assumptions).
+The CPU and Bitcoin RAM figures are this project's planning allowances, not
+upstream guarantees. Bitcoin's
+[memory guide](https://github.com/bitcoin/bitcoin/blob/v32.1/doc/reduce-memory.md)
+explains why lowering caches saves RAM but can slow initial sync.
+
+The default post-sync caps are explicit, editable `steady_cpus: 1` and
+`steady_mem_limit_mb: 2048` values in each selected node's generated config.
+See [resource caps](configuration.md#resource-caps) for changing them. A cap is
+a ceiling, not an allocation: actual usage can be lower. Source installs and
+existing profiles set to `off` do not enable automatic caps.
+
+## What we have measured
+
+A short container-capped Bitcoin trial supports a small-host target: during
 a 10-minute sample after warmup, the stack advanced 1,200 blocks with 15/15 RPC
 checks succeeding, no HTTP failures, and no application-container swap, OOM
 kills, or restarts. This trial did not cover a full initial sync, sustained full
@@ -12,9 +44,9 @@ mempool, or wallet-scan load. See the
 [resource-cap experiment](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/5dc960cb91873bcc09f599805cdc5bf1d6ec103a/experiments/go-dashboard-results/mini-1-resource-caps-2026-10-29/README.md)
 for the method, exact temporary caps, and the 2 CPU/4 GB profile results.
 
-The new steady-state target is **1 CPU and 2 GiB per node**, with initial sync
-uncapped. It remains an experimental profile until a sustained post-sync test
-passes for each daemon. The earlier Bitcoin trial does not qualify Monero.
+The trial's settings were caps, not recorded average CPU/RAM measurements.
+The **1 CPU and 2 GiB per-node** profile remains experimental until a sustained
+post-sync test passes for each daemon. The Bitcoin trial does not qualify Monero.
 Two selected nodes need separate budgets, plus shared Tor/dashboard and host
 overhead; a 2 GiB VPS cannot provide a full 2 GiB node allowance and operating
 system headroom. See [Nodes](nodes.md) for qualification status.
@@ -65,14 +97,14 @@ shutdown. Bitcoin Core's pinned
 explains the cache tradeoff and other memory controls. The optional container
 memory setting is preserved for existing installations. Fresh package wizard
 installs use the experimental `compact` resource profile: sync without limits,
-then apply a 1 CPU / 2048 MiB container limit after repeated fresh, healthy sync
-checks. Explicit operator limits take precedence. See
+then apply the configured container limits (default 1 CPU / 2048 MiB) after
+repeated fresh, healthy sync checks. Explicit operator limits take precedence. See
 [configuration](configuration.md) for disabling that profile and its safety gates.
 
 ## CPU
 
-Two CPUs are the recommended planning target. The short capped trial supports
-one CPU for a small host within the scope described above. Signature validation
+Two CPUs per syncing node are a planning estimate, not a minimum. The short
+capped trial supports a smaller target within the scope described above. Signature validation
 parallelizes across CPUs during initial sync; after that the node mostly idles.
 
 ## Network

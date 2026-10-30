@@ -8,6 +8,34 @@ config_file=$config_dir/config.json
 env_file=$state_dir/.env
 stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+config_lock_owned=0
+
+lock_config() {
+  [ "${BITCOIN_STACK_CONFIG_LOCK_HELD:-0}" != 1 ] || return 0
+  mkdir -p "$state_dir"
+  exec 8>"$state_dir/.config.lock"
+  flock 8
+  export BITCOIN_STACK_CONFIG_LOCK_HELD=1
+  config_lock_owned=1
+}
+
+unlock_config() {
+  [ "$config_lock_owned" = 1 ] || return 0
+  flock -u 8
+  unset BITCOIN_STACK_CONFIG_LOCK_HELD
+  config_lock_owned=0
+}
+
+replace_config() {
+  local source=$1 target
+  mkdir -p "$state_dir" "$config_dir"
+  lock_config
+  target=$(mktemp "$config_dir/.config.write.XXXXXX")
+  chmod 600 "$target"
+  cat "$source" >"$target"
+  mv "$target" "$config_file"
+  unlock_config
+}
 cd "$state_dir"
 
 compose() {
@@ -196,6 +224,8 @@ init() {
     '.dashboard.password=$dashboard | .bitcoin.node_password=$bitcoin | .monero.node_password=$monero' <<<"$cfg")
   [ "$w_bitcoin_enabled" = "0" ] && cfg=$(jq '.bitcoin.enabled=false' <<<"$cfg")
   [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.enabled=true' <<<"$cfg")
+  [ "$w_bitcoin_enabled" = "1" ] && cfg=$(jq '.bitcoin.steady_cpus=1 | .bitcoin.steady_mem_limit_mb=2048' <<<"$cfg")
+  [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.steady_cpus=1 | .monero.steady_mem_limit_mb=2048' <<<"$cfg")
   if [ "$package_managed" = "1" ]; then
     [ "$w_bitcoin_enabled" = "1" ] && cfg=$(jq '.bitcoin.resource_profile="compact"' <<<"$cfg")
     [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.resource_profile="compact"' <<<"$cfg")
@@ -228,18 +258,23 @@ init() {
     fi
   fi
 
-  printf '%s\n' "$cfg" | jq . >"$config_file"
-  chmod 600 "$config_file"
+  config_source=$(mktemp)
+  printf '%s\n' "$cfg" | jq . >"$config_source"
+  replace_config "$config_source"
+  rm -f "$config_source"
+  [ "$package_managed" = "0" ] || ensure_port_control_timer
   echo
   echo "Wrote private config.json (mode 600)."
   echo
   printf "Download missing containers and start the stack now? [Y/n] "
   read -r reply
   case "$reply" in n | N) echo "Later: $stack_command pull && $stack_command up" ;; *)
+    lock_config
     "$stack_root/configure.sh"
     guard_package_containers
     images_available || pull_images
     offline_up
+    unlock_config
     ensure_resource_profile_timer
     ensure_agent
     ;;
@@ -261,6 +296,14 @@ ensure_resource_profile_timer() {
   else
     systemctl disable --now "$unit" >/dev/null 2>&1 || true
   fi
+}
+
+ensure_port_control_timer() {
+  [ "$package_managed" = "1" ] || return 0
+  unit=bitcoin-starter-stack-port-control.timer
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now "$unit" >/dev/null 2>&1 ||
+    echo "WARN  could not enable LAN port controls; run: sudo systemctl enable --now $unit"
 }
 
 offline_up() {
@@ -420,9 +463,7 @@ do_restore() {
   trap 'rm -rf "$tmp"' EXIT
   tar xzf "$archive" -C "$tmp"
   if [ -f "$tmp/config.json" ]; then
-    chmod 600 "$config_file" 2>/dev/null || true
-    cp "$tmp/config.json" "$config_file"
-    chmod 600 "$config_file"
+    replace_config "$tmp/config.json"
     echo "Restored config.json"
   fi
   if [ -f "$tmp/.env" ]; then
@@ -522,9 +563,11 @@ EOF
     exit 1
   }
   echo "== Applying (pull new images, recreate changed containers)"
+  lock_config
   "$stack_root/configure.sh"
   images_available || pull_images
   offline_up
+  unlock_config
   echo
   echo "Upgraded to v$latest. Verify with: ./stack status"
   echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
@@ -540,21 +583,27 @@ upgrade_agent() {
     echo "The dashboard upgrade agent is unavailable for APT installations." >&2
     exit 1
   fi
-  echo "upgrade-agent: watching for dashboard upgrade requests (Ctrl-C to stop)."
-  echo "  The button appears when dashboard.control=true; requests run ./stack upgrade here."
+  echo "upgrade-agent: watching for dashboard host-control requests (Ctrl-C to stop)."
+  echo "  Port closes require a dashboard password; upgrades also require dashboard.control=true."
   while true; do
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+      "$stack_root/scripts/node-port-control" || echo "upgrade-agent: LAN port control check failed; still watching"
     if docker exec dashboard test -f /state/upgrade.request 2>/dev/null; then
       docker exec -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
-      # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
-      (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
+      if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
+        # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
+        (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
+      else
+        echo "upgrade-agent: ignored an upgrade request because dashboard.control is off"
+      fi
     fi
     sleep 10
   done
 }
 
-# Keep the agent in sync with dashboard.control: when on, start it detached and
-# install a @reboot cron entry (no sudo needed); when off, remove both. Skips
+# Keep the agent in sync with dashboard authentication: when set, start it
+# detached and install a @reboot cron entry (no sudo needed); when empty, remove both. Skips
 # entirely if the operator runs the agent under systemd (docs/operations.md).
 # ponytail: cron can't restart a crashed agent until reboot — use the systemd
 # unit if that matters to you.
@@ -563,7 +612,7 @@ ensure_agent() {
   if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
     return 0 # managed by systemd — stay out of its way
   fi
-  if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
+  if [ -n "$(env_get DASHBOARD_PASSWORD)" ]; then
     line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
     (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
       echo "WARN  could not install the upgrade-agent @reboot cron entry"
@@ -577,7 +626,7 @@ ensure_agent() {
       crontab -l 2>/dev/null | { grep -vF "stack upgrade-agent" || true; } | crontab -
     fi
     if pkill -f "stack upgrade-agen[t]" 2>/dev/null; then
-      echo "upgrade-agent: stopped (dashboard.control is off)"
+      echo "upgrade-agent: stopped (dashboard password is empty)"
     fi
   fi
 }
@@ -587,9 +636,14 @@ cmd=${1:-help}
 
 case "$cmd" in
   up)
-    [ -f "$env_file" ] || "$stack_root/configure.sh"
+    lock_config
+    if [ ! -f "$env_file" ]; then
+      "$stack_root/configure.sh"
+    fi
     offline_up "$@"
+    unlock_config
     ensure_resource_profile_timer
+    ensure_port_control_timer
     ensure_agent
     ;;
   init) init ;;
@@ -598,9 +652,12 @@ case "$cmd" in
   logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
   events) guard_package_containers && docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
+    lock_config
     "$stack_root/configure.sh"
     offline_up
+    unlock_config
     ensure_resource_profile_timer
+    ensure_port_control_timer
     ensure_agent
     ;;
   upgrade) do_upgrade ;;

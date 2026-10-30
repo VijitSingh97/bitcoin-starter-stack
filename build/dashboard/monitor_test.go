@@ -80,6 +80,337 @@ func TestMonitorStateTransitionsAndExactMessages(t *testing.T) {
 	}
 }
 
+func TestMultiNodeAlertsKeepIndependentState(t *testing.T) {
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, payload.Text)
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.configureNodes(true, true, t.TempDir())
+	m.settings.AlertNewBlock = false
+	m.healthTicks = 1
+	synced := map[string]any{"initialblockdownload": false, "blocks": float64(100)}
+	m.tickNodes(t.Context(), synced, synced)
+	for range downAfterTicks {
+		m.tickNodes(t.Context(), nil, synced)
+	}
+	m.tickNodes(t.Context(), synced, synced)
+
+	want := []string{
+		"[alice] Bitcoin: 🔴 node down — RPC unreachable for 3 minutes",
+		"[alice] Bitcoin: 🟢 node recovered — RPC is answering again",
+	}
+	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("messages:\n%s\nwant:\n%s", strings.Join(messages, "\n"), strings.Join(want, "\n"))
+	}
+	if m.moneroState.fails != 0 || m.moneroState.downAlerted {
+		t.Fatalf("Bitcoin failure changed Monero state: %#v", m.moneroState)
+	}
+}
+
+func TestMultiNodeHealthchecksReflectEveryEnabledNode(t *testing.T) {
+	var pings []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		pings = append(pings, r.URL.Path)
+		return response(http.StatusOK, "ok"), nil
+	})
+	m.configureNodes(true, true, t.TempDir())
+	m.settings.TelegramEnabled = false
+	m.settings.HealthchecksEnabled = true
+	m.settings.HealthchecksURL = "https://hc-ping.com/shared-check"
+	m.healthTicks = 1
+	m.healthPingDue = 0
+	synced := map[string]any{"initialblockdownload": false, "blocks": float64(100)}
+	m.tickNodes(t.Context(), synced, synced)
+	for range downAfterTicks {
+		m.healthPingDue = 0
+		m.tickNodes(t.Context(), synced, nil)
+	}
+
+	want := []string{"/shared-check", "/shared-check/fail"}
+	if strings.Join(pings, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("Healthchecks pings = %#v, want %#v", pings, want)
+	}
+}
+
+func TestMultiNodeIgnoresDisabledNodesAndSuppressesSyncFailures(t *testing.T) {
+	var telegrams int
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		telegrams++
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.healthTicks = 1
+	m.configureNodes(true, false, t.TempDir())
+	syncing := map[string]any{"initialblockdownload": true, "blocks": float64(100)}
+	m.tickNodes(t.Context(), syncing, nil)
+	for range downAfterTicks {
+		m.tickNodes(t.Context(), nil, nil)
+	}
+	if telegrams != 0 || m.moneroState.fails != 0 {
+		t.Fatalf("syncing or disabled node produced alerts=%d, Monero state=%#v", telegrams, m.moneroState)
+	}
+}
+
+func TestMultiNodeNewBlockChoicesAreIndependent(t *testing.T) {
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages = append(messages, payload.Text)
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.configureNodes(true, true, t.TempDir())
+	m.settings.AlertNewBlock = false
+	m.settings.AlertNewBlockMonero = true
+	m.healthTicks = 1
+	m.tickNodes(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, map[string]any{"initialblockdownload": false, "blocks": float64(100)})
+	m.tickNodes(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(101)}, map[string]any{"initialblockdownload": false, "blocks": float64(101)})
+	if len(messages) != 1 || messages[0] != "[alice] Monero: 🟧 new block 101" {
+		t.Fatalf("new-block messages = %#v", messages)
+	}
+}
+
+func TestMultiNodeSyncAndDiskAlertsIdentifyMonero(t *testing.T) {
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages = append(messages, payload.Text)
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	moneroDir := t.TempDir()
+	m.configureNodes(true, true, moneroDir)
+	m.settings.AlertNewBlock = false
+	m.healthTicks = 1
+	m.diskFreeGB = func(path string) (float64, error) {
+		if path == moneroDir {
+			return 40, nil
+		}
+		return 1000, nil
+	}
+	bitcoin := map[string]any{"initialblockdownload": false, "blocks": float64(900000)}
+	m.tickNodes(t.Context(), bitcoin, map[string]any{"initialblockdownload": true, "blocks": float64(100)})
+	m.tickNodes(t.Context(), bitcoin, map[string]any{"initialblockdownload": false, "blocks": float64(200)})
+	want := []string{
+		"[alice] Monero: ✅ initial sync complete at height 200",
+		"[alice] Monero: 💾 disk low: 40 GB free",
+	}
+	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("messages = %#v, want %#v", messages, want)
+	}
+}
+
+func TestMultiNodeOperationalStatePersistsAcrossRestart(t *testing.T) {
+	stateDir := t.TempDir()
+	bitcoinDir, moneroDir := t.TempDir(), t.TempDir()
+	m := NewMonitor("dev", bitcoinDir, stateDir)
+	m.configureNodes(true, true, moneroDir)
+	m.output = io.Discard
+	m.healthTicks = 1
+	m.diskFreeGB = func(string) (float64, error) { return 1000, nil }
+	synced := map[string]any{"initialblockdownload": false, "blocks": float64(100)}
+	m.tickNodes(t.Context(), synced, map[string]any{"initialblockdownload": true, "blocks": float64(50)})
+	m.tickNodes(t.Context(), nil, map[string]any{"initialblockdownload": false, "blocks": float64(75)})
+	m.tickNodes(t.Context(), nil, map[string]any{"initialblockdownload": false, "blocks": float64(76)})
+	m.tickNodes(t.Context(), nil, map[string]any{"initialblockdownload": false, "blocks": float64(77)})
+
+	restarted := NewMonitor("dev", bitcoinDir, stateDir)
+	if restarted.state.chainKnown || !restarted.state.downAlerted || restarted.state.fails != downAfterTicks {
+		t.Fatalf("Bitcoin state after restart = %#v", restarted.state)
+	}
+	if restarted.moneroState.chainKnown || restarted.moneroState.ibd || restarted.moneroState.lastBlock != 77 || !restarted.moneroState.hasLastBlock {
+		t.Fatalf("Monero state after restart = %#v", restarted.moneroState)
+	}
+}
+
+func TestRunNodesRestartAfterSyncOnlyAnnouncesCompletion(t *testing.T) {
+	initial := configuredMonitor(t, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	initial.state.chainKnown = true
+	initial.state.ibd = true
+	initial.state.lastBlock = 100
+	initial.state.hasLastBlock = true
+	initial.saveState()
+
+	messages := make(chan string, 4)
+	restarted := NewMonitor("1.2.0", initial.dataDir, filepath.Dir(initial.statePath))
+	restarted.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages <- payload.Text
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})}
+	restarted.configureNodes(true, false, "")
+	restarted.diskFreeGB = func(string) (float64, error) { return 1000, nil }
+	restarted.output = io.Discard
+	restarted.healthTicks = 1
+	restarted.tickEvery = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		restarted.RunNodes(ctx, func() map[string]any {
+			return map[string]any{"initialblockdownload": false, "blocks": float64(200)}
+		}, nil)
+		close(done)
+	}()
+
+	select {
+	case got := <-messages:
+		if got != "[alice] Bitcoin: ✅ initial sync complete at height 200" {
+			t.Fatalf("restart sync message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restart sync completion was not sent")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunNodes did not stop after cancellation")
+	}
+	select {
+	case extra := <-messages:
+		t.Fatalf("restart sent an extra online message: %q", extra)
+	default:
+	}
+}
+
+func TestRunNodesRestartRequiresFreshChainStateBeforeDownAlert(t *testing.T) {
+	initial := configuredMonitor(t, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	initial.state.chainKnown = true
+	initial.state.ibd = false
+	initial.state.lastBlock = 100
+	initial.state.hasLastBlock = true
+	initial.saveState()
+
+	var telegrams atomic.Int32
+	healthchecks := make(chan string, 1)
+	restarted := NewMonitor("1.2.0", initial.dataDir, filepath.Dir(initial.statePath))
+	restarted.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "api.telegram.org" {
+			telegrams.Add(1)
+			return response(http.StatusOK, `{"ok":true}`), nil
+		}
+		healthchecks <- r.URL.Path
+		return response(http.StatusOK, "ok"), nil
+	})}
+	restarted.configureNodes(true, false, "")
+	restarted.settings.HealthchecksEnabled = true
+	restarted.settings.HealthchecksURL = "https://hc-ping.com/shared"
+	restarted.output = io.Discard
+	restarted.healthTicks = 1
+	restarted.tickEvery = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		restarted.RunNodes(ctx, func() map[string]any { return nil }, nil)
+		close(done)
+	}()
+
+	select {
+	case got := <-healthchecks:
+		if got != "/shared/fail" {
+			t.Fatalf("Healthchecks path = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("aggregate Healthchecks failure was not sent")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunNodes did not stop after cancellation")
+	}
+	if got := telegrams.Load(); got != 0 {
+		t.Fatalf("restart without a fresh chain state sent %d down alerts", got)
+	}
+}
+
+func TestRunNodesPollsEnabledNodesConcurrently(t *testing.T) {
+	m := NewMonitor("dev", t.TempDir(), t.TempDir())
+	m.configureNodes(true, true, t.TempDir())
+	m.healthTicks = 1
+	m.tickEvery = time.Hour
+	m.output = io.Discard
+	m.diskFreeGB = func(string) (float64, error) { return 1000, nil }
+	bitcoinStarted, moneroStarted := make(chan struct{}), make(chan struct{})
+	release := make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.RunNodes(ctx,
+			func() map[string]any {
+				close(bitcoinStarted)
+				<-release
+				return map[string]any{"initialblockdownload": true}
+			},
+			func() map[string]any {
+				close(moneroStarted)
+				<-release
+				return map[string]any{"initialblockdownload": true}
+			},
+		)
+	}()
+	for _, started := range []<-chan struct{}{bitcoinStarted, moneroStarted} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("enabled node polls did not start concurrently")
+		}
+	}
+	close(release)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("monitor did not stop after cancellation")
+	}
+}
+
+func TestMoneroHealthUsesRPCState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": "dashboard", "result": map[string]any{
+			"synchronized": true, "busy_syncing": false, "height": 3500000,
+		}})
+	}))
+	defer server.Close()
+	a := &app{cfg: config{moneroRPCURL: server.URL, moneroRPCUser: "rpc-user", moneroRPCPassword: "rpc-password"}}
+	got := a.healthMonero(t.Context())
+	if got == nil || got["initialblockdownload"] != false || got["blocks"] != int64(3500000) {
+		t.Fatalf("Monero health = %#v", got)
+	}
+}
+
+func TestMoneroHealthDoesNotFollowRPCRedirects(t *testing.T) {
+	var redirected atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected.Add(1) }))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer server.Close()
+	a := &app{cfg: config{moneroRPCURL: server.URL, moneroRPCUser: "rpc-user", moneroRPCPassword: "rpc-password"}}
+	if got := a.healthMonero(t.Context()); got != nil || redirected.Load() != 0 {
+		t.Fatalf("redirected Monero health = %#v, target calls = %d", got, redirected.Load())
+	}
+}
+
 func TestUnknownStartupAndInitialSyncSuppressAutomaticTelegram(t *testing.T) {
 	var telegrams int
 	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
@@ -237,6 +568,23 @@ func TestSyncCompleteRetryWaitsForConfirmedCompletedState(t *testing.T) {
 	want := "[alice] ✅ initial sync complete"
 	if len(messages) != 2 || !strings.Contains(messages[0], want) || !strings.Contains(messages[1], want) {
 		t.Fatalf("sync completion retries = %#v", messages)
+	}
+}
+
+func TestPendingNewBlockAlertIsClearedWhenSyncResumes(t *testing.T) {
+	attempts := 0
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return response(http.StatusBadGateway, `{"ok":false}`), nil
+	})
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(101)}, nil)
+	if attempts != 1 || m.state.pendingBlock != 101 {
+		t.Fatalf("failed alert attempts=%d state=%#v", attempts, m.state)
+	}
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(101)}, nil)
+	if attempts != 1 || m.state.pendingBlock != 0 {
+		t.Fatalf("syncing retried stale block alert: attempts=%d state=%#v", attempts, m.state)
 	}
 }
 

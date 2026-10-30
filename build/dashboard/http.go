@@ -28,6 +28,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/monero/watch/{id}/key-images", a.apiMoneroWatchKeyImages)
 	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
 	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
+	mux.HandleFunc("GET /api/settings/ports", a.apiPortControlGet)
+	mux.HandleFunc("POST /api/settings/ports", a.apiPortControlPost)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
 	mux.HandleFunc("POST /api/watch", a.apiWatchAdd)
 	mux.HandleFunc("DELETE /api/watch/{name}", a.apiWatchRemove)
@@ -42,6 +44,8 @@ func (a *app) routes() http.Handler {
 
 func (a *app) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/static/favicon.png" {
 			next.ServeHTTP(w, r)
 			return

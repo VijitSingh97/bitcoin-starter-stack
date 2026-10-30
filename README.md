@@ -46,12 +46,13 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
   `rpcauth` hash, never the plaintext.
 - ♻️ **Reuse an existing chain.** Point `data_dir` at an already-synced datadir and skip
   the multi-day initial download.
-- 📟 **Opt-in Bitcoin alerts & remote access.** Telegram alerts (node down, sync complete, disk
+- 📟 **Opt-in node alerts & remote access.** Shared Telegram alerts (node down, sync complete, disk
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- ⚙️ **Notification settings that stick.** Configure Telegram, Healthchecks, and
-  new-block alerts from the gear menu on localhost, your private LAN, or the onion dashboard.
+- ⚙️ **Settings that stick.** Configure global Appearance, Telegram, and Healthchecks
+  from the gear menu, with collapsible Bitcoin and Monero settings for each node's
+  block alerts and LAN ports. Use localhost, your private LAN, or the onion dashboard.
   Saved values are visible in the settings panel, and a separate JSON override survives
   reboots and upgrades.
 - 👀 **Bitcoin balances from your own node.** Import an address, `xpub`, `zpub`, or public
@@ -86,6 +87,17 @@ trial, and Monero still needs a full capped stability test. Initial sync may use
 all available CPU and RAM. A host with only 2 GB total cannot give a node a full
 2 GB while also providing room for the operating system. See
 [Hardware Requirements](docs/hardware.md).
+
+| Per node | Initial sync: planning estimate | After sync: default container cap |
+|---|---|---|
+| Bitcoin | Allow 2 CPU cores and 4 GiB RAM for headroom; more cores can speed up validation. | 1 CPU core and 2 GiB RAM |
+| Monero | Allow 2 CPU cores and 4 GiB RAM for headroom; disk and Tor speed also matter. | 1 CPU core and 2 GiB RAM, experimental |
+
+These are planning budgets, not measured average usage or hard minimums. Sync
+is uncapped by default; a smaller host can work but may take longer. Each node's
+`steady_cpus` and `steady_mem_limit_mb` are editable in `config.json`. Fresh APT
+wizard installs activate those caps after healthy sync checks; source installs
+leave automatic caps off. See [changing resource caps](docs/configuration.md#resource-caps).
 
 ### 1. Install, then run the wizard
 
@@ -156,7 +168,9 @@ asks about the optional Upgrade button, which defaults to off.
 
 Fresh package wizard installs select the experimental compact resource profile:
 initial sync is uncapped, then a host timer checks for healthy, current sync
-before applying 1 CPU and 2 GiB to each node separately. Existing installs and
+before applying the configured caps, initially 1 CPU and 2 GiB to each node
+separately. The wizard writes these values to `config.json` so you can edit
+them and run `sudo bitcoin-stack apply`. Existing installs and
 source installs keep automatic limits off. This mechanism applies a budget;
 the longer stability tests still decide whether that budget is sufficient.
 

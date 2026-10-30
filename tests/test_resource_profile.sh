@@ -80,7 +80,7 @@ case "$1" in
         if [ -n "$configured" ]; then
           printf '%s\n' "$configured"
         elif [ -f "$FAKE_CAPS/$id" ]; then
-          printf '%s\n' '1000000000 2147483648 2147483648'
+          cat "$FAKE_CAPS/$id"
         else
           printf '%s\n' '0 0 0'
         fi
@@ -96,8 +96,14 @@ case "$1" in
     esac
     ;;
   update)
+    cpus=$3
+    memory=${5%m}
+    swap=${7%m}
     id=$8
-    [ "${FAKE_UPDATE_FAIL:-0}" != 1 ] && : >"$FAKE_CAPS/$id"
+    if [ "${FAKE_UPDATE_FAIL:-0}" != 1 ]; then
+      nanos=$(awk -v value="$cpus" 'BEGIN { printf "%.0f\n", value * 1000000000 }')
+      printf '%s %s %s\n' "$nanos" "$((memory * 1024 * 1024))" "$((swap * 1024 * 1024))" >"$FAKE_CAPS/$id"
+    fi
     ;;
 esac
 EOF
@@ -113,6 +119,10 @@ new_case() {
 BITCOIN_RESOURCE_PROFILE=off
 MONERO_RESOURCE_PROFILE=off
 BITCOIN_DBCACHE=128
+BITCOIN_STEADY_CPUS=1
+BITCOIN_STEADY_MEM_LIMIT_MB=2048
+MONERO_STEADY_CPUS=1
+MONERO_STEADY_MEM_LIMIT_MB=2048
 EOF
   export BITCOIN_STACK_ROOT=$case_root/root
   export BITCOIN_STACK_STATE_DIR=$case_root/state
@@ -164,6 +174,13 @@ updates=$(grep -c '^update ' "$log")
 tick_profile
 [ "$(grep -c '^update ' "$log")" = "$updates" ] || fail "an already capped Bitcoin container was updated again"
 
+new_case legacy-defaults
+perl -ni -e 'print unless /STEADY_/' "$case_root/state/.env"
+perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/' "$case_root/state/.env"
+export FAKE_BITCOIN_SYNCED=1
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 1 --memory 2048m --memory-swap 2048m btc-id$' "$log" || fail "legacy environment did not use the default compact limits"
+
 new_case recreate
 perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/' "$case_root/state/.env"
 export FAKE_BITCOIN_SYNCED=1
@@ -181,7 +198,7 @@ tick_profile; tick_profile; tick_profile
 ! grep -q '^update ' "$log" || fail "unhealthy Bitcoin was capped"
 
 new_case cache
-perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/; s/BITCOIN_DBCACHE=128/BITCOIN_DBCACHE=1024/' "$case_root/state/.env"
+perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/; s/BITCOIN_DBCACHE=128/BITCOIN_DBCACHE=1900/' "$case_root/state/.env"
 export FAKE_BITCOIN_SYNCED=1
 tick_profile; tick_profile; tick_profile
 ! grep -q '^update ' "$log" || fail "high-dbcache Bitcoin was capped"
@@ -201,6 +218,24 @@ grep -q '|blocked|' "$case_root/state/resource-profile/monero" || fail "high-mem
 export FAKE_MONERO_MEMORY=600MiB
 tick_profile
 grep -q '^update --cpus 1 --memory 2048m --memory-swap 2048m xmr-id$' "$log" || fail "Monero was not capped after memory became safe"
+
+new_case custom-limits
+perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/; s/BITCOIN_STEADY_CPUS=1/BITCOIN_STEADY_CPUS=0.5/; s/BITCOIN_STEADY_MEM_LIMIT_MB=2048/BITCOIN_STEADY_MEM_LIMIT_MB=1536/; s/MONERO_RESOURCE_PROFILE=off/MONERO_RESOURCE_PROFILE=compact/; s/MONERO_STEADY_CPUS=1/MONERO_STEADY_CPUS=1.5/; s/MONERO_STEADY_MEM_LIMIT_MB=2048/MONERO_STEADY_MEM_LIMIT_MB=3072/' "$case_root/state/.env"
+export FAKE_BITCOIN_SYNCED=1 FAKE_MONERO_SYNCED=1
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 0.5 --memory 1536m --memory-swap 1536m btc-id$' "$log" || fail "custom Bitcoin limits were not applied"
+grep -q '^update --cpus 1.5 --memory 3072m --memory-swap 3072m xmr-id$' "$log" || fail "custom Monero limits were not applied"
+perl -pi -e 's/BITCOIN_STEADY_CPUS=0.5/BITCOIN_STEADY_CPUS=0.75/; s/BITCOIN_STEADY_MEM_LIMIT_MB=1536/BITCOIN_STEADY_MEM_LIMIT_MB=1792/' "$case_root/state/.env"
+export FAKE_BITCOIN_ID=btc-edited
+tick_profile; tick_profile
+! grep -q '^update .* btc-edited$' "$log" || fail "edited Bitcoin cap was applied before sustained readiness"
+tick_profile
+grep -q '^update --cpus 0.75 --memory 1792m --memory-swap 1792m btc-edited$' "$log" || fail "edited Bitcoin cap was not applied to its recreated container"
+
+new_case invalid-limit
+perl -pi -e 's/BITCOIN_RESOURCE_PROFILE=off/BITCOIN_RESOURCE_PROFILE=compact/; s/BITCOIN_STEADY_CPUS=1/BITCOIN_STEADY_CPUS=zero/' "$case_root/state/.env"
+export FAKE_BITCOIN_SYNCED=1
+run_profile >/dev/null 2>&1 && fail "invalid rendered CPU limit was accepted"
 
 new_case rpc-failure
 perl -pi -e 's/MONERO_RESOURCE_PROFILE=off/MONERO_RESOURCE_PROFILE=compact/' "$case_root/state/.env"

@@ -47,6 +47,7 @@ echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'BITCOIN_ENAB
 echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'BITCOIN_RPC_EXPOSE: "0"' || fail "dashboard did not receive Bitcoin RPC exposure state"
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
+echo "$rendered" | grep -q 'ALERT_NEW_BLOCK_MONERO: "0"' || fail "ALERT_NEW_BLOCK_MONERO default not applied"
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
 grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"
@@ -137,6 +138,18 @@ echo "$monero_rendered" | sed -n '/^  monero:$/,/^  tor:$/p' | grep -q 'publishe
   fail "Monero publishes RPC or ZMQ directly"
 echo "$monero_rendered" | sed -n '/^  monero:$/,/^  tor:$/p' | grep -q '127.0.0.1' ||
   fail "Monero DNS is not fail-closed"
+custom_limits=$(COMPOSE_PROFILES=bitcoin,monero BITCOIN_STEADY_CPUS=0.5 BITCOIN_STEADY_MEM_LIMIT_MB=1536 MONERO_STEADY_CPUS=1.5 MONERO_STEADY_MEM_LIMIT_MB=3072 docker compose --env-file /dev/null config)
+bitcoin_limits=$(echo "$custom_limits" | sed -n '/^  bitcoin:$/,/^  dashboard:$/p')
+monero_limits=$(echo "$custom_limits" | sed -n '/^  monero:$/,/^  tor:$/p')
+echo "$bitcoin_limits" | grep -q 'io.node-starter-stack.steady-cpus: "0.5"' || fail "Bitcoin cap edits do not change its Compose definition"
+echo "$bitcoin_limits" | grep -q 'io.node-starter-stack.steady-memory-mb: "1536"' || fail "Bitcoin memory cap edits do not change its Compose definition"
+echo "$monero_limits" | grep -q 'io.node-starter-stack.steady-cpus: "1.5"' || fail "Monero cap edits do not change its Compose definition"
+echo "$monero_limits" | grep -q 'io.node-starter-stack.steady-memory-mb: "3072"' || fail "Monero memory cap edits do not change its Compose definition"
+echo "$bitcoin_limits" | grep -Eq "io.node-starter-stack.resource-profile: ['\"]off['\"]" || fail "Bitcoin profile changes do not change its Compose definition"
+echo "$monero_limits" | grep -Eq "io.node-starter-stack.resource-profile: ['\"]off['\"]" || fail "Monero profile changes do not change its Compose definition"
+compact_limits=$(COMPOSE_PROFILES=bitcoin BITCOIN_RESOURCE_PROFILE=compact docker compose --env-file /dev/null config)
+echo "$compact_limits" | sed -n '/^  bitcoin:$/,/^  dashboard:$/p' | grep -q 'io.node-starter-stack.resource-profile: compact' ||
+  fail "disabling the Bitcoin compact profile would not change its Compose definition"
 grep -q '^prune-blockchain=1$' build/monero/entrypoint.sh || fail "Monero pruning is not mandatory"
 # shellcheck disable=SC2016
 grep -q '^proxy=socks5://\$TOR_PROXY$' build/monero/entrypoint.sh || fail "Monero P2P proxy is not Tor"

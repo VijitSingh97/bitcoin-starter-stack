@@ -104,8 +104,14 @@ that makes `tor_egress` Tor's deterministic default route.
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls
   for the marker and runs the same predetermined `./stack upgrade` you would.
-  Even with a stolen dashboard password, the only possible action is
-  "upgrade to the latest release" ([Upgrade button](operations.md#upgrade-button-opt-in)).
+  That upgrade marker can only request the latest release
+  ([Upgrade button](operations.md#upgrade-button-opt-in)).
+- LAN port controls use a separate typed request in the same private volume.
+  A host helper validates the request and Compose ownership, then only disables
+  selected existing RPC/ZMQ listeners in server config and applies it offline.
+  The dashboard cannot create listeners, choose host paths, run commands, or
+  access Docker. Source installs reuse the host agent; APT installs use a
+  dedicated hardened systemd timer. Closing ports requires the dashboard password.
 - Docker host access is **not** a boundary: `docker inspect` reveals RPC
   credentials. Anyone who can run Docker commands owns the box anyway.
 

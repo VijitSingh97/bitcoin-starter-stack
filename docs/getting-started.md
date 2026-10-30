@@ -14,6 +14,9 @@
   The experimental steady budget is 1 CPU / 2 GiB per node, plus shared services
   and host overhead. Bitcoin has passed a short capped trial; sustained
   qualification for both daemons is pending. Initial sync is uncapped.
+  For sync headroom, plan around 2 CPU cores and 4 GiB RAM per node; these are
+  estimates, not minimum requirements or measured average usage. More resources
+  can shorten validation; Tor and SSD performance also affect sync time.
 
 Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
@@ -136,6 +139,12 @@ source installs leave automatic resource limits off. The profile remains
 experimental until sustained capped operation is qualified; it is not a claim
 that a whole 2 GB VPS can host multiple nodes.
 
+The wizard writes `steady_cpus: 1` and `steady_mem_limit_mb: 2048` into each
+selected node's `config.json` section. To change a budget, edit
+`/etc/bitcoin-starter-stack/config.json` and run `sudo bitcoin-stack apply`.
+Initial sync stays uncapped; the timer uses the edited values after its sync
+checks pass. See [resource caps](configuration.md#resource-caps).
+
 ## First start: what to expect
 
 1. **Tor bootstraps** (a minute or two):
@@ -152,7 +161,8 @@ that a whole 2 GB VPS can host multiple nodes.
 
 3. **Monero**, if selected, starts a pruned sync through Tor. Its node status
    uses authenticated internal RPC; LAN clients use a separate restricted
-   listener. No wallet service or miner starts.
+   listener. An internal view-only wallet service supports dashboard monitoring;
+   it has no host port and cannot spend. No miner starts.
 
 4. **The dashboard** at `http://localhost` shows two towers. Click a tower to
    open its chain's card. It shows a connecting state until RPC comes up,

@@ -212,6 +212,18 @@ func request(t *testing.T, handler http.Handler, method, path, password string) 
 	return w
 }
 
+func TestDashboardCannotBeFramed(t *testing.T) {
+	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	for _, path := range []string{"/", "/api/settings", "/api/settings/ports", "/missing"} {
+		for _, password := range []string{"", "dashboard-secret"} {
+			response := request(t, handler, http.MethodGet, path, password)
+			if response.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" || response.Header().Get("X-Frame-Options") != "DENY" {
+				t.Errorf("%s omitted frame protections for status %d", path, response.Code)
+			}
+		}
+	}
+}
+
 func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 	t.Setenv("NODE_NAME", "mini-1 <node>")
 	fixture := &rpcFixture{}

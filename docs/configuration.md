@@ -36,6 +36,8 @@ shows the overridable settings with their defaults:
         "blockfilterindex": false,
         "mem_limit_mb": 0,
         "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048,
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 8332
@@ -45,6 +47,8 @@ shows the overridable settings with their defaults:
         "node_username": "admin",
         "data_dir": "./data/monero",
         "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048,
         "rpc_expose": false,
         "rpc_bind_ip": "",
         "rpc_port": 18081,
@@ -62,7 +66,8 @@ shows the overridable settings with their defaults:
         "telegram_bot_token": "",
         "telegram_chat_id": "",
         "healthchecks_url": "",
-        "alert_new_block": false
+        "alert_new_block": false,
+        "alert_new_block_monero": false
     },
     "wallets": [
         {
@@ -88,12 +93,16 @@ shows the overridable settings with their defaults:
 | `bitcoin.rpc_expose` | `false` | `true` exposes authenticated Bitcoin RPC to a trusted private LAN through the Tor container's TCP relay. See [LAN wallet RPC](#lan-wallet-rpc-opt-in). |
 | `bitcoin.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host for the opt-in RPC listener. Required when `rpc_expose` is true. Public, wildcard, loopback, malformed, and IPv6 addresses are rejected. |
 | `bitcoin.rpc_port` | `8332` | Host port for the opt-in RPC listener (`1`–`65535`). The internal Core RPC port remains `8332`. |
-| `bitcoin.resource_profile` | `off`; `compact` for a node selected by the APT wizard | Experimental APT-only profile: initial sync is uncapped, then a host timer applies 1 CPU and 2048 MiB after three spaced, healthy, current sync checks. Existing and source installs remain off. Explicit operator limits take precedence. |
+| `bitcoin.resource_profile` | `off`; `compact` for a node selected by the APT wizard | Experimental APT-only profile: initial sync is uncapped, then a host timer applies the configured steady caps after three spaced, healthy, current sync checks. Existing and source installs remain off. Explicit operator limits take precedence. |
+| `bitcoin.steady_cpus` | `1` | Post-sync CPU ceiling when `resource_profile` is `compact`. A JSON number from `0.01` to `256` with at most two decimal places; fractional values such as `0.5` work. |
+| `bitcoin.steady_mem_limit_mb` | `2048` | Post-sync memory ceiling in MiB when `resource_profile` is `compact`. A whole JSON number from `257` to `1048576`. Memory plus swap is capped to this same value, so extra swap cannot hide an undersized budget. |
 | `monero.enabled` | `false` | Runs the pruned Monero node and adds its health card to the dashboard. |
 | `monero.node_username` | `admin` | Digest-auth username for restricted Monero RPC. |
 | `monero.node_password` | auto-generated | Separate Digest-auth password for restricted Monero RPC. LAN exposure requires at least 24 letters or numbers. |
 | `monero.data_dir` | `./data/monero` (source), `/var/lib/bitcoin-starter-stack/data/monero` (APT) | Monero blockchain data on the host. The node always uses pruned storage. |
 | `monero.resource_profile` | `off`; `compact` for a node selected by the APT wizard | The same experimental per-node limit as Bitcoin. Sustained Monero operation at 2 GiB remains unqualified. |
+| `monero.steady_cpus` | `1` | Monero's independent post-sync CPU ceiling; same format and range as Bitcoin. |
+| `monero.steady_mem_limit_mb` | `2048` | Monero's independent post-sync memory ceiling in MiB; same format and range as Bitcoin. The view-only wallet service is additional. |
 | `monero.rpc_expose` | `false` | Publishes restricted Digest-auth RPC to one trusted private-LAN address. |
 | `monero.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host. Required when Monero RPC exposure is enabled. |
 | `monero.rpc_port` | `18081` | Host port for the opt-in restricted RPC relay. |
@@ -108,6 +117,7 @@ shows the overridable settings with their defaults:
 | `notifications.telegram_chat_id` | `""` (off) | The chat that receives alerts. |
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
+| `notifications.alert_new_block_monero` | `false` | Monero's independent new-block Telegram alerts once synced (~720/day). The legacy `alert_new_block` key continues to mean Bitcoin. |
 | `wallets` | Binance public example | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. The example is clearly marked and excluded from personal totals. Set `[]` to opt out. After first start the saved dashboard list is authoritative. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
 
 `configure.sh` applies the defaults above for any omitted key, and generates
@@ -120,19 +130,74 @@ Monero wallet RPC, and encrypted-wallet-file passwords. Read them locally from
 the mode-600 `.env`; upgrades preserve existing credentials instead of forcing
 a rotation. The wallet RPC is internal-only and is not a LAN connection endpoint.
 
-The compact profile uses `bitcoin-starter-stack-resource-profile.timer`; it
-never runs inside the dashboard or mounts the Docker socket there. It may
-cleanly restart a synced node once to release sync memory before rechecking.
-If memory stays above 1792 MiB, it leaves the node uncapped and records the
-reason in the system journal. A Bitcoin cache above 512 MiB also blocks the
-handoff. Lower `bitcoin.dbcache_mb` explicitly before retrying. Recreated
-containers are qualified again, so they can briefly run without caps after an
-upgrade. `off` stops future automatic changes; removing an already-applied
-Docker limit requires recreating the node with `bitcoin-stack apply`.
+## Resource caps
 
-Notification settings currently monitor Bitcoin only. A Monero-only install
-does not send Bitcoin Telegram alerts or Bitcoin Healthchecks pings. Monero
-status, fees, prices, and view-only balances still work in its dashboard card.
+Fresh APT wizard installs write these values into each selected node's section.
+Existing installations and source installs keep `resource_profile: "off"`
+unless explicitly configured; automatic handoff is provided by the APT host
+timer. The `steady_*` values have no effect while the profile is `off`.
+
+```json
+{
+    "bitcoin": {
+        "resource_profile": "compact",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048
+    },
+    "monero": {
+        "resource_profile": "compact",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 2048
+    }
+}
+```
+
+Edit the existing `/etc/bitcoin-starter-stack/config.json` to change those
+fields; keep its other settings. Then run:
+
+```bash
+sudo bitcoin-stack apply
+```
+
+For example, `steady_cpus: 2` and `steady_mem_limit_mb: 3072` give that node a
+2-core, 3-GiB post-sync ceiling. Changing a cap recreates the affected container
+and rechecks sync before applying the new values. The chain data stays in its
+volume. Set `resource_profile` to `"off"` and apply to stop automatic capping.
+
+The helper uses `bitcoin-starter-stack-resource-profile.timer`; it never runs
+inside the dashboard or mounts the Docker socket there. Initial sync remains
+uncapped by this profile. Explicit manual Docker limits and the legacy
+`bitcoin.mem_limit_mb` cap take precedence, including during sync.
+
+After three spaced, healthy, current sync checks, the helper leaves 256 MiB of
+headroom below the configured memory ceiling. It may cleanly restart a synced
+node once to release sync memory before rechecking. If usage stays above that
+threshold (1792 MiB at the default 2048 MiB ceiling), it leaves the node
+uncapped and records why in the system journal. A Bitcoin cache that leaves
+less than 256 MiB below the configured memory ceiling also blocks handoff;
+lower `bitcoin.dbcache_mb` explicitly before retrying.
+Recreated containers are qualified again, so an upgrade can briefly return
+them to uncapped operation. The profile is a budget, not a guarantee that a
+workload fits; see [hardware estimates and test evidence](hardware.md).
+
+## Shared dashboard settings
+
+Appearance, Telegram, and Healthchecks are global. Per-node settings live in
+collapsible sections; block alerts are off by default for each node.
+
+Each node's section also shows its configured LAN listeners and a **Close**
+button for an exposed RPC or ZMQ port. Closing requires the dashboard password
+and a running host helper. The request is saved privately, and the panel shows
+it as pending until the host disables the listener in `config.json` and applies
+the change. The relay and dashboard can briefly reconnect during that apply;
+chain data is preserved. These controls only close existing listeners. To open
+one, edit the server's LAN bind/port configuration and apply it explicitly.
+
+For APT installs, `bitcoin-stack init`, `up`, and `apply` enable
+`bitcoin-starter-stack-port-control.timer`. Source installs reuse the host agent
+whenever a dashboard password is configured, even when dashboard upgrades are
+off. No host control runs inside the dashboard, and it has no Docker socket.
+Port closures persist across reboot because the host configuration is updated.
 
 The gear panel also includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it

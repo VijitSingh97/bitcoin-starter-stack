@@ -3,7 +3,12 @@
 .gitattributes export-ignore
 .gitleaks.toml export-ignore
 CONTRIBUTING.md export-ignore
-scripts export-ignore
+scripts/bitcoin-stack export-ignore
+scripts/build-apt.sh export-ignore
+scripts/build-deb.sh export-ignore
+scripts/node-resource-profile export-ignore
+scripts/release-notes.sh export-ignore
+scripts/release.sh export-ignore
 packaging export-ignore
 tests export-ignore
 experiments export-ignore

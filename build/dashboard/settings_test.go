@@ -88,6 +88,9 @@ func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	if view["can_configure"] != true {
 		t.Fatalf("authenticated LAN settings view is not configurable: %#v", view)
 	}
+	if view["bitcoin_enabled"] != true || view["monero_enabled"] != false || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false {
+		t.Fatalf("node-specific settings view: %#v", view)
+	}
 }
 
 func TestSettingsAppearanceScopeOmitsNotificationCredentials(t *testing.T) {
@@ -191,6 +194,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 		HealthchecksEnabled: boolPointer(true),
 		HealthchecksURL:     stringPointer("https://hc-ping.com/dashboard-id/"),
 		AlertNewBlock:       boolPointer(true),
+		AlertNewBlockMonero: boolPointer(true),
 		TowerLabels:         boolPointer(true),
 	}
 	if err := m.updateSettings(update); err != nil {
@@ -207,7 +211,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 
 	restarted := NewMonitor("dev", t.TempDir(), stateDir)
 	got := restarted.notificationSettings()
-	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.TowerLabels {
+	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.AlertNewBlockMonero || !got.TowerLabels {
 		t.Fatalf("restarted settings = %#v", got)
 	}
 	view, err := restarted.settingsView(true)
@@ -220,8 +224,8 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !restarted.notificationSettings().TowerLabels {
-		t.Fatal("legacy settings update changed tower-label preference")
+	if !restarted.notificationSettings().TowerLabels || !restarted.notificationSettings().AlertNewBlockMonero {
+		t.Fatal("legacy settings update changed newer preferences")
 	}
 
 	if err := restarted.resetSettings(); err != nil {
@@ -244,7 +248,7 @@ func TestSettingsLoadOldOverrideDefaultsTowerLabelsOff(t *testing.T) {
 	}
 	m := NewMonitor("dev", t.TempDir(), stateDir)
 	view, err := m.settingsView(true)
-	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["tower_labels"] != false {
+	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false || view["tower_labels"] != false {
 		t.Fatalf("old override view = %#v, %v", view, err)
 	}
 }
@@ -267,7 +271,7 @@ func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
 		t.Fatalf("valid POST = %d: %s", response.Code, response.Body.String())
 	}
 	var savedView map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" || savedView["telegram_bot_token"] != "123:original-token" || savedView["healthchecks_url"] != "https://hc-ping.com/original-id" {
+	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" || savedView["telegram_bot_token"] != "123:original-token" || savedView["healthchecks_url"] != "https://hc-ping.com/original-id" || savedView["port_control"] == nil {
 		t.Fatalf("POST response view = %#v, %v", savedView, err)
 	}
 	settings := a.monitor.notificationSettings()

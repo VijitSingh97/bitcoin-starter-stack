@@ -25,8 +25,11 @@ install -d "$package/DEBIAN" "$package/usr/bin" "$root" "$docs/docs" "$share"
 install -m 755 scripts/bitcoin-stack "$package/usr/bin/bitcoin-stack"
 install -m 755 stack configure.sh "$root/"
 install -m 755 scripts/node-resource-profile "$root/node-resource-profile"
+install -m 755 scripts/node-port-control "$root/node-port-control"
 install -d "$package/usr/lib/systemd/system"
-install -m 644 packaging/systemd/bitcoin-starter-stack-resource-profile.service packaging/systemd/bitcoin-starter-stack-resource-profile.timer "$package/usr/lib/systemd/system/"
+install -m 644 packaging/systemd/bitcoin-starter-stack-resource-profile.service packaging/systemd/bitcoin-starter-stack-resource-profile.timer \
+  packaging/systemd/bitcoin-starter-stack-port-control.service packaging/systemd/bitcoin-starter-stack-port-control.timer \
+  "$package/usr/lib/systemd/system/"
 install -m 644 docker-compose.yml docker-compose.rpc.yml docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml VERSION .dockerignore "$root/"
 printf '%s\n' "$version" >"$root/VERSION"
 cp -R build "$root/"

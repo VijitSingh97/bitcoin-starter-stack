@@ -15,6 +15,7 @@ tests/test_cli.sh
 tests/test_release.sh
 tests/test_package.sh
 tests/test_resource_profile.sh
+tests/test_port_control.sh
 tests/test_apt.sh
 tests/test_compose.sh
 tests/test_e2e.sh

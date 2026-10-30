@@ -45,6 +45,10 @@ services:
     image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
     container_name: bitcoin
     profiles: ["bitcoin"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${BITCOIN_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${BITCOIN_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${BITCOIN_STEADY_MEM_LIMIT_MB:-2048}"
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -112,6 +116,10 @@ services:
       context: ${STACK_ROOT:-.}/build/monero
     container_name: monero
     profiles: ["monero"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${MONERO_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${MONERO_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${MONERO_STEADY_MEM_LIMIT_MB:-2048}"
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -227,6 +235,7 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       HEALTHCHECKS_URL: ${HEALTHCHECKS_URL:-}
       ALERT_NEW_BLOCK: ${ALERT_NEW_BLOCK:-0}
+      ALERT_NEW_BLOCK_MONERO: ${ALERT_NEW_BLOCK_MONERO:-0}
       NODE_NAME: ${NODE_NAME:-bitcoin-node}
       STACK_VERSION: ${STACK_VERSION:-dev}
       WATCH_WALLETS_B64: ${WATCH_WALLETS_B64:-}

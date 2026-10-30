@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"math"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -40,6 +41,16 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	if a.cfg.moneroEnabled {
 		start(func() { a.runMoneroFees(ctx) })
 	}
+	if !a.cfg.bitcoinDisabled || a.cfg.moneroEnabled {
+		var bitcoinHealth, moneroHealth func() map[string]any
+		if !a.cfg.bitcoinDisabled {
+			bitcoinHealth = func() map[string]any { return a.healthBlockchain(ctx) }
+		}
+		if a.cfg.moneroEnabled {
+			moneroHealth = func() map[string]any { return a.healthMonero(ctx) }
+		}
+		start(func() { a.monitor.RunNodes(ctx, bitcoinHealth, moneroHealth) })
+	}
 	if a.cfg.bitcoinDisabled {
 		done := make(chan struct{})
 		go func() {
@@ -53,11 +64,7 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	for _, entry := range entries {
 		a.watch.SetPending(entry.Key, true)
 	}
-	chain := func() map[string]any {
-		return a.healthBlockchain(ctx)
-	}
-	network := func() map[string]any { result, _ := a.nodeRPC("getnetworkinfo", nil).(map[string]any); return result }
-	start(func() { a.monitor.Run(ctx, chain, network) })
+	chain := func() map[string]any { return a.healthBlockchain(ctx) }
 	start(func() {
 		a.every(ctx, time.Minute, func(ctx context.Context) {
 			var info blockchainInfo
@@ -111,6 +118,25 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		close(done)
 	}()
 	return done
+}
+
+func (a *app) healthMonero(parent context.Context) map[string]any {
+	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
+	defer cancel()
+	rpc := moneroRPC{
+		url: a.cfg.moneroRPCURL, user: a.cfg.moneroRPCUser, password: a.cfg.moneroRPCPassword,
+		client: &http.Client{Timeout: healthRPCTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}},
+	}
+	var info moneroInfo
+	if rpc.call(ctx, "get_info", &info) != nil {
+		return nil
+	}
+	return map[string]any{
+		"initialblockdownload": !info.Synchronized || info.BusySyncing,
+		"blocks":               int64(info.Height),
+	}
 }
 
 func (a *app) healthBlockchain(parent context.Context) map[string]any {

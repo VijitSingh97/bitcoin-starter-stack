@@ -13,6 +13,10 @@ stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
 umask 077
 mkdir -p "$state_dir" "$config_dir"
+if [ "${BITCOIN_STACK_CONFIG_LOCK_HELD:-0}" != 1 ]; then
+  exec 8>"$state_dir/.config.lock"
+  flock 8
+fi
 cd "$state_dir"
 
 for tool in jq openssl; do
@@ -113,6 +117,18 @@ monero_resource_profile=$(get '.monero.resource_profile')
 [ -n "$monero_resource_profile" ] || monero_resource_profile=$(sed -n 's/^MONERO_RESOURCE_PROFILE=//p' "$env_file" 2>/dev/null || true)
 [ -n "$bitcoin_resource_profile" ] || bitcoin_resource_profile=off
 [ -n "$monero_resource_profile" ] || monero_resource_profile=off
+bitcoin_steady_cpus=$(jq -r '.bitcoin.steady_cpus // empty' <<<"$config")
+bitcoin_steady_mem_limit_mb=$(jq -r '.bitcoin.steady_mem_limit_mb // empty' <<<"$config")
+monero_steady_cpus=$(jq -r '.monero.steady_cpus // empty' <<<"$config")
+monero_steady_mem_limit_mb=$(jq -r '.monero.steady_mem_limit_mb // empty' <<<"$config")
+[ -n "$bitcoin_steady_cpus" ] || bitcoin_steady_cpus=$(sed -n 's/^BITCOIN_STEADY_CPUS=//p' "$env_file" 2>/dev/null || true)
+[ -n "$bitcoin_steady_mem_limit_mb" ] || bitcoin_steady_mem_limit_mb=$(sed -n 's/^BITCOIN_STEADY_MEM_LIMIT_MB=//p' "$env_file" 2>/dev/null || true)
+[ -n "$monero_steady_cpus" ] || monero_steady_cpus=$(sed -n 's/^MONERO_STEADY_CPUS=//p' "$env_file" 2>/dev/null || true)
+[ -n "$monero_steady_mem_limit_mb" ] || monero_steady_mem_limit_mb=$(sed -n 's/^MONERO_STEADY_MEM_LIMIT_MB=//p' "$env_file" 2>/dev/null || true)
+[ -n "$bitcoin_steady_cpus" ] || bitcoin_steady_cpus=1
+[ -n "$bitcoin_steady_mem_limit_mb" ] || bitcoin_steady_mem_limit_mb=2048
+[ -n "$monero_steady_cpus" ] || monero_steady_cpus=1
+[ -n "$monero_steady_mem_limit_mb" ] || monero_steady_mem_limit_mb=2048
 dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$config")
 [ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' "$env_file" 2>/dev/null || true)
 [ -n "$dashboard_onion" ] || dashboard_onion=0
@@ -122,6 +138,7 @@ telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
 alert_new_block=$(flag '.notifications.alert_new_block')
+alert_new_block_monero=$(flag '.notifications.alert_new_block_monero')
 if [ "$package_managed" = "1" ] && [ "$dashboard_control" = "1" ]; then
   echo "dashboard.control is unavailable for APT installations; use $stack_command backup, apt upgrade, then $stack_command apply." >&2
   exit 1
@@ -228,6 +245,35 @@ validate_monero_port monero.rpc_port "$monero_rpc_port"
 validate_monero_port monero.zmq_port "$monero_zmq_port"
 case "$bitcoin_resource_profile" in compact | off) ;; *) echo "bitcoin.resource_profile must be compact or off."; exit 1 ;; esac
 case "$monero_resource_profile" in compact | off) ;; *) echo "monero.resource_profile must be compact or off."; exit 1 ;; esac
+validate_steady_limits() {
+  local node=$1 cpus=$2 memory=$3
+  if ! awk -v value="$cpus" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9][0-9]?)?$/ && value >= 0.01 && value <= 256) }'; then
+    echo "$node.steady_cpus must be a number from 0.01 to 256 with at most two decimal places."
+    exit 1
+  fi
+  case "$memory" in '' | *[!0-9]*)
+    echo "$node.steady_mem_limit_mb must be a whole number from 257 to 1048576."
+    exit 1
+    ;;
+  esac
+  if [ "$memory" -le 256 ] || [ "$memory" -gt 1048576 ]; then
+    echo "$node.steady_mem_limit_mb must be a whole number from 257 to 1048576."
+    exit 1
+  fi
+}
+for node in bitcoin monero; do
+  if ! jq -e --arg node "$node" '
+    (.[$node] // {}) as $settings |
+    (($settings | has("steady_cpus") | not) or ($settings.steady_cpus | type == "number")) and
+    (($settings | has("steady_mem_limit_mb") | not) or
+      ($settings.steady_mem_limit_mb | type == "number" and floor == .))
+  ' >/dev/null <<<"$config"; then
+    echo "$node steady resource limits must be JSON numbers."
+    exit 1
+  fi
+done
+validate_steady_limits bitcoin "$bitcoin_steady_cpus" "$bitcoin_steady_mem_limit_mb"
+validate_steady_limits monero "$monero_steady_cpus" "$monero_steady_mem_limit_mb"
 if [ "$monero_rpc_expose" = "1" ]; then
   [ -n "$monero_rpc_bind_ip" ] || { echo "monero.rpc_bind_ip is required when monero.rpc_expose is true."; exit 1; }
   check_bind_ip monero.rpc_bind_ip "$monero_rpc_bind_ip" 0
@@ -396,6 +442,8 @@ BITCOIN_INBOUND_ONION=$inbound_onion
 BITCOIN_BLOCKFILTERINDEX=$blockfilterindex
 BITCOIN_MEM_LIMIT=$bitcoin_mem_limit
 BITCOIN_RESOURCE_PROFILE=$bitcoin_resource_profile
+BITCOIN_STEADY_CPUS=$bitcoin_steady_cpus
+BITCOIN_STEADY_MEM_LIMIT_MB=$bitcoin_steady_mem_limit_mb
 MONERO_ENABLED=$monero_enabled
 MONERO_RPC_URL=http://172.29.0.30:18085
 MONERO_RPC_USER=$monero_rpc_user
@@ -412,6 +460,8 @@ MONERO_ZMQ_EXPOSE=$monero_zmq_expose
 MONERO_ZMQ_BIND_IP=$monero_zmq_bind_ip
 MONERO_ZMQ_PORT=$monero_zmq_port
 MONERO_RESOURCE_PROFILE=$monero_resource_profile
+MONERO_STEADY_CPUS=$monero_steady_cpus
+MONERO_STEADY_MEM_LIMIT_MB=$monero_steady_mem_limit_mb
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 DASHBOARD_CONTROL=$dashboard_control
@@ -420,6 +470,7 @@ TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
 ALERT_NEW_BLOCK=$alert_new_block
+ALERT_NEW_BLOCK_MONERO=$alert_new_block_monero
 NODE_NAME=$(hostname)
 STACK_VERSION=$stack_version
 STACK_ROOT=$stack_root

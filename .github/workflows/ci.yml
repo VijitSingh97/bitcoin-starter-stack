@@ -83,10 +83,11 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build and test the package
         run: |
-          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/node-resource-profile tests/test_package.sh tests/test_apt.sh tests/test_resource_profile.sh
+          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/node-resource-profile scripts/node-port-control tests/test_package.sh tests/test_apt.sh tests/test_resource_profile.sh tests/test_port_control.sh
           tests/test_package.sh
           tests/test_apt.sh
           tests/test_resource_profile.sh
+          tests/test_port_control.sh
       - name: Verify inert install, upgrade, and removal
         run: |
           printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
