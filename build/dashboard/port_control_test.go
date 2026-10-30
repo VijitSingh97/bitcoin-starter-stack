@@ -38,11 +38,13 @@ func TestPortControlViewRequiresPasswordAndFreshCapability(t *testing.T) {
 	a.cfg.moneroEnabled = true
 	a.cfg.moneroRPCEndpoint = "192.168.1.50:18081"
 	a.cfg.moneroZMQEndpoint = ""
+	t.Setenv("MONERO_ZMQ_BIND_IP", "192.168.1.60")
+	t.Setenv("MONERO_ZMQ_PORT", "28083")
 	handler := a.routes()
 
 	var view portControlView
 	response := portControlHTTP(handler, http.MethodGet, "dashboard-secret", "", false)
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &view) != nil || view.Available || len(view.Ports) != 3 || !view.Ports[0].Enabled || view.Ports[2].Enabled {
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &view) != nil || view.Available || len(view.Ports) != 3 || !view.Ports[0].Enabled || view.Ports[2].Enabled || view.Ports[2].BindIP != "192.168.1.60" || view.Ports[2].HostPort != 28083 {
 		t.Fatalf("unavailable view = %d %#v", response.Code, view)
 	}
 	enablePortControl(t, a)
@@ -69,13 +71,13 @@ func TestPortControlViewRequiresPasswordAndFreshCapability(t *testing.T) {
 	if unsafeResponse.Code != http.StatusForbidden {
 		t.Fatalf("passwordless public-host view = %d: %s", unsafeResponse.Code, unsafeResponse.Body.String())
 	}
-	response = portControlHTTP(passwordless.routes(), http.MethodPost, "", `{"ports":["bitcoin_rpc"]}`, true)
+	response = portControlHTTP(passwordless.routes(), http.MethodPost, "", `{"changes":[{"port":"bitcoin_rpc","enabled":false}]}`, true)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("passwordless close = %d: %s", response.Code, response.Body.String())
 	}
 }
 
-func TestPortControlQueuesStrictCloseOnlyRequestAndReportsStatus(t *testing.T) {
+func TestPortControlQueuesStrictOpenAndCloseRequestAndReportsStatus(t *testing.T) {
 	a, _ := testApp(t, &rpcFixture{}, "dashboard-secret")
 	a.cfg.bitcoinRPCEndpoint = "192.168.1.50:8332"
 	a.cfg.moneroEnabled = true
@@ -84,15 +86,25 @@ func TestPortControlQueuesStrictCloseOnlyRequestAndReportsStatus(t *testing.T) {
 	enablePortControl(t, a)
 	handler := a.routes()
 
-	if got := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"ports":["bitcoin_rpc"]}`, false); got.Code != http.StatusForbidden {
+	if got := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false}]}`, false); got.Code != http.StatusForbidden {
 		t.Fatalf("missing CSRF = %d", got.Code)
 	}
 	for _, body := range []string{
-		`{"ports":[]}`,
-		`{"ports":["unknown"]}`,
-		`{"ports":["monero_rpc"]}`,
-		`{"ports":["bitcoin_rpc","bitcoin_rpc"]}`,
-		`{"ports":["bitcoin_rpc"],"open":true}`,
+		`{"changes":[]}`,
+		`{"changes":[{"port":"unknown","enabled":true,"bind_ip":"192.168.1.50","host_port":18081}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":false}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":false,"bind_ip":"192.168.1.50"}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"127.0.0.1","host_port":18081}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"8.8.8.8","host_port":18081}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"fc00::1","host_port":18081}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.50","host_port":0}]}`,
+		`{"changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.50","host_port":8332}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":true,"bind_ip":"192.168.1.50","host_port":8332}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"bitcoin_rpc","enabled":false}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":false,"bind_ip":null}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":false,"host_port":null}]}`,
+		`{"changes":[{"port":"bitcoin_rpc","enabled":false}],"open":true}`,
 	} {
 		got := portControlHTTP(handler, http.MethodPost, "dashboard-secret", body, true)
 		if got.Code != http.StatusBadRequest && got.Code != http.StatusConflict {
@@ -100,7 +112,7 @@ func TestPortControlQueuesStrictCloseOnlyRequestAndReportsStatus(t *testing.T) {
 		}
 	}
 
-	response := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"ports":["bitcoin_rpc","monero_zmq"]}`, true)
+	response := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.50","host_port":18081}]}`, true)
 	if response.Code != http.StatusAccepted || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("valid close = %d: %s", response.Code, response.Body.String())
 	}
@@ -115,10 +127,10 @@ func TestPortControlQueuesStrictCloseOnlyRequestAndReportsStatus(t *testing.T) {
 	}
 	var request portControlRequest
 	b, _ := os.ReadFile(requestPath)
-	if json.Unmarshal(b, &request) != nil || request.ID != accepted.Status.ID || strings.Join(request.Ports, ",") != "bitcoin_rpc,monero_zmq" || time.Since(time.Unix(request.RequestedAt, 0)) > time.Minute {
+	if json.Unmarshal(b, &request) != nil || request.ID != accepted.Status.ID || len(request.Changes) != 2 || request.Changes[0] != (portControlChange{Port: "bitcoin_rpc", Enabled: false}) || request.Changes[1] != (portControlChange{Port: "monero_rpc", Enabled: true, BindIP: "192.168.1.50", HostPort: 18081}) || time.Since(time.Unix(request.RequestedAt, 0)) > time.Minute {
 		t.Fatalf("queued request = %#v", request)
 	}
-	if got := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"ports":["bitcoin_rpc"]}`, true); got.Code != http.StatusConflict {
+	if got := portControlHTTP(handler, http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false}]}`, true); got.Code != http.StatusConflict {
 		t.Fatalf("second request = %d", got.Code)
 	}
 
@@ -133,13 +145,13 @@ func TestPortControlQueuesStrictCloseOnlyRequestAndReportsStatus(t *testing.T) {
 	if err := os.Remove(a.portControlPath("processing")); err != nil {
 		t.Fatal(err)
 	}
-	status, _ := json.Marshal(portControlStatus{ID: request.ID, State: "applied", Message: "Selected port closed."})
+	status, _ := json.Marshal(portControlStatus{ID: request.ID, State: "applied", Message: "LAN port closed.", AffectedServices: []string{"tor", "dashboard"}})
 	if err := os.WriteFile(a.portControlPath("status"), status, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	response = portControlHTTP(handler, http.MethodGet, "dashboard-secret", "", false)
 	var applied portControlView
-	if json.Unmarshal(response.Body.Bytes(), &applied) != nil || applied.Status == nil || applied.Status.State != "applied" || applied.Status.Message != "LAN port closed." {
+	if json.Unmarshal(response.Body.Bytes(), &applied) != nil || applied.Status == nil || applied.Status.State != "applied" || applied.Status.Message != "LAN port changes applied." || strings.Join(applied.Status.AffectedServices, ",") != "tor,dashboard" {
 		t.Fatalf("applied view = %#v", applied)
 	}
 }
@@ -159,7 +171,7 @@ func TestPortControlRejectsStaleCapabilityAndMalformedStatus(t *testing.T) {
 	if err := os.Chtimes(a.portControlPath("capability"), stale, stale); err != nil {
 		t.Fatal(err)
 	}
-	response := portControlHTTP(a.routes(), http.MethodPost, "dashboard-secret", `{"ports":["bitcoin_rpc"]}`, true)
+	response := portControlHTTP(a.routes(), http.MethodPost, "dashboard-secret", `{"changes":[{"port":"bitcoin_rpc","enabled":false}]}`, true)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("stale capability POST = %d", response.Code)
 	}

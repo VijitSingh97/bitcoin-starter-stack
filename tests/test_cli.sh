@@ -62,7 +62,9 @@ bitcoin_password=$(jq -r '.bitcoin.node_password' config.json)
 monero_password=$(jq -r '.monero.node_password' config.json)
 printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Bitcoin RPC password was not generated"
 printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Monero RPC password was not generated"
-[ "$bitcoin_password" != "$monero_password" ] && [ "$bitcoin_password" != hunter2hunter2hunter2hunter2 ] || fail "init: node passwords are not separate"
+if [ "$bitcoin_password" = "$monero_password" ] || [ "$bitcoin_password" = hunter2hunter2hunter2hunter2 ]; then
+  fail "init: node passwords are not separate"
+fi
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
 [ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: data directory"
 [ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: dashboard bind address"
@@ -236,6 +238,10 @@ printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: sta
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 [ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
+: >"$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply-port-settings >/dev/null
+grep -q 'docker compose up -d --pull never --no-build --no-deps tor dashboard' "$FAKE_LOG" ||
+  fail "port settings apply was not limited to Tor and dashboard"
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up >/dev/null
 awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||

@@ -1,5 +1,5 @@
 [Unit]
-Description=Apply Node Starter Stack LAN port close requests
+Description=Apply Node Starter Stack LAN port settings
 After=docker.service
 Requires=docker.service
 ConditionPathExists=/var/lib/bitcoin-starter-stack/.env

@@ -185,19 +185,26 @@ workload fits; see [hardware estimates and test evidence](hardware.md).
 Appearance, Telegram, and Healthchecks are global. Per-node settings live in
 collapsible sections; block alerts are off by default for each node.
 
-Each node's section also shows its configured LAN listeners and a **Close**
-button for an exposed RPC or ZMQ port. Closing requires the dashboard password
-and a running host helper. The request is saved privately, and the panel shows
-it as pending until the host disables the listener in `config.json` and applies
-the change. The relay and dashboard can briefly reconnect during that apply;
-chain data is preserved. These controls only close existing listeners. To open
-one, edit the server's LAN bind/port configuration and apply it explicitly.
+Each node's section also lets you enable or disable its LAN RPC listener and,
+for Monero, its ZMQ listener. Set the host's private IPv4 address and port when
+enabling a listener. Public, wildcard, loopback, and IPv6 addresses are rejected;
+RPC exposure also requires a strong saved node password. ZMQ has no password,
+so only enable it on a trusted LAN.
+
+Changes stay in the form until you save. Appearance and notification changes
+use **Save**. Port changes use **Save & restart**, with the affected services
+listed above the button. LAN listeners live in the Tor relay, so changing them
+restarts the relay and dashboard rather than the Bitcoin or Monero daemon.
+The dashboard can briefly reconnect; chain data and node sync are preserved.
+Port changes require the dashboard password and a running host helper. A
+private typed request stays pending until the host validates it, updates
+`config.json`, and applies it; an error is shown if that cannot complete.
 
 For APT installs, `bitcoin-stack init`, `up`, and `apply` enable
 `bitcoin-starter-stack-port-control.timer`. Source installs reuse the host agent
 whenever a dashboard password is configured, even when dashboard upgrades are
 off. No host control runs inside the dashboard, and it has no Docker socket.
-Port closures persist across reboot because the host configuration is updated.
+Port settings persist across reboot because the host configuration is updated.
 
 The gear panel also includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it

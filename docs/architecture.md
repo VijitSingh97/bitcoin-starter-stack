@@ -107,11 +107,14 @@ that makes `tor_egress` Tor's deterministic default route.
   That upgrade marker can only request the latest release
   ([Upgrade button](operations.md#upgrade-button-opt-in)).
 - LAN port controls use a separate typed request in the same private volume.
-  A host helper validates the request and Compose ownership, then only disables
-  selected existing RPC/ZMQ listeners in server config and applies it offline.
-  The dashboard cannot create listeners, choose host paths, run commands, or
-  access Docker. Source installs reuse the host agent; APT installs use a
-  dedicated hardened systemd timer. Closing ports requires the dashboard password.
+  A host helper validates the request, private LAN bind, ports, saved RPC
+  credentials, and Compose ownership, then updates only the selected RPC/ZMQ
+  listener fields in server config and applies it offline. The dashboard cannot
+  publish a public listener, choose host paths, run commands, or access Docker.
+  Source installs reuse the host agent; APT installs use a dedicated hardened
+  systemd timer. Port changes require the dashboard password.
+  A compromised dashboard process can exercise these allowed LAN-listener
+  controls; the helper limits its actions rather than independently authenticating the operator.
 - Docker host access is **not** a boundary: `docker inspect` reveals RPC
   credentials. Anyone who can run Docker commands owns the box anyway.
 

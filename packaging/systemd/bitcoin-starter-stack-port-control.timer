@@ -1,5 +1,5 @@
 [Unit]
-Description=Check Node Starter Stack LAN port close requests
+Description=Check Node Starter Stack LAN port settings
 
 [Timer]
 OnBootSec=1min

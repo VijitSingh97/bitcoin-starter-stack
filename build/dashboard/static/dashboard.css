@@ -208,8 +208,10 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
 .settings-dialog .settings-note { color: var(--muted); font-size: 0.8rem; }
 .settings-dialog details { margin: 10px 0; }
 .settings-dialog summary { color: var(--text); cursor: pointer; }
-.settings-port { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 10px 24px; font-size: 0.8rem; color: var(--muted); }
-.settings-port button { flex: 0 0 auto; padding: 5px 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--tag-bg); color: var(--text); }
+.settings-port { margin: 10px 0 14px 24px; color: var(--muted); }
+.settings-port-fields { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; }
+.settings-port-fields label { margin: 4px 0; font-size: 0.75rem; }
+.settings-port-fields:has(input:disabled) { opacity: 0.55; }
 .settings-actions { display: flex; gap: 10px; }
 .settings-actions button { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--border); }
 #settings-save { background: var(--accent); color: var(--bg); }

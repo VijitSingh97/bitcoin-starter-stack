@@ -4,7 +4,7 @@
 
 The gear at the bottom right opens shared Appearance, Telegram, and Healthchecks
 settings plus a collapsible section for each configured node. Changes apply
-immediately without restarting a node. A dashboard
+immediately unless LAN port settings change. A dashboard
 password protects the gear when configured; without one, it follows the same
 access policy as the rest of the dashboard. The gear works from localhost, a
 configured private LAN address, or the Tor onion dashboard (enable
@@ -26,9 +26,12 @@ configuration is unchanged.
 
 Each configured node has its own collapsible section. It shows whether its LAN
 RPC or ZMQ port is exposed. With a dashboard password and the installed host
-helper, **Close** queues a validated close-only request; the dashboard cannot
-open a port. Enable or re-enable LAN access in `config.json`, then run
-`./stack apply`.
+helper, the same bottom Save button can open or close those ports on a private
+IPv4 LAN address. Port edits stay local in the form until Save. The button reads
+**Save & restart** when a port change will recreate the Tor relay and dashboard;
+the blockchain node processes keep running. The helper validates the address,
+port, enabled node, saved credentials, and port collisions before updating
+`config.json` and applying the change.
 
 Three opt-in ways to keep an eye on the node set when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access

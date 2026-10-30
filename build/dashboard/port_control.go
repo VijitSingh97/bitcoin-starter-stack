@@ -6,15 +6,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
 const (
 	portControlCapabilityAge = 90 * time.Second
-	maxPortControlBody       = 1024
+	maxPortControlBody       = 4096
 )
 
 var errPortControlBusy = errors.New("port control request already pending")
@@ -22,14 +26,16 @@ var errPortControlBusy = errors.New("port control request already pending")
 type portControlPort struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
-	Endpoint string `json:"endpoint,omitempty"`
 	Enabled  bool   `json:"enabled"`
+	BindIP   string `json:"bind_ip"`
+	HostPort int    `json:"host_port"`
 }
 
 type portControlStatus struct {
-	ID      string `json:"id,omitempty"`
-	State   string `json:"state"`
-	Message string `json:"message,omitempty"`
+	ID               string   `json:"id,omitempty"`
+	State            string   `json:"state"`
+	Message          string   `json:"message,omitempty"`
+	AffectedServices []string `json:"affected_services,omitempty"`
 }
 
 type portControlView struct {
@@ -38,32 +44,92 @@ type portControlView struct {
 	Status    *portControlStatus `json:"status,omitempty"`
 }
 
+type portControlChangeInput struct {
+	Port            string  `json:"port"`
+	Enabled         *bool   `json:"enabled"`
+	BindIP          *string `json:"bind_ip,omitempty"`
+	HostPort        *int    `json:"host_port,omitempty"`
+	bindIPPresent   bool
+	hostPortPresent bool
+}
+
 type portControlInput struct {
-	Ports []string `json:"ports"`
+	Changes []portControlChangeInput `json:"changes"`
+}
+
+type portControlChange struct {
+	Port     string `json:"port"`
+	Enabled  bool   `json:"enabled"`
+	BindIP   string `json:"bind_ip,omitempty"`
+	HostPort int    `json:"host_port,omitempty"`
 }
 
 type portControlRequest struct {
-	ID          string   `json:"id"`
-	Ports       []string `json:"ports"`
-	RequestedAt int64    `json:"requested_at"`
+	ID          string              `json:"id"`
+	Changes     []portControlChange `json:"changes"`
+	RequestedAt int64               `json:"requested_at"`
+}
+
+func (input *portControlChangeInput) UnmarshalJSON(data []byte) error {
+	type wireInput struct {
+		Port     string  `json:"port"`
+		Enabled  *bool   `json:"enabled"`
+		BindIP   *string `json:"bind_ip"`
+		HostPort *int    `json:"host_port"`
+	}
+	var wire wireInput
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	input.Port, input.Enabled, input.BindIP, input.HostPort = wire.Port, wire.Enabled, wire.BindIP, wire.HostPort
+	_, input.bindIPPresent = fields["bind_ip"]
+	_, input.hostPortPresent = fields["host_port"]
+	return nil
 }
 
 func (a *app) portControlPath(name string) string {
 	return filepath.Join(a.cfg.stateDir, "port-control."+name)
 }
 
+func configuredPort(id, label, endpoint, bindEnv, portEnv, defaultPort string) portControlPort {
+	bindIP := strings.TrimSpace(os.Getenv(bindEnv))
+	hostPort, _ := strconv.Atoi(strings.TrimSpace(os.Getenv(portEnv)))
+	if hostPort == 0 {
+		hostPort, _ = strconv.Atoi(defaultPort)
+	}
+	if endpoint != "" {
+		if host, port, err := net.SplitHostPort(endpoint); err == nil {
+			bindIP = host
+			if parsed, err := strconv.Atoi(port); err == nil {
+				hostPort = parsed
+			}
+		}
+	}
+	return portControlPort{ID: id, Label: label, Enabled: endpoint != "", BindIP: bindIP, HostPort: hostPort}
+}
+
 func (a *app) portControlPorts() []portControlPort {
 	ports := make([]portControlPort, 0, 3)
 	if !a.cfg.bitcoinDisabled {
-		ports = append(ports, portControlPort{ID: "bitcoin_rpc", Label: "Bitcoin RPC", Endpoint: a.cfg.bitcoinRPCEndpoint, Enabled: a.cfg.bitcoinRPCEndpoint != ""})
+		ports = append(ports, configuredPort("bitcoin_rpc", "Bitcoin RPC", a.cfg.bitcoinRPCEndpoint, "BITCOIN_RPC_BIND_IP", "BITCOIN_RPC_PORT", "8332"))
 	}
 	if a.cfg.moneroEnabled {
 		ports = append(ports,
-			portControlPort{ID: "monero_rpc", Label: "Monero RPC", Endpoint: a.cfg.moneroRPCEndpoint, Enabled: a.cfg.moneroRPCEndpoint != ""},
-			portControlPort{ID: "monero_zmq", Label: "Monero ZMQ", Endpoint: a.cfg.moneroZMQEndpoint, Enabled: a.cfg.moneroZMQEndpoint != ""},
+			configuredPort("monero_rpc", "Monero RPC", a.cfg.moneroRPCEndpoint, "MONERO_RPC_BIND_IP", "MONERO_RPC_PORT", "18081"),
+			configuredPort("monero_zmq", "Monero ZMQ", a.cfg.moneroZMQEndpoint, "MONERO_ZMQ_BIND_IP", "MONERO_ZMQ_PORT", "18083"),
 		)
 	}
 	return ports
+}
+
+func affectedPortServices() []string {
+	return []string{"tor", "dashboard"}
 }
 
 func (a *app) portControlAvailable() bool {
@@ -85,10 +151,10 @@ func (a *app) pendingPortControl() (*portControlStatus, bool) {
 		if err == nil {
 			var request portControlRequest
 			_ = json.Unmarshal(b, &request)
-			return &portControlStatus{ID: request.ID, State: "pending", Message: "Closing selected port…"}, true
+			return &portControlStatus{ID: request.ID, State: "pending", Message: "Applying LAN port changes…", AffectedServices: affectedPortServices()}, true
 		}
 		if !os.IsNotExist(err) {
-			return &portControlStatus{State: "pending", Message: "Port change is being checked…"}, true
+			return &portControlStatus{State: "pending", Message: "Port changes are being checked…", AffectedServices: affectedPortServices()}, true
 		}
 	}
 	return nil, false
@@ -110,12 +176,13 @@ func (a *app) readPortControlStatus() *portControlStatus {
 	}
 	switch status.State {
 	case "applied":
-		status.Message = "LAN port closed."
+		status.Message = "LAN port changes applied."
 	case "rejected":
-		status.Message = "Port close request was rejected."
+		status.Message = "LAN port changes were rejected."
 	case "failed":
-		status.Message = "Port close is saved but could not be applied."
+		status.Message = "LAN port changes were saved but could not be applied."
 	}
+	status.AffectedServices = affectedPortServices()
 	return &status
 }
 
@@ -148,6 +215,59 @@ func (a *app) apiPortControlGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, a.portControlView())
 }
 
+func validatePortControlChanges(input portControlInput, ports []portControlPort) ([]portControlChange, error) {
+	allowed := make(map[string]portControlPort, len(ports))
+	desired := make(map[string]portControlPort, len(ports))
+	for _, port := range ports {
+		allowed[port.ID] = port
+		desired[port.ID] = port
+	}
+	if len(input.Changes) == 0 || len(input.Changes) > len(allowed) {
+		return nil, errors.New("invalid port changes")
+	}
+	seen := make(map[string]bool, len(input.Changes))
+	changes := make([]portControlChange, 0, len(input.Changes))
+	for _, inputChange := range input.Changes {
+		current, ok := allowed[inputChange.Port]
+		if !ok || seen[inputChange.Port] || inputChange.Enabled == nil {
+			return nil, errors.New("invalid port change")
+		}
+		seen[inputChange.Port] = true
+		change := portControlChange{Port: inputChange.Port, Enabled: *inputChange.Enabled}
+		if change.Enabled {
+			if !inputChange.bindIPPresent || !inputChange.hostPortPresent || inputChange.BindIP == nil || inputChange.HostPort == nil || strings.TrimSpace(*inputChange.BindIP) != *inputChange.BindIP {
+				return nil, errors.New("enabled port requires a private LAN address and host port")
+			}
+			address, err := netip.ParseAddr(*inputChange.BindIP)
+			if err != nil || !address.Is4() || !address.IsPrivate() || *inputChange.HostPort < 1 || *inputChange.HostPort > 65535 {
+				return nil, errors.New("enabled port requires a private LAN address and host port")
+			}
+			change.BindIP, change.HostPort = *inputChange.BindIP, *inputChange.HostPort
+			if current.Enabled && current.BindIP == change.BindIP && current.HostPort == change.HostPort {
+				return nil, errors.New("port change has no effect")
+			}
+		} else if inputChange.bindIPPresent || inputChange.hostPortPresent || !current.Enabled {
+			return nil, errors.New("disabled port change is invalid")
+		}
+		next := current
+		next.Enabled, next.BindIP, next.HostPort = change.Enabled, change.BindIP, change.HostPort
+		desired[change.Port] = next
+		changes = append(changes, change)
+	}
+	endpoints := make(map[string]bool)
+	for _, port := range desired {
+		if !port.Enabled {
+			continue
+		}
+		endpoint := net.JoinHostPort(port.BindIP, strconv.Itoa(port.HostPort))
+		if endpoints[endpoint] {
+			return nil, errors.New("LAN ports conflict")
+		}
+		endpoints[endpoint] = true
+	}
+	return changes, nil
+}
+
 func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if a.cfg.dashboardPassword == "" {
@@ -169,21 +289,10 @@ func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid port control request", http.StatusBadRequest)
 		return
 	}
-	allowed := make(map[string]bool)
-	for _, port := range a.portControlPorts() {
-		allowed[port.ID] = port.Enabled
-	}
-	seen := make(map[string]bool)
-	if len(input.Ports) == 0 || len(input.Ports) > len(allowed) {
-		http.Error(w, "invalid port control request", http.StatusBadRequest)
+	changes, err := validatePortControlChanges(input, a.portControlPorts())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-	for _, port := range input.Ports {
-		if !allowed[port] || seen[port] {
-			http.Error(w, "requested port is not currently exposed", http.StatusConflict)
-			return
-		}
-		seen[port] = true
 	}
 	a.portControlMu.Lock()
 	defer a.portControlMu.Unlock()
@@ -196,7 +305,7 @@ func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "port control unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	request := portControlRequest{ID: hex.EncodeToString(idBytes), Ports: input.Ports, RequestedAt: time.Now().Unix()}
+	request := portControlRequest{ID: hex.EncodeToString(idBytes), Changes: changes, RequestedAt: time.Now().Unix()}
 	b, err := json.Marshal(request)
 	if err != nil || writePrivateFileAtomic(a.portControlPath("request"), append(b, '\n')) != nil {
 		http.Error(w, "port control unavailable", http.StatusServiceUnavailable)
@@ -204,7 +313,8 @@ func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, portControlView{Available: true, Ports: a.portControlPorts(), Status: &portControlStatus{ID: request.ID, State: "pending", Message: "Closing selected port…"}})
+	status := &portControlStatus{ID: request.ID, State: "pending", Message: "Applying LAN port changes…", AffectedServices: affectedPortServices()}
+	writeJSON(w, portControlView{Available: true, Ports: a.portControlPorts(), Status: status})
 }
 
 func validPortControlID(value string) bool {

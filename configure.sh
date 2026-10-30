@@ -382,6 +382,10 @@ if [ "$blockfilterindex" = "1" ] && [ "$prune" != "0" ]; then
   exit 1
 fi
 
+if [ "${BITCOIN_STACK_VALIDATE_ONLY:-0}" = 1 ]; then
+  exit 0
+fi
+
 # rpcauth = salted HMAC of the password (same scheme as Bitcoin Core's
 # rpcauth.py), so the bitcoin container never holds the plaintext password.
 # Salt and hash stay as separate hex values; the container assembles the

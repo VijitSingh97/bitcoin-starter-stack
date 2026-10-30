@@ -660,6 +660,16 @@ case "$cmd" in
     ensure_port_control_timer
     ensure_agent
     ;;
+  apply-port-settings)
+    lock_config
+    "$stack_root/configure.sh"
+    guard_package_containers
+    compose up -d --pull never --no-build --no-deps tor dashboard || {
+      echo "Port settings could not be applied with the installed images."
+      exit 1
+    }
+    unlock_config
+    ;;
   upgrade) do_upgrade ;;
   pull)
     [ -f "$env_file" ] || "$stack_root/configure.sh"

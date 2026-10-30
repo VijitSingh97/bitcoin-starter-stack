@@ -22,8 +22,9 @@ dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
 monero_password=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' "$tmp/.env")
 monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
 monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
-[ -n "$dashboard_password" ] && [ -n "$monero_password" ] && [ -n "$monero_wallet_rpc_password" ] && [ -n "$monero_wallet_password" ] ||
+if [ -z "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ]; then
   fail "fresh install did not generate all passwords"
+fi
 passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" | sort -u | wc -l | tr -d ' ')
 [ "$passwords" = "5" ] || fail "fresh install did not separate service passwords"
 grep -q '^MONERO_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Monero wallet RPC user default is not admin"

@@ -90,7 +90,7 @@ Enabling it is one setting: answer **y** at the Upgrade-button question in
 `./stack apply`. That's it: `up`/`apply` start the host-side agent for you,
 detached and logging to `~/upgrade-agent.log`, and install a `@reboot` cron
 entry so it survives reboots (no sudo needed). Setting `control` back to
-`false` disables upgrades. The agent continues to handle close-only LAN port
+`false` disables upgrades. The agent continues to handle validated LAN port
 requests while a dashboard password is configured; clearing that password and
 applying removes its automatic source-install startup.
 `./stack doctor` reports whether the agent is running.
