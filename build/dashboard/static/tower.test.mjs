@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, towerLayout, previewDepth, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, towerLayout, previewDepth, sceneDepth, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -116,5 +116,20 @@ test("preview tower reaches the viewport bottom", () => {
     const depth = previewDepth(H, anchorY, tw);
     const bottom = project(GRID, GRID, 0, tw, tw * 0.5, 0, anchorY - GRID * (tw / 4) + (depth + 1) * tw * 0.5).y;
     assert.ok(bottom >= H, `H=${H} stops at ${bottom}`);
+  }
+});
+
+test("zoom keeps at least the overview tower depth throughout the transition", () => {
+  const H = 900;
+  const overviewY = H * 0.3;
+  const overviewTw = 40;
+  const initialDepth = previewDepth(H, overviewY, overviewTw);
+  for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+    const anchorY = overviewY + (H * 0.6 - overviewY) * progress;
+    const tw = overviewTw + (52 - overviewTw) * progress;
+    const depth = sceneDepth(H, anchorY, tw, overviewY, overviewTw);
+    assert.ok(depth >= initialDepth, `progress=${progress} shrank from ${initialDepth} to ${depth}`);
+    const bottom = project(GRID, GRID, 0, tw, tw * 0.5, 0, anchorY - GRID * (tw / 4) + (depth + 1) * tw * 0.5).y;
+    assert.ok(bottom >= H, `progress=${progress} stops at ${bottom}`);
   }
 });

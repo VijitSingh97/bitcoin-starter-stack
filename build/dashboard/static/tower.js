@@ -91,6 +91,10 @@ export function previewDepth(H, anchorY, tw) {
   return Math.max(10, Math.ceil((H - anchorY - GRID * (tw / 4)) / (tw * 0.5)));
 }
 
+export function sceneDepth(H, anchorY, tw, overviewY, overviewTw) {
+  return Math.max(previewDepth(H, anchorY, tw), previewDepth(H, overviewY, overviewTw));
+}
+
 if (typeof document !== "undefined") {
   const canvas = document.getElementById("tower");
   const ctx = canvas && canvas.getContext("2d");
@@ -154,6 +158,15 @@ if (typeof document !== "undefined") {
       ctx.shadowBlur = 0;
     }
 
+    function line(from, to, stroke) {
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
     function drawTowerGlow(p, depth, pal, highlight, opacity = 1) {
       if (highlight <= 0.01 || opacity <= 0.01) return;
       ctx.save();
@@ -172,28 +185,26 @@ if (typeof document !== "undefined") {
       ctx.restore();
     }
 
-    function drawPreviewTower(node, ox, anchorY, tw, fill, pulse, highlight, opacity = 1) {
+    function drawTower(node, ox, anchorY, tw, depthCount, fill, pulse, highlight, opacity = 1, push = 0) {
       const pal = palette(node);
       const bh = tw * 0.5;
-      const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - layer * bh - GRID * (tw / 4));
-      const depthCount = previewDepth(H, anchorY, tw);
+      const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - push - layer * bh - GRID * (tw / 4));
       for (let depth = depthCount; depth >= 1; depth--) {
         const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
         ctx.globalAlpha = opacity * pal.alpha * fade;
-        for (let i = 0; i < GRID; i++) {
-          poly([p(i, GRID, -depth), p(i + 1, GRID, -depth), p(i + 1, GRID, -depth - 1), p(i, GRID, -depth - 1)], pal.side, pal.edge, 0);
-        }
-        for (let j = 0; j < GRID; j++) {
-          poly([p(GRID, j, -depth), p(GRID, j + 1, -depth), p(GRID, j + 1, -depth - 1), p(GRID, j, -depth - 1)], pal.dark, pal.edge, 0);
-        }
+        poly([p(0, GRID, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1)], pal.side, pal.edge, 0);
+        poly([p(GRID, 0, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(GRID, 0, -depth - 1)], pal.dark, pal.edge, 0);
       }
+      ctx.globalAlpha = opacity * pal.alpha * 0.55;
+      for (let i = 1; i < GRID; i++) line(p(i, GRID, 0), p(i, GRID, -depthCount - 1), pal.edge);
+      for (let j = 1; j < GRID; j++) line(p(GRID, j, 0), p(GRID, j, -depthCount - 1), pal.edge);
       const done = Math.floor(fill);
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
         if (idx < done) {
           ctx.globalAlpha = opacity * pal.alpha;
-          poly(face, pal.top, pal.edge, pal.glow);
+          poly(face, pal.top, pal.edge, 0);
         } else if (idx === done) {
           ctx.globalAlpha = opacity * pal.alpha * (0.2 + 0.7 * pulse);
           poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
@@ -235,14 +246,17 @@ if (typeof document !== "undefined") {
       const baseTw = mobile ? Math.max(12, Math.min(20, W / 28)) : Math.max(26, Math.min(46, W / 36));
       const overviewY = H * 0.3;
       const hovered = document.body.dataset.hoverNode;
+      const overviewDepth = previewDepth(H, overviewY, baseTw);
       if (!selected && scene.progress === 0) {
         for (const node of ["bitcoin", "monero"]) {
           previewHighlight[node] = reduce
             ? (hovered === node ? 1 : 0)
             : nextHighlight(previewHighlight[node], hovered === node, dt);
         }
-        drawPreviewTower("bitcoin", W * (mobile ? 0.27 : 0.32), overviewY, baseTw * (1 + 0.12 * previewHighlight.bitcoin), fill, pulse, previewHighlight.bitcoin);
-        drawPreviewTower("monero", W * (mobile ? 0.73 : 0.68), overviewY, baseTw * (1 + 0.12 * previewHighlight.monero), fill, pulse, previewHighlight.monero);
+        const bitcoinTw = baseTw * (1 + 0.12 * previewHighlight.bitcoin);
+        const moneroTw = baseTw * (1 + 0.12 * previewHighlight.monero);
+        drawTower("bitcoin", W * (mobile ? 0.27 : 0.32), overviewY, bitcoinTw, sceneDepth(H, overviewY, bitcoinTw, overviewY, baseTw), fill, pulse, previewHighlight.bitcoin);
+        drawTower("monero", W * (mobile ? 0.73 : 0.68), overviewY, moneroTw, sceneDepth(H, overviewY, moneroTw, overviewY, baseTw), fill, pulse, previewHighlight.monero);
         if (label) {
           label.hidden = true;
           label.style.opacity = "0";
@@ -258,19 +272,22 @@ if (typeof document !== "undefined") {
         if (scene.node) {
           const startHighlight = previewHighlight[scene.node];
           const startTw = baseTw * (1 + 0.12 * startHighlight);
-          if (amount < 0.99) drawPreviewTower(other, overviewX(other), overviewY, baseTw, fill, pulse, 0, 1 - amount);
-          drawPreviewTower(
+          if (amount < 0.99) drawTower(other, overviewX(other), overviewY, baseTw, overviewDepth, fill, pulse, 0, 1 - amount);
+          const anchorY = overviewY + (focusedY - overviewY) * amount;
+          const tw = startTw + (focusedTw - startTw) * amount;
+          drawTower(
             scene.node,
             overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount,
-            overviewY + (focusedY - overviewY) * amount,
-            startTw + (focusedTw - startTw) * amount,
+            anchorY,
+            tw,
+            sceneDepth(H, anchorY, tw, overviewY, baseTw),
             fill,
             pulse,
             startHighlight + (1 - startHighlight) * amount,
           );
         } else {
-          drawPreviewTower("bitcoin", overviewX("bitcoin"), overviewY, baseTw, fill, pulse, 0);
-          drawPreviewTower("monero", overviewX("monero"), overviewY, baseTw, fill, pulse, 0);
+          drawTower("bitcoin", overviewX("bitcoin"), overviewY, baseTw, overviewDepth, fill, pulse, 0);
+          drawTower("monero", overviewX("monero"), overviewY, baseTw, overviewDepth, fill, pulse, 0);
         }
         if (label) {
           label.hidden = true;
@@ -278,59 +295,19 @@ if (typeof document !== "undefined") {
         }
         return;
       }
-      const pal = palette(selected);
       if (label) label.hidden = false;
       const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
       const anchorY = H * 0.6;
       const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0 after a rollover
-
-      // vertex of cell (gx,gy) on the top surface of layer `k` (0 = today's
-      // top; negative below is a finished day)
-      const p = (gx, gy, k) =>
-        project(gx, gy, 0, tw, bh, ox, anchorY + (0 - k) * bh - push - N * (tw / 4));
-
-      // finished days below, near-to-far
-      const visible = Math.min(22, Math.ceil((H - anchorY) / bh) + 2);
-      for (let d = visible; d >= 1; d--) {
-        const fade = Math.max(0.15, 1 - d * 0.06);
-        ctx.globalAlpha = pal.alpha * fade;
-        for (let i = 0; i < N; i++) {
-          poly([p(i, N, -d), p(i + 1, N, -d), p(i + 1, N, -d - 1), p(i, N, -d - 1)], pal.side, pal.edge, 0);
-        }
-        for (let j = 0; j < N; j++) {
-          poly([p(N, j, -d), p(N, j + 1, -d), p(N, j + 1, -d - 1), p(N, j, -d - 1)], pal.dark, pal.edge, 0);
-        }
-      }
-
-      // today's layer: filled up to the current time of day, the frontier
-      // cube pulsing as this 10-minute slot loads
-      const done = Math.floor(fill);
-      for (let idx = 0; idx < PER_LAYER; idx++) {
-        const { gx, gy } = gridCell(idx);
-        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
-        if (idx < done) {
-          ctx.globalAlpha = pal.alpha;
-          poly(face, pal.top, pal.edge, pal.glow);
-        } else if (idx === done) {
-          // the slot loading right now — pulses
-          ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
-          poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
-        } else {
-          // an unfilled slot for later in the day — a faint grid, so it
-          // recedes and doesn't read as a bright cube next to the loading one
-          ctx.globalAlpha = pal.alpha * 0.4;
-          poly(face, null, pal.grid, 0);
-        }
-      }
-      ctx.globalAlpha = 1;
-      drawTowerGlow(p, visible, pal, 1);
+      const visible = sceneDepth(H, anchorY, tw, overviewY, baseTw);
+      drawTower(selected, ox, anchorY, tw, visible, fill, pulse, 1, 1, push);
 
       // "loading block N" header above the tower's back corner
       if (label) {
         const next = liveData().nextBlock;
         if (next) {
-          const topY = p(0, 0, 0).y;
+          const topY = project(0, 0, 0, tw, bh, ox, anchorY - push - N * (tw / 4)).y;
           label.style.left = ox + "px";
           label.style.top = Math.max(8, topY - 40) + "px";
           label.innerHTML = 'loading block <b>' + next + "</b>";
@@ -343,13 +320,9 @@ if (typeof document !== "undefined") {
 
     render(performance.now()); // one static frame (also covers a hidden tab)
     if (!reduce) {
-      const FRAME_MS = 1000 / 30;
-      let last = 0;
       const frame = (now) => {
         requestAnimationFrame(frame);
         if (document.hidden) { prev = now; return; }
-        if (now - last < FRAME_MS) return;
-        last = now;
         render(now);
       };
       requestAnimationFrame(frame);
