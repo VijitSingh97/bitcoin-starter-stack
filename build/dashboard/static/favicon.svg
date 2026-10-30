@@ -1,4 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#f2a900"/>
-  <text x="16" y="24" font-family="Arial, sans-serif" font-size="22" font-weight="bold" text-anchor="middle" fill="#ffffff">&#8383;</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Bitcoin block tower</title>
+  <defs>
+    <linearGradient id="left" x2="0" y2="1">
+      <stop stop-color="#efb600"/>
+      <stop offset="1" stop-color="#715314"/>
+    </linearGradient>
+    <linearGradient id="right" x2="0" y2="1">
+      <stop stop-color="#a47713"/>
+      <stop offset="1" stop-color="#3f310f"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#left)" d="M10 18 32 29V61L10 50Z"/>
+  <path fill="url(#right)" d="M32 29 54 18V50L32 61Z"/>
+  <path fill="none" stroke="#ffe19a" stroke-opacity=".6" stroke-width=".8" d="M10 26 32 37 54 26M10 34 32 45 54 34M10 42 32 53 54 42M17.33 21.67V53.67M24.67 25.33V57.33M32 29V61M39.33 25.33V57.33M46.67 21.67V53.67"/>
+  <path fill="#111110" stroke="#9f781d" stroke-width=".6" d="M32 4 54 15 32 26 10 15Z"/>
+  <path fill="#ffdc7b" d="M32 4 54 15 48.5 17.75 26.5 6.75Z"/>
+  <path fill="none" stroke="#d8a82e" stroke-opacity=".4" stroke-width=".6" d="M24.67 7.67 46.67 18.67M17.33 11.33 39.33 22.33M39.33 7.67 17.33 18.67M46.67 11.33 24.67 22.33"/>
 </svg>
