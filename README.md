@@ -214,10 +214,11 @@ Open `http://localhost` on the node. After setting a private LAN bind address,
 use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
 The landing page shows a gold Bitcoin tower and an orange Monero tower. Click
 one to zoom in and open its card; close it with **×**, Escape, or a click outside
-the panel. Towers extend to the bottom of the screen, grow on hover or keyboard
+the panel. Towers continue below the screen, grow on hover or keyboard
 focus, and show a pulsing loading block on top. Names are hidden by default;
-enable **Label towers** in the gear panel to show them. That preference survives
-restarts. Disabled nodes show **Not configured** in their card.
+enable **Label towers** in the gear panel to show their names, prices, and next
+block numbers. The saved default currency starts at USD. These preferences
+survive restarts. Disabled nodes show **Not configured** in their card.
 
 Both cards show node version, uptime, connections, sync progress, chain storage,
 native fee estimates with a 24-hour graph, and a nine-currency price selector.

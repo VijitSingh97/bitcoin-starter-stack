@@ -101,6 +101,31 @@ encrypted watch-only wallet files in its own private Docker volume. See
 [Watch-only balances](watch-only.md#monero-view-only-wallets) and Monero's
 [official view-only guide](https://www.getmonero.org/resources/user-guides/view_only.html).
 
+## Tari planning for Pithead
+
+Tari is not selectable in this stack yet. Its upstream
+[pruned mode](https://rfc.tari.com/RFC-0140_Syncing_and_seeding) uses
+`base_node.storage.pruning_horizon`: zero is archival; a positive block horizon
+enables pruning. The horizon, retained state, initial sync, and resulting disk
+use need testing on the pinned release. Pruning is not evidence that its RAM
+use fits the 2 GiB target.
+
+The adapter should run only the base node, with public P2P traffic through Tor,
+DNS seeds disabled, and no clearnet initial-sync option. Its internal gRPC
+allowlist should cover dashboard status and Pithead's mining-template/block
+submission calls. Private-LAN gRPC on port **18142** should be a separate opt-in,
+off by default, using the same server-side address and port-conflict controls
+as the existing nodes. No wallet, miner, or payout private key is needed here.
+
+Pithead already supports a
+[remote Tari node](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md#remote-tari-node)
+through `tari.mode: remote`, `tari.remote.host`, and `tari.remote.grpc_port`.
+Its current mining client uses plaintext, unauthenticated gRPC and cannot use
+Tari's gRPC authentication or TLS options. Use a trusted LAN or WireGuard link;
+a dashboard password does not protect this separate mining endpoint. The
+integration test must confirm both template creation and block submission with
+the selected pruned release before the adapter becomes available in setup.
+
 ## Other chains evaluated
 
 These are candidates, not selectable or downloadable adapters. Findings were
@@ -111,7 +136,7 @@ stack's Tor isolation, upgrade, pruning, and capped stability tests yet.
 |---|---|---|
 | [Litecoin Core](https://github.com/litecoin-project/litecoin/blob/master/doc/README.md) | Closest next adapter: Bitcoin-like JSON-RPC, pruning, and [Tor support](https://github.com/litecoin-project/litecoin/blob/master/doc/tor.md). | Pin verified images/binaries, test wallet/RPC differences, measure current disk use and 1 CPU / 2 GiB steady operation. Old upstream disk estimates are not current sizing guidance. |
 | [Dogecoin Core](https://github.com/dogecoin/dogecoin/blob/master/doc/getting-started.md) | Pruning and [Tor proxying](https://github.com/dogecoin/dogecoin/blob/master/doc/tor.md) are available. | Verify discovery cannot leak DNS, test chain-specific sync/fee behavior, and measure disk/RAM. No current 2 GiB qualification. |
-| [Tari / Minotari](https://github.com/tari-project/tari/blob/development/docs/guide/applications_overview.md) | Configurable pruning horizon and SOCKS transport; a different gRPC adapter is needed. | Explicit pruning (upstream horizon defaults to zero), fail-closed Tor testing, authenticated remote API design, and fresh disk/RAM benchmarks. No verified 2 GiB floor. |
+| [Tari / Minotari](https://github.com/tari-project/tari/blob/development/docs/guide/applications_overview.md) | Configurable pruning horizon and Tor transport; a different gRPC adapter is needed. Pithead can use its mining API remotely. | Explicit pruning (upstream horizon defaults to zero), fail-closed Tor tests, Pithead gRPC compatibility, and fresh disk/RAM benchmarks. No verified 2 GiB floor. |
 | [Zcash / Zebra](https://github.com/ZcashFoundation/zebra) | Does not currently meet our pruned-only profile. | Upstream historical block-body [pruning remains open](https://github.com/ZcashFoundation/zebra/issues/12071). Revisit after it ships; resource and Tor-isolation testing would still be required. |
 | [Bitcoin Cash Node](https://github.com/bitcoin-cash-node/bitcoin-cash-node/blob/master/doc/README.md) | Another Bitcoin-family candidate with pruning and [Tor support](https://github.com/bitcoin-cash-node/bitcoin-cash-node/blob/master/doc/tor.md). | Same packaging, isolation, RPC, storage, and stability checks as Litecoin. |
 

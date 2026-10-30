@@ -254,6 +254,19 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
   font-weight: 600;
 }
 
+.tower-overview-label {
+  position: fixed;
+  z-index: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+  color: var(--muted);
+  font: 0.8rem monospace;
+  white-space: nowrap;
+}
+
+.tower-overview-label b { color: var(--accent); font-weight: 600; }
+.tower-overview-label-monero b { color: var(--monero); }
+
 .center {
   display: flex;
   justify-content: center;

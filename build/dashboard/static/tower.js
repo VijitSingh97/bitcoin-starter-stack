@@ -88,17 +88,30 @@ export function towerLayout(W, cols = GRID) {
 }
 
 export function previewDepth(H, anchorY, tw) {
-  return Math.max(10, Math.ceil((H - anchorY - GRID * (tw / 4)) / (tw * 0.5)));
+  return Math.max(10, Math.ceil((H - anchorY) / (tw * 0.5)));
 }
 
 export function sceneDepth(H, anchorY, tw, overviewY, overviewTw) {
   return Math.max(previewDepth(H, anchorY, tw), previewDepth(H, overviewY, overviewTw));
 }
 
+export function overviewBlockLabels(nextBlocks, labelsEnabled, overviewSettled) {
+  const label = (value) => {
+    const block = String(value || "").trim();
+    return /^\d+$/.test(block) ? `loading block ${block}` : "";
+  };
+  if (!labelsEnabled || !overviewSettled) return { bitcoin: "", monero: "" };
+  return { bitcoin: label(nextBlocks?.bitcoin), monero: label(nextBlocks?.monero) };
+}
+
 if (typeof document !== "undefined") {
   const canvas = document.getElementById("tower");
   const ctx = canvas && canvas.getContext("2d");
   const label = document.getElementById("tower-label");
+  const overviewLabels = {
+    bitcoin: document.getElementById("tower-overview-label-bitcoin"),
+    monero: document.getElementById("tower-overview-label-monero"),
+  };
   if (ctx) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const N = GRID;
@@ -141,6 +154,24 @@ if (typeof document !== "undefined") {
         : document.getElementById("live");
       return (el && el.dataset) || {};
     };
+
+    const nextBlocks = () => ({
+      bitcoin: document.getElementById("live")?.dataset?.nextBlock,
+      monero: document.getElementById("monero-live")?.dataset?.nextBlock,
+    });
+
+    function hideOverviewLabels() {
+      for (const element of Object.values(overviewLabels)) if (element) element.hidden = true;
+    }
+
+    function showOverviewLabel(node, text, ox, anchorY, tw) {
+      const element = overviewLabels[node];
+      if (!element || !text) return;
+      element.querySelector("b").textContent = text.slice("loading block ".length);
+      element.style.left = `${ox}px`;
+      element.style.top = `${Math.max(8, anchorY - GRID * (tw / 4) - 40)}px`;
+      element.hidden = false;
+    }
 
     function poly(pts, fill, stroke, glow) {
       ctx.beginPath();
@@ -240,6 +271,7 @@ if (typeof document !== "undefined") {
       const pulse = reduce ? 0.65 : 0.5 + 0.5 * Math.sin(now / 300);
 
       ctx.clearRect(0, 0, W, H);
+      hideOverviewLabels();
       const selected = document.body.dataset.node;
       scene = nextScene(scene.node, selected, scene.progress, dt, reduce);
       const mobile = W <= 700;
@@ -255,8 +287,13 @@ if (typeof document !== "undefined") {
         }
         const bitcoinTw = baseTw * (1 + 0.12 * previewHighlight.bitcoin);
         const moneroTw = baseTw * (1 + 0.12 * previewHighlight.monero);
-        drawTower("bitcoin", W * (mobile ? 0.27 : 0.32), overviewY, bitcoinTw, sceneDepth(H, overviewY, bitcoinTw, overviewY, baseTw), fill, pulse, previewHighlight.bitcoin);
-        drawTower("monero", W * (mobile ? 0.73 : 0.68), overviewY, moneroTw, sceneDepth(H, overviewY, moneroTw, overviewY, baseTw), fill, pulse, previewHighlight.monero);
+        const bitcoinX = W * (mobile ? 0.27 : 0.32);
+        const moneroX = W * (mobile ? 0.73 : 0.68);
+        drawTower("bitcoin", bitcoinX, overviewY, bitcoinTw, sceneDepth(H, overviewY, bitcoinTw, overviewY, baseTw), fill, pulse, previewHighlight.bitcoin);
+        drawTower("monero", moneroX, overviewY, moneroTw, sceneDepth(H, overviewY, moneroTw, overviewY, baseTw), fill, pulse, previewHighlight.monero);
+        const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
+        showOverviewLabel("bitcoin", blockLabels.bitcoin, bitcoinX, overviewY, bitcoinTw);
+        showOverviewLabel("monero", blockLabels.monero, moneroX, overviewY, moneroTw);
         if (label) {
           label.hidden = true;
           label.style.opacity = "0";
@@ -327,10 +364,14 @@ if (typeof document !== "undefined") {
       };
       requestAnimationFrame(frame);
     } else {
-      new MutationObserver(() => render(performance.now())).observe(document.body, {
+      const observer = new MutationObserver(() => render(performance.now()));
+      observer.observe(document.body, {
         attributes: true,
-        attributeFilter: ["data-hover-node", "data-node"],
+        attributeFilter: ["data-hover-node", "data-node", "data-tower-labels"],
       });
+      const moneroLive = document.getElementById("monero-live");
+      if (moneroLive) observer.observe(moneroLive, { attributes: true, attributeFilter: ["data-next-block"] });
+      window.addEventListener("live-updated", () => render(performance.now()));
     }
   }
 }

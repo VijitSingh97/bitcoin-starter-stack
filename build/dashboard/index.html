@@ -11,6 +11,8 @@
 {{if or .Loading (not .BitcoinEnabled)}}
 <body class="center-screen" data-node="">
   <canvas id="tower"></canvas><div id="tower-label"></div>
+  <div id="tower-overview-label-bitcoin" class="tower-overview-label tower-overview-label-bitcoin" hidden>loading block <b></b></div>
+  <div id="tower-overview-label-monero" class="tower-overview-label tower-overview-label-monero" hidden>loading block <b></b></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1>
@@ -41,6 +43,8 @@
 {{else}}
 <body class="center" data-node="">
   <canvas id="tower"></canvas><div id="tower-label"></div>
+  <div id="tower-overview-label-bitcoin" class="tower-overview-label tower-overview-label-bitcoin" hidden>loading block <b></b></div>
+  <div id="tower-overview-label-monero" class="tower-overview-label tower-overview-label-monero" hidden>loading block <b></b></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1>

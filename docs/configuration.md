@@ -212,7 +212,8 @@ Port settings persist across reboot because the host configuration is updated.
 
 The gear panel also includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
-survives restarts. With labels enabled, each tower also shows its coin price.
+survives restarts. With labels enabled, each tower shows its coin price and
+the next block number above it. Both overview towers extend below the screen.
 **Default currency** starts at USD and applies to those prices and to a panel
 when opened. Panel currency selectors can still change the current view.
 Resetting to server configuration hides the names and restores USD.
