@@ -7,12 +7,12 @@
 [![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
-![Tor](https://img.shields.io/badge/Networking-Tor--only-7D4698?logo=torproject&logoColor=white)
+![Runtime: Tor-only](https://img.shields.io/badge/Runtime-Tor--only-7D4698?logo=torproject&logoColor=white)
 
 Run a [Bitcoin Core](https://bitcoincore.org/) node with a small Go dashboard.
 Watch blocks arrive, track your own watch-only balances, check fees and BTC prices,
-and get alerts when something needs attention. Internet traffic uses Tor; your
-wallet addresses stay on your node.
+and get alerts when something needs attention. Running services use Tor for
+public internet traffic; your wallet addresses stay on your node.
 
 <img src="./images/dashboard.png" width="100%" alt="Go dashboard with Bitcoin Core 32.1, BTC price below mempool, the public Binance example, and Your Wallet marked Pending history; demo data" />
 
@@ -29,10 +29,10 @@ wallet addresses stay on your node.
 - 🟠 **Fully validating, pruned by default.** Bitcoin Core validates every block, then keeps
   10 GB of recent blocks. Plan on **30–60 GB total disk**; archival storage remains an
   advanced manual option.
-- 🧅 **Tor-only networking.** All P2P traffic goes through the Tor container
+- 🧅 **Tor-only runtime networking.** All P2P traffic goes through the Tor container
   (`onlynet=onion`). Bitcoin and the dashboard cannot route directly to the internet,
   and local DNS forwarding is disabled. Inbound Bitcoin connections use an onion
-  service when enabled. See the [privacy model and Tor bootstrap](docs/privacy.md).
+  service when enabled. See the [privacy model](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
   add a password and an onion address for remote access. RPC is private by default,
@@ -67,52 +67,106 @@ wallet addresses stay on your node.
   the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
   monitoring you already run.
 
-## 🚀 Quick Start
+## 🚀 Fresh install
 
-**Prerequisites:** Ubuntu Server 24.04 with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
-`jq` and `curl`, an SSD with 30–60 GB free for the default
-[pruned](docs/configuration.md#pruned-node) setup (about 1 TB for archival), and a
-recommended target of 2 CPUs and 4 GB RAM. A short trial also worked with the
-containers limited to a 1 CPU/2 GB budget. Full initial sync and heavier loads
-still need longer testing at those limits.
-Details in [Hardware Requirements](docs/hardware.md).
+You need Ubuntu Server 24.04, Docker Engine with Compose 2.33.1 or newer,
+`jq`, `openssl`, and `curl`; an SSD with 30–60 GB free; and a recommended target
+of 2 CPUs and 4 GB RAM. A short trial also worked with the containers limited
+to a 1 CPU/2 GB budget. Full initial sync and heavier loads still need longer
+testing at those limits. The default node validates the entire chain, keeps
+10 GB of recent block files, and uses about 30–60 GB in total. See
+[Hardware Requirements](docs/hardware.md).
 
-First set up [Tor for downloads](docs/privacy.md#bootstrap-and-apt), including the
-initial Tor image and Docker's proxy. There is no automatic clearnet fallback.
-With the source and images available locally:
+### 1. Install, then run the wizard
+
+The Ubuntu APT package is prepared for the next release. The feed and signing
+key are not public yet. When that release is published, first follow the
+[official feed and signing-key setup](docs/privacy.md#package-feed), then run:
 
 ```bash
+sudo apt update
+sudo apt install bitcoin-starter-stack
+sudo bitcoin-stack init
+```
+
+Package installation is inert: it does not start containers or launch setup.
+Run `sudo bitcoin-stack init` explicitly. For a downloaded `.deb`, replace the
+install command with `sudo apt install ./bitcoin-starter-stack_VERSION_all.deb`,
+then run the same wizard. The first package release supports fresh installs; it
+does not migrate an existing source-managed production node.
+
+Until the feed is public, install the published release tarball:
+
+```bash
+curl --fail --location --output bitcoin-starter-stack.tar.gz \
+  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest/download/bitcoin-starter-stack.tar.gz
+tar -xzf bitcoin-starter-stack.tar.gz
 cd bitcoin-starter-stack
-./stack init              # optional guided setup; defaults to 10 GB block retention
-./stack up                # creates local settings and starts preloaded images
+./stack init
 ```
 
-The internal RPC password is generated for you. Runtime images are prebuilt for
-amd64 and arm64; the node does not need a compiler or Python. `./stack pull`
-fetches images after checking the host's Tor proxy. Unreleased development builds
-are kept separate from the deployment path.
+Development branches use unpublished image tags and need their images built in
+a separate development environment; they are not a fresh-install path.
 
-For LAN access, set `dashboard.bind_ip` to the server's private IPv4 address in
-`config.json`, then run `./stack apply`. The default is local access only.
-[Configuration](docs/configuration.md) covers pruning, existing chain data, alerts,
-and optional remote access through an onion service.
+### 2. Accept the safe defaults
 
-Then watch it come up:
+Press Enter at the password prompt to generate a strong shared RPC/dashboard
+password. The username is `admin`; the wizard prints the password once at the
+end. This package example uses a fake password only to show the questions:
+
+```text
+Shared RPC and dashboard password (letters/numbers) [Enter = strong random]: ExampleOnly1234567890
+Bitcoin data directory [/var/lib/bitcoin-starter-stack/data/bitcoin]:
+Dashboard bind address (loopback or private LAN) [127.0.0.1]:
+Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] n
+Recent-block retention in GB [10]:
+Download missing containers and start the stack now? [Y/n]
+
+Dashboard login (shown once):
+  Username: admin
+  Password: ExampleOnly1234567890
+```
+
+Press Enter at the final question. Docker downloads the published container
+images using the host's normal network settings, then the stack starts. The
+wizard does not change Docker's proxy or daemon configuration. These initial
+APT and container downloads happen on the host; once running, Bitcoin peers,
+prices, alerts, and dashboard update checks use the stack's Tor container.
+
+Keep `127.0.0.1` to open the dashboard only on the node. For trusted-LAN access,
+enter the server's private IPv4 address, such as `192.168.1.117`; wildcard and
+public addresses are rejected. The source wizard uses `./data/bitcoin` and also
+asks about the optional Upgrade button, which defaults to off.
+
+If you answer **n** at the final question, start later with:
 
 ```bash
-./stack status            # container + health summary
-./stack logs tor          # wait for "Bootstrapped 100% (done)"
-./stack logs bitcoin      # headers, then block sync
+sudo bitcoin-stack pull
+sudo bitcoin-stack up
+sudo bitcoin-stack status
 ```
 
-`./stack` wraps day-to-day operations (`up`, `down`, `logs`, `status`,
-`doctor`, `apply`, `upgrade`, `backup`/`restore`) — see [Operations](docs/operations.md).
-Upgrading is one command: **`./stack upgrade`** fetches the latest release,
-backs up, and applies it.
+For a source install, use `./stack pull`, `./stack up`, and `./stack status`.
+`pull` is the explicit network action; routine `up` and `apply` use local images
+only and never build or download implicitly.
 
-The node still downloads and validates the whole historical chain, currently roughly
-900 GB, before pruning old block files. Over Tor this can take days. Full walkthrough:
-[Getting Started](docs/getting-started.md).
+### 3. Open the dashboard and let Bitcoin sync
+
+Open `http://localhost` on the node. If you chose a private LAN address, open
+`http://<server-private-ip>` from a trusted device. Keep port 80 off the public
+internet. Check progress with `./stack logs bitcoin` for source installs or
+`sudo bitcoin-stack logs bitcoin` for packages.
+
+Watch-only wallets remain pending during initial block download. After sync, the
+node scans the live UTXO set and shows confirmed balances; its chart contains
+saved balance snapshots, not transaction history, spent outputs, or mempool
+activity. Initial sync transfers roughly 900 GB through Tor and can take days.
+See [Watch-only balances](docs/watch-only.md).
+
+Containers use Docker's `unless-stopped` policy. They return after a reboot when
+Docker starts at boot, unless you explicitly stopped them. Day-to-day commands,
+upgrades, backups, and troubleshooting are in [Operations](docs/operations.md),
+and [Getting Started](docs/getting-started.md) has the fuller walkthrough.
 
 ## 📈 Monitoring
 
@@ -180,7 +234,7 @@ covers downloads, DNS, and the limits of the guarantee.
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
 | [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
-| [Tor & Privacy](docs/privacy.md) | Enforced routing, LAN access, host downloads, and bootstrap. |
+| [Tor & Privacy](docs/privacy.md) | Enforced runtime routing, LAN access, and the host-download boundary. |
 | [Architecture](docs/architecture.md) | The three services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |
 | [Notifications & Remote Access](docs/notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |

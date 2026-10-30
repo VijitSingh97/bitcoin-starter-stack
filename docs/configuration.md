@@ -9,6 +9,15 @@ can't end up in a commit. `./stack init` and `./stack restore` keep both files
 private with mode `600`. The wizard prints the new shared login once at the end;
 restore does not print credentials.
 
+APT installations use `bitcoin-stack` in place of `./stack`. Their config is
+`/etc/bitcoin-starter-stack/config.json`; generated credentials and backups live
+under `/var/lib/bitcoin-starter-stack`, and chain data defaults to the dedicated
+`/var/lib/bitcoin-starter-stack/data/bitcoin` directory. Run package commands
+with `sudo`. A fresh package installation with no config or prior `.env` defaults
+to `prune_mb: 10000`; an explicit config or existing generated value always wins.
+`dashboard.control` is unavailable for APT installations because package
+upgrades require an explicit administrator command.
+
 ## config.json reference
 
 Every key is optional. The template ([config.example.json](../config.example.json))
@@ -54,9 +63,9 @@ shows the overridable settings with their defaults:
 |---|---|---|
 | `bitcoin.node_username` | `admin` | RPC username used by the dashboard and optional LAN wallet connections. Letters and numbers only. |
 | `bitcoin.node_password` | auto-generated | Shared RPC and dashboard password on fresh installs. Existing explicit or rendered credentials remain unchanged. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
-| `bitcoin.data_dir` | `./data/bitcoin` | Where the blockchain lives on the host. Relative paths resolve from the repo root. |
+| `bitcoin.data_dir` | `./data/bitcoin` (source), `/var/lib/bitcoin-starter-stack/data/bitcoin` (APT) | Where the blockchain lives on the host. Relative source paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `128` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). Existing installs keep their rendered cache setting when this key is omitted; the Compose fallback remains 3000 for older `.env` files that predate this setting. |
-| `bitcoin.prune_mb` | `10000` | Keeps about 10 GB of recent block files after full validation. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
+| `bitcoin.prune_mb` | `10000` | Keeps about 10 GB of recent block files after full validation. Existing explicit configuration and rendered state remain unchanged. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node accepts inbound connections and serves available blocks with no IP exposure. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | Advanced archival-node compatibility setting. It is incompatible with pruning and is not needed for the default pruned watch-only balance scan. |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM. **Size it above `dbcache_mb`** and leave additional room for Core's workload-dependent memory outside the cache. There is no universal fixed margin; monitor actual usage because a low cap can make bitcoind restart-loop. `configure.sh` warns if the cap is not above `dbcache_mb`. |
@@ -76,7 +85,7 @@ shows the overridable settings with their defaults:
 `configure.sh` applies the defaults above for any omitted key, and generates
 strong random RPC credentials on first run (reused on later runs).
 Starting and applying use local images only. See [Tor-only networking](privacy.md)
-for the Tor-verified image download and first-install bootstrap process.
+for the boundary between host downloads and Tor-only runtime traffic.
 
 Fresh headless installs use the same generated value for `BITCOIN_RPC_PASSWORD`
 and `DASHBOARD_PASSWORD`. Read it locally from the mode-600 `.env`; upgrades

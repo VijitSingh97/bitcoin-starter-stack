@@ -21,8 +21,9 @@ All notable changes to this project are documented here. Format follows
 - Bitcoin and dashboard networking is externally isolated, with local DNS
   forwarding disabled. Only Tor has an internet route; the optional clearnet
   sync setting is removed. Dashboard access binds to loopback or a private IPv4.
-- Starts use preloaded images. Downloads and upgrades require Tor-routed Git
-  and Docker; an unavailable or unverified proxy blocks image downloads.
+- Routine starts use local images without implicit pulls or builds. The setup
+  wizard and `pull` command download missing images with host Docker settings;
+  source upgrades continue to fetch Git release tags through Tor.
 - Updated the digest-pinned Bitcoin Core image to 32.1, retaining the existing
   connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
 - Update notices and Telegram release alerts track stack releases only, with
@@ -34,6 +35,9 @@ All notable changes to this project are documented here. Format follows
 
 - A notification settings menu with persistent JSON overrides, live updates,
   visible saved values, and the dashboard's optional password on LAN or onion access.
+- Prepared an Ubuntu 24.04 APT package with a global `bitcoin-stack` command,
+  FHS configuration and persistent state, a fresh-install pruning default, and
+  signed-feed release automation for the next release.
 - Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
   and explicit unavailable/stale states.
 - An address-type selector for wallets that export a bare xpub for SegWit accounts.

@@ -4,19 +4,27 @@
 # defaults and the internal RPC credentials are auto-generated — zero setup.
 # Usually run for you by `./stack up`; safe to run directly and to re-run.
 set -euo pipefail
+stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")" && pwd)}
+state_dir=${BITCOIN_STACK_STATE_DIR:-$stack_root}
+config_dir=${BITCOIN_STACK_CONFIG_DIR:-$state_dir}
+config_file=$config_dir/config.json
+env_file=$state_dir/.env
+stack_command=${BITCOIN_STACK_COMMAND:-./stack}
+package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
 umask 077
-cd "$(dirname "$0")"
+mkdir -p "$state_dir" "$config_dir"
+cd "$state_dir"
 
 for tool in jq openssl; do
   command -v "$tool" >/dev/null || {
-    echo "$tool is required; see docs/privacy.md for Tor-routed dependency installation."
+    echo "$tool is required; install it with your host package manager."
     exit 1
   }
 done
 
 # config.json is optional — default to an empty object so every field falls back.
 config='{}'
-[ -f config.json ] && config=$(cat config.json)
+[ -f "$config_file" ] && config=$(cat "$config_file")
 
 get() { jq -r "$1 // \"${2:-}\"" <<<"$config"; }
 flag() { jq -r "if $1 == true then 1 else 0 end" <<<"$config"; }
@@ -28,10 +36,10 @@ rpc_password=$(get '.bitcoin.node_password')
 dashboard_password=$(get '.dashboard.password')
 dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
 had_env=0
-[ -f .env ] && had_env=1
-[ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env 2>/dev/null || true)
-[ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env 2>/dev/null || true)
-[ "$dashboard_password_set" = "1" ] || dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' .env 2>/dev/null || true)
+[ -f "$env_file" ] && had_env=1
+[ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$env_file" 2>/dev/null || true)
+[ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
+[ "$dashboard_password_set" = "1" ] || dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 [ -n "$rpc_user" ] || rpc_user="admin"
 if [ "$had_env" = "0" ]; then
   [ -n "$rpc_password" ] || rpc_password=$dashboard_password
@@ -42,29 +50,36 @@ if [ -z "$rpc_password" ]; then
   [ "$had_env" = "1" ] || dashboard_password=$rpc_password
 fi
 
-data_dir=$(get '.bitcoin.data_dir' './data/bitcoin')
+data_dir=$(get '.bitcoin.data_dir')
+if [ -z "$data_dir" ]; then
+  if [ -n "${BITCOIN_STACK_DATA_DIR:-}" ]; then
+    data_dir=$BITCOIN_STACK_DATA_DIR/bitcoin
+  else
+    data_dir=./data/bitcoin
+  fi
+fi
 dbcache=$(jq -r '.bitcoin.dbcache_mb // empty' <<<"$config")
 [ -n "$dbcache" ] || {
-  dbcache=$(sed -n 's/^BITCOIN_DBCACHE=//p' .env 2>/dev/null || true)
-  [ -n "$dbcache" ] || [ ! -f .env ] || dbcache=3000
+  dbcache=$(sed -n 's/^BITCOIN_DBCACHE=//p' "$env_file" 2>/dev/null || true)
+  [ -n "$dbcache" ] || [ ! -f "$env_file" ] || dbcache=3000
 }
 [ -n "$dbcache" ] || dbcache=128
 prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$config")
 [ -n "$prune" ] || {
-  prune=$(sed -n 's/^BITCOIN_PRUNE=//p' .env 2>/dev/null || true)
-  [ -n "$prune" ] || [ ! -f .env ] || prune=0
+  prune=$(sed -n 's/^BITCOIN_PRUNE=//p' "$env_file" 2>/dev/null || true)
+  [ -n "$prune" ] || [ ! -f "$env_file" ] || prune=0
 }
 [ -n "$prune" ] || prune=10000
 mem_limit_mb=$(jq -r '.bitcoin.mem_limit_mb // 0' <<<"$config")
 inbound_onion=$(jq -r 'if ((.bitcoin // {}) | has("inbound_onion")) then if .bitcoin.inbound_onion == true then 1 else 0 end else empty end' <<<"$config")
-[ -n "$inbound_onion" ] || inbound_onion=$(sed -n 's/^BITCOIN_INBOUND_ONION=//p' .env 2>/dev/null || true)
+[ -n "$inbound_onion" ] || inbound_onion=$(sed -n 's/^BITCOIN_INBOUND_ONION=//p' "$env_file" 2>/dev/null || true)
 [ -n "$inbound_onion" ] || inbound_onion=0
 blockfilterindex=$(flag '.bitcoin.blockfilterindex')
 rpc_expose=$(flag '.bitcoin.rpc_expose')
 rpc_bind_ip=$(get '.bitcoin.rpc_bind_ip')
 rpc_port=$(jq -r '.bitcoin.rpc_port // 8332' <<<"$config")
 dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$config")
-[ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' .env 2>/dev/null || true)
+[ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' "$env_file" 2>/dev/null || true)
 [ -n "$dashboard_onion" ] || dashboard_onion=0
 dashboard_control=$(flag '.dashboard.control')
 dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
@@ -72,9 +87,17 @@ telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
 alert_new_block=$(flag '.notifications.alert_new_block')
+if [ "$package_managed" = "1" ] && [ "$dashboard_control" = "1" ]; then
+  echo "dashboard.control is unavailable for APT installations; use $stack_command backup, apt upgrade, then $stack_command apply." >&2
+  exit 1
+fi
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
-watch_wallets_b64=$(jq -cej '
+default_wallets='[{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}]'
+if [ "$package_managed" = "1" ] && [ "$prune" != "0" ]; then
+  default_wallets='[]'
+fi
+watch_wallets_b64=$(jq -cej --argjson defaults "$default_wallets" '
   def public_key:
     type == "string" and
     (gsub("^\\s+|\\s+$"; "") |
@@ -82,7 +105,7 @@ watch_wallets_b64=$(jq -cej '
        (test("^(?:addr|pk|pkh|wpkh|sh|wsh|tr|rawtr|combo|raw|multi|sortedmulti)\\(") and
         (test("\\s") | not) and
         (test("(^|[^A-Za-z0-9])[xtyuzvXYZUV]prv[A-Za-z0-9]+|(^|[^1-9A-HJ-NP-Za-km-z])[5KL9c][1-9A-HJ-NP-Za-km-z]{50,51}($|[^1-9A-HJ-NP-Za-km-z])") | not))));
-  (if has("wallets") then .wallets else [{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}] end) |
+  (if has("wallets") then .wallets else $defaults end) |
   if type != "array" then error("wallets must be an array")
   elif all(.[]; type == "object" and (.key | public_key)) then .
   else error("wallets accept only public addresses, extended public keys, or public descriptors; remove private or invalid material from config.json") end
@@ -224,29 +247,29 @@ fi
 # Reuse the existing salt (like the password above) so an unchanged password
 # re-renders byte-identical — a fresh salt every run would rotate the hash and
 # needlessly recreate the bitcoin container on every apply/upgrade.
-rpcauth_salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' .env 2>/dev/null || true)
+rpcauth_salt=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$env_file" 2>/dev/null || true)
 [ -n "$rpcauth_salt" ] || rpcauth_salt=$(openssl rand -hex 16)
 rpcauth_hash=$(printf '%s' "$rpc_password" | openssl dgst -sha256 -hmac "$rpcauth_salt" -r | cut -d' ' -f1)
 
 # Displayed version: the release number when this checkout IS the tagged release
 # (or an unpacked release tarball, which has no git), otherwise branch-commit so
 # dev builds are identifiable rather than masquerading as the release.
-version=$(cat VERSION 2>/dev/null || echo dev)
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  head=$(git rev-parse HEAD 2>/dev/null || echo)
+version=$(cat "$stack_root/VERSION" 2>/dev/null || echo dev)
+if git -C "$stack_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  head=$(git -C "$stack_root" rev-parse HEAD 2>/dev/null || echo)
   # ^{commit} dereferences the (annotated) release tag to its commit; without it
   # the tag-object sha never equals HEAD and every deploy looks like a dev build.
-  tag=$(git rev-parse "v$version^{commit}" 2>/dev/null || echo)
+  tag=$(git -C "$stack_root" rev-parse "v$version^{commit}" 2>/dev/null || echo)
   # diff-index checks tracked files only, so runtime files (.env, data/) don't
   # demote a clean release checkout to a dev build.
-  if [ -n "$head" ] && [ "$head" = "$tag" ] && git diff-index --quiet HEAD -- 2>/dev/null; then
+  if [ -n "$head" ] && [ "$head" = "$tag" ] && git -C "$stack_root" diff-index --quiet HEAD -- 2>/dev/null; then
     stack_version="$version" # clean checkout of the release tag
   else
     # '/' is legal in a git branch name but not in a Docker image tag, and
     # STACK_VERSION is used as the compose image tag — sanitize so a branch like
     # feat/x doesn't render an invalid ghcr reference and break `docker compose`.
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')
-    short=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+    branch=$(git -C "$stack_root" rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')
+    short=$(git -C "$stack_root" rev-parse --short HEAD 2>/dev/null || echo unknown)
     if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
       stack_version="$branch-$short" # a named branch
     else
@@ -257,7 +280,7 @@ else
   stack_version="$version" # release tarball (no .git)
 fi
 
-env_tmp=$(mktemp .env.tmp.XXXXXX)
+env_tmp=$(mktemp "$state_dir/.env.tmp.XXXXXX")
 trap 'rm -f "$env_tmp"' EXIT
 cat >"$env_tmp" <<EOF
 COMPOSE_FILE=$compose_file
@@ -284,13 +307,18 @@ HEALTHCHECKS_URL=$healthchecks_url
 ALERT_NEW_BLOCK=$alert_new_block
 NODE_NAME=$(hostname)
 STACK_VERSION=$stack_version
+STACK_ROOT=$stack_root
 WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
 chmod 600 "$env_tmp"
-mv -f "$env_tmp" .env
+mv -f "$env_tmp" "$env_file"
 
 # Create the data dir up front, or docker creates it root-owned
 # and bitcoind (uid 1000) can't write to it
 mkdir -p "$data_dir"
+if [ "$package_managed" = "1" ] && [ "$data_dir" = "${BITCOIN_STACK_DATA_DIR%/}/bitcoin" ]; then
+  chown 1000:1000 "$data_dir"
+  chmod 700 "$data_dir"
+fi
 
-echo "Done. Start preloaded images with: ./stack up (downloads: ./stack pull; see docs/privacy.md)."
+echo "Done. Start local images with: $stack_command up (download missing images: $stack_command pull)."

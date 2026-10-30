@@ -22,7 +22,7 @@ Multi-arch images (amd64 and arm64/Raspberry Pi) for the two first-party
 components — `tor` and `dashboard` — are built and published to GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) per release by the `images`
 job in the [Release workflow](../.github/workflows/release.yml).
-`./stack pull` downloads these tags through a verified host Tor proxy;
+`./stack pull` downloads these tags with the host's Docker settings;
 `./stack up` starts only locally available images and never builds implicitly.
 The release artifact is also a source tarball. Source builds need a controlled
 build environment with its own Tor egress; see [Privacy](privacy.md).
@@ -77,10 +77,33 @@ Nothing is published until the gate is green. A red gate leaves the tag
 without a release — fix on `main`, bump the patch version, tag again
 (release tags are protected from deletion and rewrite by a repo ruleset).
 
+## APT feed
+
+The first APT feed must wait for a new release containing the Go dashboard so
+the package version and published amd64/arm64 images match. Before that release:
+
+1. Create a dedicated signing key for this project. Do not reuse another
+   project's private key.
+2. Commit its full primary fingerprint in the user onboarding command in
+   `docs/privacy.md`, replacing `UNPUBLISHED`, and review that change before
+   enabling the feed.
+3. Store the armored private key as the `APT_SIGNING_KEY` repository secret and
+   its full fingerprint as the `APT_SIGNING_FINGERPRINT` repository variable.
+4. Configure GitHub Pages to deploy through GitHub Actions.
+5. Decide the feed replay policy before activation. The static feed currently
+   omits `Valid-Until`, so releases remain installable between releases but old
+   signed snapshots do not expire. Adding an expiry requires monitored periodic
+   re-signing so an idle project does not break every user's `apt update`.
+
+After the normal source release and multi-architecture images succeed, the
+release workflow builds the architecture-independent package, verifies its
+signed feed locally with APT, uploads the package and checksum to the GitHub
+Release, and deploys the feed to Pages.
+
 ## How users get a release
 
-- **Tarball:** obtain `bitcoin-starter-stack.tar.gz` through Tor, unpack,
-  configure [Tor image downloads](privacy.md), then `./stack pull` and `./stack up`.
+- **Tarball:** obtain and unpack `bitcoin-starter-stack.tar.gz`, then run
+  `./stack init` to download missing images and start.
 - **Git:** `./stack upgrade` fetches and applies a release through the guarded
   Tor download path. Source builds stay in a separately controlled environment.
 - Running stacks learn about new releases from the dashboard's daily

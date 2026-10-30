@@ -2,16 +2,13 @@
 
 ## Prerequisites
 
-- **An existing Tor connection or an offline source/image bundle.** Set up
-  [Tor for downloads](privacy.md#bootstrap-and-apt) before installing dependencies,
-  cloning the repository, or fetching images. There is no clearnet bootstrap.
 - **Ubuntu Server 24.04** (other Docker-capable Linux works, but this is
   what's tested).
 - **[Docker Engine](https://docs.docker.com/engine/install/ubuntu/)** and
   Docker Compose **2.33.1 or newer**, with the
   [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
   so your user can run `docker` without sudo.
-- **`jq`, `openssl`, and `curl`** — configuration and verified Tor downloads.
+- **`jq`, `openssl`, and `curl`** — configuration and downloads.
 - Hardware per [Hardware Requirements](hardware.md) — the short version:
   2 CPUs, 4 GB RAM, and 30–60 GB free on an SSD are the recommended target for
   the default pruned node. A short trial also worked with the containers limited
@@ -22,25 +19,61 @@ Optional: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
 machines on your LAN.
 
-Once APT's Tor proxy is configured as described in the privacy guide, install
-`jq`, `openssl`, `curl`, and optionally `avahi-daemon` through that proxy.
+Install `jq`, `openssl`, `curl`, and optionally `avahi-daemon` with APT.
 
 ## Install
 
+The Ubuntu 24.04 APT package will become available with the next release, after
+matching amd64 and arm64 dashboard images are published. It installs the
+`bitcoin-stack` command globally and keeps mutable files in standard system
+locations:
+
+- configuration: `/etc/bitcoin-starter-stack/config.json`
+- generated credentials and backups: `/var/lib/bitcoin-starter-stack/`
+- Bitcoin chain data: `/var/lib/bitcoin-starter-stack/data/bitcoin/`
+
+APT installation does not start containers, run setup, or change an existing
+checkout. Run `sudo bitcoin-stack init` explicitly after installation. A new
+package install defaults to `prune_mb: 10000`; existing configuration and
+generated state always win, so an upgrade never converts a full node to pruning.
+The first package release supports fresh installations only; keep an existing
+source-managed production node on its current upgrade path. Package mode blocks
+startup when the fixed service names belong to another Compose installation.
+The commands below remain the supported installation until the feed is live.
+When the package is released, verify and install its signing key as described in
+[Package feed](privacy.md#package-feed), then add the feed:
+
 ```bash
-NO_PROXY='' no_proxy='' git -c http.proxy=socks5h://127.0.0.1:9050 clone \
-  https://github.com/VijitSingh97/bitcoin-starter-stack.git
-cd bitcoin-starter-stack
-./stack up tor       # initial Tor image must already be loaded locally
-./stack pull         # Docker's Tor proxy must be configured and active
-./stack up
+echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/bitcoin-starter-stack ./' \
+  | sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo apt update
+sudo apt install bitcoin-starter-stack
+sudo bitcoin-stack init
 ```
 
-The clone example uses an existing Tor proxy on localhost. For an offline
-installation, unpack the source and load the images locally instead. Follow the
-[bootstrap guide](privacy.md#bootstrap-and-apt) for the initial image and Docker
-proxy setup before running these commands. `up` and `apply` never download or
-build implicitly.
+The wizard configures the node, downloads missing images with the host's Docker
+settings, and starts the stack when you accept its final default. Docker keeps
+image layers in its own managed storage. Neither package installation nor the
+wizard changes the Docker daemon or its proxy settings.
+
+For the current release-tarball installation:
+
+```bash
+curl --fail --location --output bitcoin-starter-stack.tar.gz \
+  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest/download/bitcoin-starter-stack.tar.gz
+tar -xzf bitcoin-starter-stack.tar.gz
+cd bitcoin-starter-stack
+./stack init
+```
+
+The tarball's semantic version matches its published container images.
+Development branches use unpublished image tags and require images built in a
+separate development environment; do not use a branch checkout for installation.
+
+For an offline installation, unpack the source and load all images locally. The
+wizard sees that they are present and starts without downloading. `up` and
+`apply` never download or build implicitly; `pull` is always an explicit host
+network action.
 
 `./stack up` runs `configure.sh` on first launch, which renders a gitignored
 `.env` and creates the data directory. With no `config.json` it uses sensible
@@ -54,17 +87,17 @@ start with `sed -n 's/^DASHBOARD_PASSWORD=/Password: /p' .env`; the username is
 
 The `tor` and `dashboard` images are published prebuilt on GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
-(Raspberry Pi). `./stack pull` downloads them only after verifying the Docker
-daemon's Tor proxy. Development builds require a separately Tor-routed build
-environment.
+(Raspberry Pi). `./stack pull` downloads them with the host's existing Docker
+settings. The running Bitcoin and dashboard containers remain isolated behind
+Tor regardless of how their images were obtained.
 
 Everything is optional. Two ways to customize:
 
 - **`./stack init`** — an interactive wizard that asks for a shared RPC/dashboard
   password (Enter generates a strong one and prints it once at the end), the data
   directory, a loopback or private-LAN dashboard address, one-click upgrades,
-  optional private-LAN wallet RPC, and recent-block retention. Every prompt has a
-  default you accept by pressing Enter.
+  optional private-LAN wallet RPC, recent-block retention, and whether to download
+  missing images and start. Every prompt has a default you accept by pressing Enter.
 - Or edit `config.json` by hand (copy `config.example.json`) and run
   `./stack apply`. Stick to letters and numbers in any credentials you set.
 
@@ -79,6 +112,7 @@ Dashboard bind address (loopback or private LAN) [127.0.0.1]:
 One-click upgrades from the dashboard (Upgrade button)? [y/N]
 Expose Bitcoin RPC to trusted LAN wallet apps? [y/N]
 Recent-block retention in GB [10]:
+Download missing containers and start the stack now? [Y/n]
 Dashboard login (shown once):
   Username: admin
   Password: <the password you entered or the generated password>
@@ -118,8 +152,8 @@ its RPC is warmed up.
 ## Verify it's working
 
 ```bash
-docker ps            # all three containers Up, eventually (healthy)
-curl -s localhost | grep -o 'Bitcoin Node' | head -1
+./stack status        # source install
+sudo bitcoin-stack status  # package install
 ```
 
 If something looks wrong, see

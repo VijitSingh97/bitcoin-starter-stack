@@ -13,6 +13,8 @@ fi
 tests/test_configure.sh
 tests/test_cli.sh
 tests/test_release.sh
+tests/test_package.sh
+tests/test_apt.sh
 tests/test_compose.sh
 tests/test_e2e.sh
 tests/test_upgrade.sh

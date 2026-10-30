@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-pages
+  cancel-in-progress: false
+
 jobs:
   gate:
     uses: ./.github/workflows/ci.yml
@@ -76,3 +80,69 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f build/dashboard/Dockerfile \
             -t "$base-dashboard:$v" -t "$base-dashboard:latest" --push .
+
+  apt:
+    needs: [publish, images]
+    if: vars.APT_SIGNING_FINGERPRINT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      APT_SIGNING_FINGERPRINT: ${{ vars.APT_SIGNING_FINGERPRINT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y apt-utils
+      - name: Validate and build package
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          scripts/build-deb.sh
+          dpkg-deb --info dist/*.deb
+      - name: Build signed APT feed
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          GNUPGHOME=$(mktemp -d)
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s' "$APT_SIGNING_KEY" | gpg --batch --import
+          scripts/build-apt.sh
+          gpg --verify public/InRelease
+      - name: Verify feed with APT
+        run: |
+          state=$(mktemp -d)
+          chmod 755 "$state"
+          mkdir -p "$state/lists/partial" "$state/download"
+          cp -R public "$state/feed"
+          chmod -R a+rX "$state/feed"
+          printf 'deb [signed-by=%s/feed/bitcoin-starter-stack.asc] file:%s/feed ./\n' "$state" "$state" >"$state/sources.list"
+          options=(-o "Dir::Etc::sourcelist=$state/sources.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/lists")
+          sudo apt-get "${options[@]}" update
+          cd "$state/download"
+          sudo apt-get "${options[@]}" download bitcoin-starter-stack
+          dpkg-deb --info ./*.deb
+      - name: Upload package assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum ./*.deb >SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" ./*.deb SHA256SUMS --clobber
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: public
+      - name: Deploy signed APT feed
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

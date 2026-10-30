@@ -50,6 +50,7 @@ printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a 
 # shared password, data dir, dashboard bind, control, LAN RPC, prune, start
 out=$(printf 'hunter2hunter2hunter2hunter2\n%s\n192.168.1.116\ny\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
+printf '%s' "$out" | grep -q 'Later: ./stack pull && ./stack up' || fail "init deferred-start instructions omit image download"
 [ "$(printf '%s' "$out" | grep -c 'Password: hunter2hunter2hunter2hunter2')" = "1" ] || fail "init did not print the new login exactly once"
 [ "$(printf '%s' "$out" | grep -c 'Username: admin')" = "1" ] || fail "init did not print the username exactly once"
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
@@ -78,7 +79,7 @@ grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail 
 # Enter at the dashboard-password prompt generates a strong one (#76):
 # Existing archival, path, and bind settings survive a wizard rewrite.
 jq '.bitcoin.prune_mb=0' config.json >config.next && mv config.next config.json
-out=$(printf 'y\n\n\n\n\nn\nn\n\nn\n' | ./stack init)
+out=$(printf 'y\n\n\n\nn\nn\n\nn\n' | ./stack init)
 generated=$(jq -r '.dashboard.password' config.json)
 printf '%s' "$generated" | grep -qE '^[0-9a-f]{48}$' ||
   fail "init: empty password should generate a 48-hex one"
@@ -114,9 +115,11 @@ EOS
 cat >"$stub/docker" <<'EOS'
 #!/usr/bin/env bash
 echo "docker $*" >>"$FAKE_LOG"
-if [ "${1:-}" = info ]; then
-  if [ -n "${FAKE_DOCKER_INFO:-}" ]; then printf '%s\n' "$FAKE_DOCKER_INFO"; else printf '{}\n'; fi
-fi
+case " $* " in
+  *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
+  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ]; exit ;;
+esac
 exit 0
 EOS
 cat >"$stub/pgrep" <<'EOS'
@@ -136,6 +139,38 @@ cat >"$stub/systemctl" <<'EOS'
 exit 1
 EOS
 chmod +x "$stub"/*
+
+wizard="$tmp/wizard"
+mkdir "$wizard"
+cp stack configure.sh "$wizard/"
+printf '1.2.3\n' >"$wizard/VERSION"
+rm -f "$FAKE_LOG"
+(cd "$wizard" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+  FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
+grep -q 'docker compose pull' "$FAKE_LOG" || fail "init did not pull missing images"
+grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
+
+wizard_loaded="$tmp/wizard-loaded"
+mkdir "$wizard_loaded"
+cp stack configure.sh "$wizard_loaded/"
+printf '1.2.3\n' >"$wizard_loaded/VERSION"
+rm -f "$FAKE_LOG"
+(cd "$wizard_loaded" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+  HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
+grep -q 'docker compose pull' "$FAKE_LOG" && fail "init pulled images that were already local"
+grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init did not start local images"
+
+wizard_failed="$tmp/wizard-failed"
+mkdir "$wizard_failed"
+cp stack configure.sh "$wizard_failed/"
+printf '1.2.3\n' >"$wizard_failed/VERSION"
+rm -f "$FAKE_LOG"
+(cd "$wizard_failed" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+  FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
+  fail "init ignored a missing-image pull failure"
+grep -q 'docker compose pull' "$FAKE_LOG" || fail "init failure did not attempt a pull"
+grep -q 'docker compose up -d' "$FAKE_LOG" && fail "init started after a failed pull"
+
 echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 
 # control on -> cron entry installed, agent started
@@ -156,27 +191,12 @@ HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up --build >/dev/null 2>&1 && fail "up allows an implicit build"
 
-# Image downloads fail before contacting a registry unless the daemon uses Tor.
+# Explicit pulls use the host Docker configuration and report pull failures.
 rm -f "$FAKE_LOG"
-HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull accepted an unproxied daemon"
-grep -q 'docker compose pull' "$FAKE_LOG" && fail "unproxied pull reached the registry command"
-cat >"$stub/curl" <<'EOS'
-#!/usr/bin/env bash
-echo "curl $*" >>"$FAKE_LOG"
-printf '{"IsTor":true}\n'
-EOS
-chmod +x "$stub/curl"
-export FAKE_DOCKER_INFO='{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","NoProxy":"","RegistryConfig":{"Mirrors":[]}}'
-HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null || fail "verified Tor pull failed"
-grep -q 'curl .*--proxy socks5h://172.29.0.25:9050 --noproxy ' "$FAKE_LOG" || fail "Tor verification can bypass its proxy"
-grep -q 'docker compose pull' "$FAKE_LOG" || fail "verified pull did not run"
-for bad_info in \
-  '{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","NoProxy":"*"}' \
-  '{"HttpProxy":"http://proxy:3128","HttpsProxy":"http://proxy:3128"}' \
-  '{"HttpProxy":"socks5h://172.29.0.25:9050","HttpsProxy":"socks5h://172.29.0.25:9050","RegistryConfig":{"Mirrors":["https://mirror.example"]}}'; do
-  FAKE_DOCKER_INFO="$bad_info" HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull accepted an unsafe proxy configuration"
-done
-unset FAKE_DOCKER_INFO
+HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null || fail "host Docker pull failed"
+grep -q 'docker compose pull' "$FAKE_LOG" || fail "pull did not reach Compose"
+grep -q 'docker info' "$FAKE_LOG" && fail "pull inspected or changed host Docker proxy settings"
+FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull failure was ignored"
 
 cat >"$stub/git" <<'EOS'
 #!/usr/bin/env bash
@@ -196,7 +216,7 @@ grep -q 'no_proxy= NO_PROXY=$' "$FAKE_LOG" || fail "Git inherited a proxy bypass
 rm -f "$FAKE_LOG"
 FAKE_ORIGIN=git@github.com:example/stack.git PATH="$stub:$PATH" ./stack upgrade >/dev/null 2>&1 && fail "SSH origin accepted"
 [ ! -f "$FAKE_LOG" ] || fail "SSH upgrade attempted a network fetch"
-rm -f "$stub/git" "$stub/curl"
+rm -f "$stub/git"
 
 # control off -> cron entry removed, agent killed
 echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json

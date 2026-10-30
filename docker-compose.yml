@@ -8,9 +8,9 @@ x-logging: &logging
 
 services:
   tor:
-    # Prebuilt release image; ./stack pull verifies Tor before downloading.
+    # Prebuilt release image; downloads use the host's Docker settings.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:-latest}
-    build: ./build/tor
+    build: ${STACK_ROOT:-.}/build/tor
     container_name: tor
     security_opt:
       - no-new-privileges:true
@@ -64,7 +64,7 @@ services:
       BLOCKFILTERINDEX: ${BITCOIN_BLOCKFILTERINDEX:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
-      - ./build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
+      - ${STACK_ROOT:-.}/build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
       - tor_data:/var/lib/tor:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
     # Auth uses rpcauth (salted hash) — the plaintext RPC password never
@@ -107,7 +107,7 @@ services:
     # Prebuilt release image, with an explicit build target for development.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
     build:
-      context: .
+      context: ${STACK_ROOT:-.}
       dockerfile: build/dashboard/Dockerfile
     container_name: dashboard
     # runs non-root (uid 1000) via USER in build/dashboard/Dockerfile — the
