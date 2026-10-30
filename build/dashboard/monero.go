@@ -20,32 +20,66 @@ import (
 const maxMoneroRPCBody = 1 << 20
 
 type moneroStatus struct {
-	Enabled             bool    `json:"enabled"`
-	Available           bool    `json:"available"`
-	Synced              bool    `json:"synced"`
-	Height              uint64  `json:"height"`
-	TargetHeight        uint64  `json:"target_height"`
-	SyncPercent         float64 `json:"sync_percent"`
-	Version             string  `json:"version"`
-	UptimeSeconds       uint64  `json:"uptime_seconds"`
-	IncomingConnections uint64  `json:"incoming_connections"`
-	OutgoingConnections uint64  `json:"outgoing_connections"`
-	Pruned              bool    `json:"pruned"`
-	DatabaseSizeBytes   uint64  `json:"database_size_bytes"`
-	Error               string  `json:"error"`
+	Enabled               bool    `json:"enabled"`
+	Available             bool    `json:"available"`
+	Synced                bool    `json:"synced"`
+	Height                uint64  `json:"height"`
+	TargetHeight          uint64  `json:"target_height"`
+	SyncPercent           float64 `json:"sync_percent"`
+	Version               string  `json:"version"`
+	UptimeSeconds         uint64  `json:"uptime_seconds"`
+	IncomingConnections   uint64  `json:"incoming_connections"`
+	OutgoingConnections   uint64  `json:"outgoing_connections"`
+	Pruned                bool    `json:"pruned"`
+	DatabaseSizeBytes     uint64  `json:"database_size_bytes"`
+	MempoolTxs            uint64  `json:"mempool_txs"`
+	MempoolTxsAvailable   bool    `json:"mempool_txs_available"`
+	MempoolBytes          uint64  `json:"mempool_bytes"`
+	MempoolBytesAvailable bool    `json:"mempool_bytes_available"`
+	Difficulty            uint64  `json:"difficulty"`
+	NetworkHashrate       float64 `json:"network_hashrate"`
+	HashrateAvailable     bool    `json:"hashrate_available"`
+	LatestBlockTimestamp  uint64  `json:"latest_block_timestamp"`
+	LatestBlockAgeSeconds uint64  `json:"latest_block_age_seconds"`
+	LatestBlockAvailable  bool    `json:"latest_block_available"`
+	DiskTotalBytes        uint64  `json:"disk_total_bytes"`
+	DiskFreeBytes         uint64  `json:"disk_free_bytes"`
+	DiskAvailable         bool    `json:"disk_available"`
+	RPCExposureEnabled    bool    `json:"rpc_exposure_enabled"`
+	RPCEndpoint           string  `json:"rpc_endpoint"`
+	ZMQExposureEnabled    bool    `json:"zmq_exposure_enabled"`
+	ZMQEndpoint           string  `json:"zmq_endpoint"`
+	Error                 string  `json:"error"`
 }
 
 type moneroInfo struct {
-	Synchronized             bool   `json:"synchronized"`
-	BusySyncing              bool   `json:"busy_syncing"`
-	Height                   uint64 `json:"height"`
-	TargetHeight             uint64 `json:"target_height"`
-	Version                  string `json:"version"`
-	StartTime                uint64 `json:"start_time"`
-	IncomingConnectionsCount uint64 `json:"incoming_connections_count"`
-	OutgoingConnectionsCount uint64 `json:"outgoing_connections_count"`
-	PruningSeed              uint64 `json:"pruning_seed"`
-	DatabaseSize             uint64 `json:"database_size"`
+	Synchronized             bool    `json:"synchronized"`
+	BusySyncing              bool    `json:"busy_syncing"`
+	Height                   uint64  `json:"height"`
+	TargetHeight             uint64  `json:"target_height"`
+	Version                  string  `json:"version"`
+	StartTime                uint64  `json:"start_time"`
+	IncomingConnectionsCount uint64  `json:"incoming_connections_count"`
+	OutgoingConnectionsCount uint64  `json:"outgoing_connections_count"`
+	PruningSeed              uint64  `json:"pruning_seed"`
+	DatabaseSize             uint64  `json:"database_size"`
+	Difficulty               uint64  `json:"difficulty"`
+	Target                   uint64  `json:"target"`
+	TxPoolSize               *uint64 `json:"tx_pool_size"`
+}
+
+type moneroBlockHeader struct {
+	Timestamp uint64 `json:"timestamp"`
+}
+type moneroLastBlock struct {
+	BlockHeader moneroBlockHeader `json:"block_header"`
+}
+type moneroPoolStats struct {
+	Status    string `json:"status"`
+	PoolStats *struct {
+		BytesTotal *uint64 `json:"bytes_total"`
+		TxsTotal   *uint64 `json:"txs_total"`
+	} `json:"pool_stats"`
 }
 
 type moneroRPC struct {
@@ -57,7 +91,11 @@ type moneroRPC struct {
 
 func (a *app) apiMonero(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	status := moneroStatus{Enabled: a.cfg.moneroEnabled}
+	status := moneroStatus{
+		Enabled:            a.cfg.moneroEnabled,
+		RPCExposureEnabled: a.cfg.moneroRPCEndpoint != "", RPCEndpoint: a.cfg.moneroRPCEndpoint,
+		ZMQExposureEnabled: a.cfg.moneroZMQEndpoint != "", ZMQEndpoint: a.cfg.moneroZMQEndpoint,
+	}
 	if !a.cfg.moneroEnabled {
 		writeJSON(w, status)
 		return
@@ -89,6 +127,30 @@ func (a *app) apiMonero(w http.ResponseWriter, r *http.Request) {
 	status.OutgoingConnections = info.OutgoingConnectionsCount
 	status.Pruned = info.PruningSeed != 0
 	status.DatabaseSizeBytes = info.DatabaseSize
+	if info.TxPoolSize != nil {
+		status.MempoolTxs, status.MempoolTxsAvailable = *info.TxPoolSize, true
+	}
+	status.Difficulty = info.Difficulty
+	if info.Difficulty > 0 && info.Target > 0 {
+		status.NetworkHashrate = float64(info.Difficulty) / float64(info.Target)
+		status.HashrateAvailable = true
+	}
+	if disk := diskUsage(a.cfg.moneroDataDir); disk.Total > 0 {
+		status.DiskTotalBytes, status.DiskFreeBytes, status.DiskAvailable = disk.Total, disk.Free, true
+	}
+	var last moneroLastBlock
+	if rpc.call(ctx, "get_last_block_header", &last) == nil && last.BlockHeader.Timestamp > 0 {
+		status.LatestBlockTimestamp, status.LatestBlockAvailable = last.BlockHeader.Timestamp, true
+		now := uint64(time.Now().Unix())
+		if now > last.BlockHeader.Timestamp {
+			status.LatestBlockAgeSeconds = now - last.BlockHeader.Timestamp
+		}
+	}
+	var pool moneroPoolStats
+	if rpc.callPath(ctx, "/get_transaction_pool_stats", &pool) == nil && strings.EqualFold(pool.Status, "OK") && pool.PoolStats != nil && pool.PoolStats.TxsTotal != nil && pool.PoolStats.BytesTotal != nil {
+		status.MempoolTxs, status.MempoolBytes = *pool.PoolStats.TxsTotal, *pool.PoolStats.BytesTotal
+		status.MempoolTxsAvailable, status.MempoolBytesAvailable = true, true
+	}
 	if info.StartTime > 0 && uint64(time.Now().Unix()) > info.StartTime {
 		status.UptimeSeconds = uint64(time.Now().Unix()) - info.StartTime
 	}
@@ -112,50 +174,9 @@ func (m moneroRPC) call(ctx context.Context, method string, out any) error {
 	if err != nil {
 		return err
 	}
-	endpoint, err := url.Parse(m.url)
-	if err != nil {
-		return errors.New("invalid Monero RPC URL")
-	}
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/json_rpc"
-	endpoint.RawQuery = ""
-	endpoint.Fragment = ""
-	request := func(authorization string) (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if authorization != "" {
-			req.Header.Set("Authorization", authorization)
-		}
-		return m.client.Do(req)
-	}
-	response, err := request("")
+	responseBody, err := m.do(ctx, http.MethodPost, "/json_rpc", body)
 	if err != nil {
 		return err
-	}
-	if response.StatusCode == http.StatusUnauthorized {
-		challenge := digestChallenge(response.Header.Values("WWW-Authenticate"))
-		response.Body.Close()
-		authorization, err := digestAuthorization(challenge, m.user, m.password, http.MethodPost, endpoint.RequestURI())
-		if err != nil {
-			return err
-		}
-		response, err = request(authorization)
-		if err != nil {
-			return err
-		}
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Monero RPC returned HTTP %d", response.StatusCode)
-	}
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxMoneroRPCBody+1))
-	if err != nil {
-		return errors.New("read Monero RPC response")
-	}
-	if len(responseBody) > maxMoneroRPCBody {
-		return errors.New("Monero RPC response too large")
 	}
 	var envelope struct {
 		Result json.RawMessage `json:"result"`
@@ -171,6 +192,68 @@ func (m moneroRPC) call(ctx context.Context, method string, out any) error {
 		return errors.New("invalid Monero RPC result")
 	}
 	return nil
+}
+
+func (m moneroRPC) callPath(ctx context.Context, path string, out any) error {
+	responseBody, err := m.do(ctx, http.MethodPost, path, []byte("{}"))
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(responseBody, out); err != nil {
+		return errors.New("invalid Monero RPC response")
+	}
+	return nil
+}
+
+func (m moneroRPC) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	endpoint, err := url.Parse(m.url)
+	if err != nil {
+		return nil, errors.New("invalid Monero RPC URL")
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + path
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	request := func(authorization string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		if len(body) > 0 {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		return m.client.Do(req)
+	}
+	response, err := request("")
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		challenge := digestChallenge(response.Header.Values("WWW-Authenticate"))
+		response.Body.Close()
+		authorization, err := digestAuthorization(challenge, m.user, m.password, method, endpoint.RequestURI())
+		if err != nil {
+			return nil, err
+		}
+		response, err = request(authorization)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Monero RPC returned HTTP %d", response.StatusCode)
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxMoneroRPCBody+1))
+	if err != nil {
+		return nil, errors.New("read Monero RPC response")
+	}
+	if len(responseBody) > maxMoneroRPCBody {
+		return nil, errors.New("Monero RPC response too large")
+	}
+	return responseBody, nil
 }
 
 func digestChallenge(values []string) map[string]string {

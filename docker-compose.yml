@@ -159,10 +159,20 @@ services:
       BITCOIN_ENABLED: ${BITCOIN_ENABLED:-1}
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
+      BITCOIN_RPC_BIND_IP: ${BITCOIN_RPC_BIND_IP:-127.0.0.1}
+      BITCOIN_RPC_PORT: ${BITCOIN_RPC_PORT:-8332}
       MONERO_ENABLED: ${MONERO_ENABLED:-0}
       MONERO_RPC_URL: ${MONERO_RPC_URL:-http://172.29.0.30:18085}
       MONERO_RPC_USER: ${MONERO_RPC_USER:-}
       MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:-}
+      MONERO_DATA_DIR: /data-monero
+      MONERO_RPC_EXPOSE: ${MONERO_RPC_EXPOSE:-0}
+      MONERO_RPC_BIND_IP: ${MONERO_RPC_BIND_IP:-127.0.0.1}
+      MONERO_RPC_PORT: ${MONERO_RPC_PORT:-18081}
+      MONERO_ZMQ_EXPOSE: ${MONERO_ZMQ_EXPOSE:-0}
+      MONERO_ZMQ_BIND_IP: ${MONERO_ZMQ_BIND_IP:-127.0.0.1}
+      MONERO_ZMQ_PORT: ${MONERO_ZMQ_PORT:-18083}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       DASHBOARD_CONTROL: ${DASHBOARD_CONTROL:-0}
       SETTINGS_PORT: "8001"
@@ -175,6 +185,7 @@ services:
       WATCH_WALLETS_B64: ${WATCH_WALLETS_B64:-}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
+      - ${MONERO_DATA_DIR:-./data/monero}:/data-monero:ro
       # writable state (the saved watch-only wallet list); the chain stays read-only
       - dashboard_state:/state
     restart: unless-stopped

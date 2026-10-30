@@ -30,6 +30,7 @@ type notificationSettings struct {
 	HealthchecksEnabled bool   `json:"healthchecks_enabled"`
 	HealthchecksURL     string `json:"healthchecks_url"`
 	AlertNewBlock       bool   `json:"alert_new_block"`
+	TowerLabels         bool   `json:"tower_labels"`
 }
 
 type settingsUpdate struct {
@@ -40,6 +41,7 @@ type settingsUpdate struct {
 	HealthchecksEnabled *bool   `json:"healthchecks_enabled,omitempty"`
 	HealthchecksURL     *string `json:"healthchecks_url,omitempty"`
 	AlertNewBlock       *bool   `json:"alert_new_block,omitempty"`
+	TowerLabels         *bool   `json:"tower_labels,omitempty"`
 	present             map[string]bool
 }
 
@@ -181,6 +183,9 @@ func (update settingsUpdate) apply(current notificationSettings) (notificationSe
 	next.TelegramEnabled = *update.TelegramEnabled
 	next.HealthchecksEnabled = *update.HealthchecksEnabled
 	next.AlertNewBlock = *update.AlertNewBlock
+	if update.TowerLabels != nil {
+		next.TowerLabels = *update.TowerLabels
+	}
 	if next.TelegramEnabled {
 		if update.TelegramBotToken != nil && *update.TelegramBotToken != "" {
 			next.TelegramBotToken = *update.TelegramBotToken
@@ -222,6 +227,7 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 		"healthchecks_enabled": m.settings.HealthchecksEnabled,
 		"healthchecks_url":     m.settings.HealthchecksURL,
 		"alert_new_block":      m.settings.AlertNewBlock,
+		"tower_labels":         m.settings.TowerLabels,
 		"overridden":           m.settingsOverridden,
 		"can_configure":        canConfigure,
 	}, nil
@@ -347,6 +353,10 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 	view, err := a.monitor.settingsView(true)
 	if err != nil {
 		http.Error(w, "notification settings unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if r.URL.Query().Get("scope") == "appearance" {
+		writeJSON(w, map[string]any{"tower_labels": view["tower_labels"]})
 		return
 	}
 	writeJSON(w, view)

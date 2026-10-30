@@ -214,7 +214,9 @@ func request(t *testing.T, handler http.Handler, method, path, password string) 
 
 func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 	fixture := &rpcFixture{}
-	_, handler := testApp(t, fixture, "dashboard-secret")
+	a, _ := testApp(t, fixture, "dashboard-secret")
+	a.cfg.bitcoinRPCEndpoint = "192.168.1.50:8332"
+	handler := a.routes()
 	if got := request(t, handler, http.MethodGet, "/", ""); got.Code != http.StatusUnauthorized || got.Header().Get("WWW-Authenticate") == "" {
 		t.Fatalf("unauthenticated response = %d, challenge %q", got.Code, got.Header().Get("WWW-Authenticate"))
 	}
@@ -232,7 +234,7 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 		t.Fatalf("status = %d", got.Code)
 	}
 	body := got.Body.String()
-	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`} {
+	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`, "192.168.1.50:8332 · LAN", "Configured LAN access"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
@@ -254,6 +256,9 @@ func TestInvalidRPCRendersLoading(t *testing.T) {
 	}
 	if strings.Contains(got.Body.String(), "% synced") {
 		t.Fatal("unavailable Core must not invent a sync percentage")
+	}
+	if !strings.Contains(got.Body.String(), `id="monero-panel"`) || !strings.Contains(got.Body.String(), `/static/nodes.js`) {
+		t.Fatal("Bitcoin loading page omitted the independent Monero panel")
 	}
 }
 
@@ -439,6 +444,9 @@ func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
 	index := request(t, handler, http.MethodGet, "/", "")
 	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") || strings.Contains(index.Body.String(), "/static/prices.js") {
 		t.Fatalf("disabled index = %d %q", index.Code, index.Body.String())
+	}
+	if !strings.Contains(index.Body.String(), `id="monero-panel"`) || !strings.Contains(index.Body.String(), `/static/nodes.js`) {
+		t.Fatal("Bitcoin-disabled page omitted the independent Monero panel")
 	}
 	metrics := request(t, handler, http.MethodGet, "/metrics", "")
 	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "bitcoin_node_enabled 0") || !strings.Contains(metrics.Body.String(), "bitcoin_node_up 0") {

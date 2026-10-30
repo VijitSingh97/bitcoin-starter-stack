@@ -16,21 +16,25 @@ import (
 )
 
 type config struct {
-	bitcoinDisabled   bool
-	rpcURL            string
-	rpcUser           string
-	rpcPassword       string
-	dashboardPassword string
-	dataDir           string
-	stateDir          string
-	version           string
-	port              string
-	settingsPort      string
-	control           bool
-	moneroEnabled     bool
-	moneroRPCURL      string
-	moneroRPCUser     string
-	moneroRPCPassword string
+	bitcoinDisabled    bool
+	rpcURL             string
+	rpcUser            string
+	rpcPassword        string
+	dashboardPassword  string
+	dataDir            string
+	stateDir           string
+	version            string
+	port               string
+	settingsPort       string
+	control            bool
+	moneroEnabled      bool
+	moneroRPCURL       string
+	moneroRPCUser      string
+	moneroRPCPassword  string
+	moneroDataDir      string
+	bitcoinRPCEndpoint string
+	moneroRPCEndpoint  string
+	moneroZMQEndpoint  string
 }
 
 func envConfig() (config, error) {
@@ -78,6 +82,21 @@ func envConfig() (config, error) {
 	}
 	cfg.moneroRPCUser = os.Getenv("MONERO_RPC_USER")
 	cfg.moneroRPCPassword = os.Getenv("MONERO_RPC_PASSWORD")
+	cfg.moneroDataDir = envOr("MONERO_DATA_DIR", "/data-monero")
+	var exposureErr error
+	if !cfg.bitcoinDisabled {
+		if cfg.bitcoinRPCEndpoint, exposureErr = exposedLANEndpoint("BITCOIN_RPC_EXPOSE", "BITCOIN_RPC_BIND_IP", "BITCOIN_RPC_PORT", "8332"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+	}
+	if cfg.moneroEnabled {
+		if cfg.moneroRPCEndpoint, exposureErr = exposedLANEndpoint("MONERO_RPC_EXPOSE", "MONERO_RPC_BIND_IP", "MONERO_RPC_PORT", "18081"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+		if cfg.moneroZMQEndpoint, exposureErr = exposedLANEndpoint("MONERO_ZMQ_EXPOSE", "MONERO_ZMQ_BIND_IP", "MONERO_ZMQ_PORT", "18083"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+	}
 	if cfg.moneroEnabled {
 		if parsed, err := url.Parse(cfg.moneroRPCURL); err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil {
 			return config{}, errors.New("MONERO_RPC_URL must be an HTTP URL without embedded credentials")
@@ -90,6 +109,26 @@ func envConfig() (config, error) {
 		return config{}, errors.New("RPC_USER and RPC_PASSWORD are required")
 	}
 	return cfg, nil
+}
+
+func exposedLANEndpoint(enabledName, addressName, portName, defaultPort string) (string, error) {
+	if !enabled(os.Getenv(enabledName)) {
+		return "", nil
+	}
+	address := strings.TrimSpace(os.Getenv(addressName))
+	ip := net.ParseIP(address)
+	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback()) {
+		return "", errors.New(addressName + " must be a private or loopback IP address when exposure is enabled")
+	}
+	port := strings.TrimSpace(os.Getenv(portName))
+	if port == "" {
+		port = defaultPort
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", errors.New(portName + " must be between 1 and 65535")
+	}
+	return net.JoinHostPort(address, port), nil
 }
 
 func explicitlyDisabled(value string) bool {

@@ -81,6 +81,7 @@ type pageData struct {
 	FeeHour              string
 	NextBlock            int64
 	LastUpdate           string
+	BitcoinRPCEndpoint   string
 }
 
 type app struct {
@@ -175,6 +176,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		TotalGB: gibU(disk.Total), FreeGB: gibU(disk.Free), DiskWarn: disk.Free < 50*1024*1024*1024,
 		NextBlock: chain.Blocks + 1, LastUpdate: time.Now().Format("15:04:05"),
 		FeeNext: "—", Fee30m: "—", FeeHour: "—",
+		BitcoinRPCEndpoint: a.cfg.bitcoinRPCEndpoint,
 	}
 	if disk.Total > 0 {
 		data.DiskPercent = float64(chain.SizeOnDisk) / float64(disk.Total) * 100

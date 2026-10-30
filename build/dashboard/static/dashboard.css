@@ -65,37 +65,31 @@ body {
 
 .node-choice {
   position: absolute;
-  top: 50%;
-  width: min(260px, 42vw);
-  height: min(380px, 66vh);
-  transform: translate(-50%, -50%);
-  border: 1px solid transparent;
-  border-radius: 18px;
+  inset-block: 0;
+  width: 50vw;
+  transform: translateX(-50%);
+  border: 0;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   font: 700 1.15rem monospace;
   text-align: center;
-  padding-top: min(300px, 52vh);
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  padding-top: 8vh;
 }
-.node-choice span, .node-choice small {
-  display: table;
+.node-choice span {
+  display: none;
   margin-inline: auto;
   padding: 3px 8px;
   background: var(--card);
   border-radius: 5px;
   box-shadow: 0 2px 8px var(--shadow);
 }
-.node-choice small { margin-top: 4px; color: var(--muted); font-size: 0.68rem; font-weight: 400; }
+body[data-tower-labels="1"] .node-choice span { display: table; }
 .node-choice-bitcoin { left: 32%; }
 .node-choice-monero { left: 68%; }
-.node-choice:hover, .node-choice:focus-visible {
-  transform: translate(-50%, -50%) scale(1.03);
-  background: rgba(128, 128, 128, 0.08);
-}
-.node-choice-bitcoin:hover, .node-choice-bitcoin:focus-visible { border-color: var(--accent); outline-color: var(--accent); }
-.node-choice-monero:hover, .node-choice-monero:focus-visible { border-color: var(--monero); outline-color: var(--monero); }
+.node-choice:focus { outline: 0; }
+body[data-tower-labels="1"] .node-choice-bitcoin:focus-visible span { box-shadow: 0 0 0 2px var(--accent); }
+body[data-tower-labels="1"] .node-choice-monero:focus-visible span { box-shadow: 0 0 0 2px var(--monero); }
 
 .node-close-backdrop {
   position: fixed;
@@ -140,17 +134,15 @@ body[data-node="monero"] .node-close-backdrop { display: block; }
 
 @media (max-width: 700px) {
   .node-choice {
-    left: 50%;
-    width: min(300px, 84vw);
-    height: 42vh;
-    padding-top: 31vh;
+    width: 50vw;
+    padding-top: 6vh;
   }
-  .node-choice-bitcoin { top: 27%; }
-  .node-choice-monero { top: 73%; }
+  .node-choice-bitcoin { left: 27%; }
+  .node-choice-monero { left: 73%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .node-choice, .node-panel { transition: none; animation: none; }
+  .node-panel { animation: none; }
 }
 
 .settings-open {

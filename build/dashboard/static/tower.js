@@ -66,6 +66,10 @@ export function towerLayout(W, cols = GRID) {
   return { wide: true, ox: (cardZone + W) / 2, tw };
 }
 
+export function previewDepth(H, anchorY, tw) {
+  return Math.max(10, Math.ceil((H - anchorY - GRID * (tw / 4)) / (tw * 0.5)));
+}
+
 if (typeof document !== "undefined") {
   const canvas = document.getElementById("tower");
   const ctx = canvas && canvas.getContext("2d");
@@ -129,12 +133,13 @@ if (typeof document !== "undefined") {
       ctx.shadowBlur = 0;
     }
 
-    function drawPreviewTower(node, ox, anchorY, tw, fill) {
+    function drawPreviewTower(node, ox, anchorY, tw, fill, pulse) {
       const pal = palette(node);
       const bh = tw * 0.5;
       const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - layer * bh - GRID * (tw / 4));
-      for (let depth = 10; depth >= 1; depth--) {
-        const fade = Math.max(0.25, 1 - depth * 0.07);
+      const depthCount = previewDepth(H, anchorY, tw);
+      for (let depth = depthCount; depth >= 1; depth--) {
+        const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
         ctx.globalAlpha = pal.alpha * fade;
         for (let i = 0; i < GRID; i++) {
           poly([p(i, GRID, -depth), p(i + 1, GRID, -depth), p(i + 1, GRID, -depth - 1), p(i, GRID, -depth - 1)], pal.side, pal.edge, 0);
@@ -147,8 +152,16 @@ if (typeof document !== "undefined") {
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
-        ctx.globalAlpha = idx < done ? pal.alpha : pal.alpha * 0.35;
-        poly(face, idx < done ? pal.top : null, idx < done ? pal.edge : pal.grid, idx < done ? pal.glow : 0);
+        if (idx < done) {
+          ctx.globalAlpha = pal.alpha;
+          poly(face, pal.top, pal.edge, pal.glow);
+        } else if (idx === done) {
+          ctx.globalAlpha = pal.alpha * (0.2 + 0.7 * pulse);
+          poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
+        } else {
+          ctx.globalAlpha = pal.alpha * 0.35;
+          poly(face, null, pal.grid, 0);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -171,19 +184,17 @@ if (typeof document !== "undefined") {
         displayed = nextDisplayed(displayed, target, dt);
       }
       const fill = Math.max(0, Math.min(PER_LAYER, displayed));
+      const pulse = reduce ? 0.65 : 0.5 + 0.5 * Math.sin(now / 300);
 
       ctx.clearRect(0, 0, W, H);
       const selected = document.body.dataset.node;
       if (!selected) {
-        if (W <= 700) {
-          const tw = Math.max(18, Math.min(28, W / 17));
-          drawPreviewTower("bitcoin", W / 2, H * 0.25, tw, fill);
-          drawPreviewTower("monero", W / 2, H * 0.71, tw, fill);
-        } else {
-          const tw = Math.max(22, Math.min(38, W / 34));
-          drawPreviewTower("bitcoin", W * 0.32, H * 0.48, tw, fill);
-          drawPreviewTower("monero", W * 0.68, H * 0.48, tw, fill);
-        }
+        const mobile = W <= 700;
+        const baseTw = mobile ? Math.max(12, Math.min(20, W / 28)) : Math.max(26, Math.min(46, W / 36));
+        const anchorY = H * 0.3;
+        const hovered = document.body.dataset.hoverNode;
+        drawPreviewTower("bitcoin", W * (mobile ? 0.27 : 0.32), anchorY, baseTw * (hovered === "bitcoin" ? 1.12 : 1), fill, pulse);
+        drawPreviewTower("monero", W * (mobile ? 0.73 : 0.68), anchorY, baseTw * (hovered === "monero" ? 1.12 : 1), fill, pulse);
         if (label) {
           label.hidden = true;
           label.style.opacity = "0";
@@ -218,7 +229,6 @@ if (typeof document !== "undefined") {
       // today's layer: filled up to the current time of day, the frontier
       // cube pulsing as this 10-minute slot loads
       const done = Math.floor(fill);
-      const pulse = 0.5 + 0.5 * Math.sin(now / 300); // ~2s flash on the loading block
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];

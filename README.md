@@ -197,10 +197,17 @@ Open `http://localhost` on the node. After setting a private LAN bind address,
 use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
 The landing page shows a gold Bitcoin tower and an orange Monero tower. Click
 one to zoom in and open its card; close it with **×**, Escape, or a click outside
-the panel. Disabled nodes are labeled **Not configured**.
+the panel. Towers extend to the bottom of the screen, grow on hover or keyboard
+focus, and show a pulsing loading block on top. Names are hidden by default;
+enable **Label towers** in the gear panel to show them. That preference survives
+restarts. Disabled nodes show **Not configured** in their card.
 
 Both cards show node version, uptime, connections, sync progress, and chain
-storage. The following extra features belong to the Bitcoin card:
+storage. Monero also shows mempool size, disk capacity/free space, latest-block
+age, difficulty, and estimated network hashrate. Unavailable metrics show a dash.
+The **Open ports** section shows configured LAN RPC/ZMQ access or **Disabled**;
+it does not scan ports or expose the internal administration listener.
+The following extra features belong to the Bitcoin card:
 
 - **Node mode** — a **Full** or **Pruned** badge in the header.
 - **Sync progress** — block height vs. headers, with a progress bar.

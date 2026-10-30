@@ -4,6 +4,7 @@ export function notificationPayload(values) {
     telegram_chat_id: values.telegram_enabled ? String(values.telegram_chat_id || "").trim() : "",
     healthchecks_enabled: !!values.healthchecks_enabled,
     alert_new_block: !!values.alert_new_block,
+    tower_labels: !!values.tower_labels,
   };
   const token = String(values.telegram_bot_token || "").trim();
   const url = String(values.healthchecks_url || "").trim();
@@ -14,6 +15,12 @@ export function notificationPayload(values) {
 
 export function configurationAccess(data) {
   return data?.can_configure === true;
+}
+
+export function applyTowerLabels(data, root = typeof document === "undefined" ? undefined : document.body) {
+  const value = data?.tower_labels === true ? "1" : "0";
+  if (root?.dataset) root.dataset.towerLabels = value;
+  return value;
 }
 
 if (typeof document !== "undefined") {
@@ -27,6 +34,7 @@ if (typeof document !== "undefined") {
   const telegramEnabled = byId("telegram-enabled");
   const healthchecksEnabled = byId("healthchecks-enabled");
   const newBlock = byId("new-block");
+  const towerLabels = byId("tower-labels");
   const save = byId("save");
   const reset = byId("reset");
   let saved = {};
@@ -46,6 +54,8 @@ if (typeof document !== "undefined") {
     telegramEnabled.checked = !!data.telegram_enabled;
     healthchecksEnabled.checked = !!data.healthchecks_enabled;
     newBlock.checked = !!data.alert_new_block;
+    towerLabels.checked = !!data.tower_labels;
+    applyTowerLabels(data);
     token.value = data.telegram_bot_token || "";
     chat.value = data.telegram_chat_id || "";
     url.value = data.healthchecks_url || "";
@@ -56,7 +66,7 @@ if (typeof document !== "undefined") {
       : "Using the server configuration. Saving here creates a persistent dashboard override.";
     save.disabled = !allowed;
     reset.disabled = !allowed || !data.overridden;
-    telegramEnabled.disabled = healthchecksEnabled.disabled = newBlock.disabled = !allowed;
+    telegramEnabled.disabled = healthchecksEnabled.disabled = newBlock.disabled = towerLabels.disabled = !allowed;
     updateInputs();
   };
   async function request(method = "GET", payload) {
@@ -74,7 +84,7 @@ if (typeof document !== "undefined") {
   async function load() {
     allowed = false;
     save.disabled = reset.disabled = true;
-    telegramEnabled.disabled = healthchecksEnabled.disabled = newBlock.disabled = true;
+    telegramEnabled.disabled = healthchecksEnabled.disabled = newBlock.disabled = towerLabels.disabled = true;
     updateInputs();
     status.textContent = "Loading…";
     try {
@@ -110,9 +120,14 @@ if (typeof document !== "undefined") {
       healthchecks_enabled: healthchecksEnabled.checked,
       healthchecks_url: url.value,
       alert_new_block: newBlock.checked,
-    }), "Notification settings saved.");
+      tower_labels: towerLabels.checked,
+    }), "Settings saved.");
   });
   reset.addEventListener("click", () => {
     if (allowed) persist({ reset: true }, "Using the server configuration.");
   });
+  fetch("/api/settings?scope=appearance")
+    .then((response) => response.ok ? response.json() : Promise.reject())
+    .then(applyTowerLabels)
+    .catch(() => applyTowerLabels({}));
 }

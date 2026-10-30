@@ -379,6 +379,15 @@ fi
 
 # Monero is opt-in, pruned, and its LAN RPC/ZMQ relays require private binds.
 cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118"},"monero":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118","zmq_expose":true,"zmq_bind_ip":"192.168.1.118"}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "disabled nodes retained stale LAN relay overrides"
+grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Bitcoin retained stale RPC exposure"
+grep -q '^MONERO_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale RPC exposure"
+grep -q '^MONERO_ZMQ_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale ZMQ exposure"
+
+cat >"$tmp/config.json" <<'EOF'
 {"bitcoin":{"enabled":false},"monero":{"enabled":true,"node_username":"moneroadmin","node_password":"moneropassword1234567890123456","data_dir":"./monero-chain","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
@@ -399,15 +408,15 @@ echo '{"monero":{"enabled":true,"node_password":"short","rpc_expose":true,"rpc_b
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "short exposed Monero RPC password was accepted"
 
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081}}
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin and Monero RPC host port collision was accepted"
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28083},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28083},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin RPC and Monero ZMQ host port collision was accepted"
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin":{"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.119","rpc_port":28081}}
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.119","rpc_port":28081}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "same cross-chain host port on different bind addresses was rejected"
 

@@ -82,7 +82,7 @@ func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["overridden"] != false {
+	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["tower_labels"] != false || view["overridden"] != false {
 		t.Fatalf("unexpected settings view: %#v", view)
 	}
 	if view["can_configure"] != true {
@@ -90,9 +90,32 @@ func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	}
 }
 
+func TestSettingsAppearanceScopeOmitsNotificationCredentials(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:top-secret")
+	t.Setenv("TELEGRAM_CHAT_ID", "-10042")
+	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid")
+	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	req := httptest.NewRequest(http.MethodGet, "/api/settings?scope=appearance", nil)
+	req.RemoteAddr = "192.0.2.10:12345"
+	req.Host = "mini-1.local"
+	req.SetBasicAuth("dashboard", "dashboard-secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("appearance GET = %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "top-secret") || strings.Contains(w.Body.String(), "private-uuid") {
+		t.Fatalf("appearance response leaked notification settings: %s", w.Body.String())
+	}
+	var view map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || len(view) != 1 || view["tower_labels"] != false {
+		t.Fatalf("appearance response = %#v, %v", view, err)
+	}
+}
+
 func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *testing.T) {
 	a, handler := testApp(t, &rpcFixture{}, "")
-	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true}`
+	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true,"tower_labels":true}`
 	if got := settingsRequest(handler, http.MethodPost, "", body, false); got.Code != http.StatusForbidden {
 		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
 	}
@@ -117,7 +140,7 @@ func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *tes
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
 	}
-	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true {
+	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true || view["tower_labels"] != true {
 		t.Fatalf("restarted LAN settings view = %#v", view)
 	}
 }
@@ -168,6 +191,7 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 		HealthchecksEnabled: boolPointer(true),
 		HealthchecksURL:     stringPointer("https://hc-ping.com/dashboard-id/"),
 		AlertNewBlock:       boolPointer(true),
+		TowerLabels:         boolPointer(true),
 	}
 	if err := m.updateSettings(update); err != nil {
 		t.Fatal(err)
@@ -183,12 +207,21 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 
 	restarted := NewMonitor("dev", t.TempDir(), stateDir)
 	got := restarted.notificationSettings()
-	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock {
+	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.TowerLabels {
 		t.Fatalf("restarted settings = %#v", got)
 	}
 	view, err := restarted.settingsView(true)
 	if err != nil || view["overridden"] != true {
 		t.Fatalf("restarted view = %#v, %v", view, err)
+	}
+	if err := restarted.updateSettings(settingsUpdate{
+		TelegramEnabled: boolPointer(false), TelegramChatID: stringPointer(""),
+		HealthchecksEnabled: boolPointer(false), AlertNewBlock: boolPointer(false),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted.notificationSettings().TowerLabels {
+		t.Fatal("legacy settings update changed tower-label preference")
 	}
 
 	if err := restarted.resetSettings(); err != nil {
@@ -200,6 +233,19 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 	got = restarted.notificationSettings()
 	if got.TelegramBotToken != "123:server-token" || got.TelegramChatID != "server-chat" || got.HealthchecksURL != "https://hc-ping.com/server-id" || got.AlertNewBlock {
 		t.Fatalf("reset settings = %#v", got)
+	}
+}
+
+func TestSettingsLoadOldOverrideDefaultsTowerLabelsOff(t *testing.T) {
+	stateDir := t.TempDir()
+	old := `{"telegram_enabled":false,"telegram_bot_token":"","telegram_chat_id":"","healthchecks_enabled":false,"healthchecks_url":"","alert_new_block":true}`
+	if err := os.WriteFile(filepath.Join(stateDir, "notification_settings.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewMonitor("dev", t.TempDir(), stateDir)
+	view, err := m.settingsView(true)
+	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["tower_labels"] != false {
+		t.Fatalf("old override view = %#v, %v", view, err)
 	}
 }
 

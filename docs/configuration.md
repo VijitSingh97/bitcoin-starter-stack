@@ -132,6 +132,15 @@ Docker limit requires recreating the node with `bitcoin-stack apply`.
 Notification settings currently monitor Bitcoin only. A Monero-only install
 does not send Bitcoin Telegram alerts or Bitcoin Healthchecks pings.
 
+The gear panel also includes **Label towers**, off by default. It saves the
+appearance preference in the same private dashboard override file, so it
+survives restarts. Resetting to server configuration hides the names again.
+
+Node cards display configured host RPC/ZMQ endpoints under **Open ports**.
+Disabled services have no endpoint, and disabling a node disables its relays.
+This view describes configuration; it is not a live port scan. Internal Monero
+administration RPC is never shown as a wallet connection endpoint.
+
 ## Applying changes
 
 The dashboard gear can change Telegram, Healthchecks, and `alert_new_block`

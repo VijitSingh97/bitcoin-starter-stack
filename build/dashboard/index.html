@@ -13,8 +13,8 @@
   <canvas id="tower"></canvas><div id="tower-label"></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
-    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span>Bitcoin</span><small>Gold tower</small></button>
-    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-controls="monero-panel" aria-expanded="false"><span>Monero</span><small>Orange tower</small></button>
+    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span aria-hidden="true">Bitcoin</span></button>
+    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span aria-hidden="true">Monero</span></button>
   </main>
   <div id="node-close-backdrop" class="node-close-backdrop" aria-hidden="true"></div>
   <div id="bitcoin-panel" class="stack-col node-panel" data-node-panel="bitcoin" hidden>
@@ -42,8 +42,8 @@
   <canvas id="tower"></canvas><div id="tower-label"></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
-    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span>Bitcoin</span><small>Gold tower</small></button>
-    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-controls="monero-panel" aria-expanded="false"><span>Monero</span><small>Orange tower</small></button>
+    <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span aria-hidden="true">Bitcoin</span></button>
+    <button class="node-choice node-choice-monero" type="button" data-select-node="monero" aria-label="Monero" aria-controls="monero-panel" aria-expanded="false"><span aria-hidden="true">Monero</span></button>
   </main>
   <div id="node-close-backdrop" class="node-close-backdrop" aria-hidden="true"></div>
   <div id="bitcoin-panel" class="stack-col node-panel" data-node-panel="bitcoin" hidden>
@@ -83,6 +83,10 @@
             <span id="btc-price-status">Price unavailable</span>
           </div>
         </section>
+        <hr>
+        <div class="row"><span class="label">Open ports:</span> <span></span></div>
+        <div class="row"><span class="label">Bitcoin RPC:</span> <span>{{if .BitcoinRPCEndpoint}}{{.BitcoinRPCEndpoint}} · LAN{{else}}Disabled{{end}}</span></div>
+        <p class="node-state">Configured LAN access. Use your Bitcoin RPC login.</p>
         <div id="upgrade" class="row" hidden></div>
         <div class="footer"><span>Updated: {{.LastUpdate}}</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
@@ -105,14 +109,30 @@
         <div class="row"><span class="label">Sync Progress:</span> <span id="monero-sync">—</span></div>
         <hr>
         <div class="row"><span class="label">Database Size:</span> <span id="monero-size">—</span></div>
+        <div class="row"><span class="label">Disk Capacity:</span> <span id="monero-disk-capacity">—</span></div>
+        <div class="row"><span class="label">Disk Free:</span> <span id="monero-disk-free">—</span></div>
+        <hr>
+        <div class="row"><span class="label">Mempool:</span> <span id="monero-mempool">—</span></div>
+        <div class="row"><span class="label">Difficulty:</span> <span id="monero-difficulty">—</span></div>
+        <div class="row"><span class="label">Network Hashrate:</span> <span id="monero-hashrate">—</span></div>
+        <div class="row"><span class="label">Latest Block:</span> <span id="monero-last-block">—</span></div>
+        <hr>
+        <div class="row"><span class="label">Open ports:</span> <span></span></div>
+        <div class="row"><span class="label">RPC:</span> <span id="monero-rpc-exposure">Disabled</span></div>
+        <div class="row"><span class="label">ZMQ:</span> <span id="monero-zmq-exposure">Disabled</span></div>
+        <p class="node-state">Configured LAN access. RPC is restricted and requires your Monero login. ZMQ is for a trusted LAN.</p>
       </div>
     </section>
   </div>
-  <button id="settings-open" class="settings-open" type="button" aria-label="Notification settings" title="Notification settings">⚙</button>
+  <button id="settings-open" class="settings-open" type="button" aria-label="Settings" title="Settings">⚙</button>
   <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">
-      <div class="settings-heading"><h2 id="settings-title">Notifications</h2><button id="settings-close" type="button" aria-label="Close settings">✕</button></div>
+      <div class="settings-heading"><h2 id="settings-title">Settings</h2><button id="settings-close" type="button" aria-label="Close settings">✕</button></div>
       <p>Configure Bitcoin alerts without restarting your node. Changes are saved on this node. Monero currently provides node status only.</p>
+      <fieldset id="settings-appearance">
+        <legend>Appearance</legend>
+        <label class="settings-check"><input id="settings-tower-labels" type="checkbox"> Label towers</label>
+      </fieldset>
       <fieldset id="settings-telegram">
         <legend>Telegram</legend>
         <label class="settings-check"><input id="settings-telegram-enabled" type="checkbox"> Enable Telegram alerts</label>

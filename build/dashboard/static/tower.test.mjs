@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, towerLayout, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, towerLayout, previewDepth, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -80,5 +80,13 @@ test("towerLayout keeps the tower clear of the card zone on wide screens", () =>
     assert.equal(wide, true);
     assert.ok(ox - (GRID * tw) / 2 >= 500, `W=${W} overlaps card`);
     assert.ok(ox + (GRID * tw) / 2 <= W + 1, `W=${W} runs off screen`);
+  }
+});
+
+test("preview tower reaches the viewport bottom", () => {
+  for (const [H, anchorY, tw] of [[667, 200, 14], [900, 270, 40], [2160, 648, 46]]) {
+    const depth = previewDepth(H, anchorY, tw);
+    const bottom = project(GRID, GRID, 0, tw, tw * 0.5, 0, anchorY - GRID * (tw / 4) + (depth + 1) * tw * 0.5).y;
+    assert.ok(bottom >= H, `H=${H} stops at ${bottom}`);
   }
 });

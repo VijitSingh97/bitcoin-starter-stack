@@ -41,6 +41,7 @@ echo "$rendered" | grep -q 'INBOUND_ONION: "0"' || fail "INBOUND_ONION default n
 echo "$rendered" | grep -q 'DASHBOARD_ONION: "0"' || fail "DASHBOARD_ONION default not applied"
 echo "$rendered" | grep -q 'BITCOIN_RPC_EXPOSE: "0"' || fail "LAN RPC exposure default not applied"
 echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'BITCOIN_ENABLED: "1"' || fail "dashboard did not receive enabled Bitcoin state"
+echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'BITCOIN_RPC_EXPOSE: "0"' || fail "dashboard did not receive Bitcoin RPC exposure state"
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
@@ -137,6 +138,10 @@ grep -q '^rpc-restricted-bind-ip=0.0.0.0$' build/monero/entrypoint.sh || fail "M
 grep -q '^restricted-rpc=1$' build/monero/entrypoint.sh && fail "Monero globally restricts the dashboard RPC"
 echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_RPC_URL: http://172.29.0.30:18085' ||
   fail "dashboard is not wired to Monero internal RPC"
+echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'target: /data-monero' ||
+  fail "dashboard is missing the read-only Monero data mount"
+echo "$monero_rendered" | grep -A4 'target: /data-monero' | grep -q 'read_only: true' ||
+  fail "dashboard Monero data mount is writable"
 
 monero_lan=$(COMPOSE_PROFILES=bitcoin,monero MONERO_ENABLED=1 MONERO_RPC_EXPOSE=1 MONERO_ZMQ_EXPOSE=1 \
   MONERO_RPC_BIND_IP=192.168.1.118 MONERO_RPC_PORT=28081 MONERO_ZMQ_BIND_IP=192.168.1.118 MONERO_ZMQ_PORT=28083 \
@@ -144,6 +149,8 @@ monero_lan=$(COMPOSE_PROFILES=bitcoin,monero MONERO_ENABLED=1 MONERO_RPC_EXPOSE=
   docker compose --env-file /dev/null config)
 echo "$monero_lan" | grep -A5 'target: 18081' | grep -q 'published: "28081"' || fail "Monero RPC LAN relay missing"
 echo "$monero_lan" | grep -A5 'target: 18083' | grep -q 'published: "28083"' || fail "Monero ZMQ LAN relay missing"
+echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_RPC_PORT: "28081"' || fail "dashboard did not receive Monero RPC port"
+echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_ZMQ_PORT: "28083"' || fail "dashboard did not receive Monero ZMQ port"
 [ "$(echo "$monero_lan" | grep -c 'published:' || true)" = "3" ] || fail "Monero overrides published an unexpected port"
 
 # Without credentials the stack refuses to start

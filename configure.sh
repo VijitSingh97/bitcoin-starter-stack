@@ -99,6 +99,8 @@ monero_rpc_port=$(jq -r '.monero.rpc_port // 18081' <<<"$config")
 monero_zmq_expose=$(flag '.monero.zmq_expose')
 monero_zmq_bind_ip=$(get '.monero.zmq_bind_ip')
 monero_zmq_port=$(jq -r '.monero.zmq_port // 18083' <<<"$config")
+[ "$bitcoin_enabled" = "1" ] || rpc_expose=0
+[ "$monero_enabled" = "1" ] || { monero_rpc_expose=0; monero_zmq_expose=0; }
 bitcoin_resource_profile=$(get '.bitcoin.resource_profile')
 monero_resource_profile=$(get '.monero.resource_profile')
 [ -n "$bitcoin_resource_profile" ] || bitcoin_resource_profile=$(sed -n 's/^BITCOIN_RESOURCE_PROFILE=//p' "$env_file" 2>/dev/null || true)
