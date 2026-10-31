@@ -74,6 +74,42 @@ export function nextHighlight(current, active, dtMs) {
   return current + (target - current) * amount;
 }
 
+export function retainedSyncProgress(value, previous = null) {
+  if (value === null || value === undefined || String(value).trim() === "") return previous;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : previous;
+}
+
+export function nextBuildProgress(current, target, dtMs, reduce = false) {
+  const from = Math.min(1, Math.max(0, Number(current) || 0));
+  const to = Math.min(1, Math.max(0, Number(target) || 0));
+  if (reduce || from === to) return to;
+  const next = from + (to - from) * (1 - Math.exp(-Math.max(0, dtMs) / 360));
+  return Math.abs(next - to) < 0.0005 ? to : next;
+}
+
+export function constructionGeometry(targetAnchor, fullDepth, tw, progress) {
+  const depth = Math.max(1, Math.floor(fullDepth));
+  const fraction = Math.min(1, Math.max(0, Number(progress) || 0));
+  const built = 1 + (depth - 1) * fraction;
+  const complete = Math.min(depth, Math.floor(built));
+  const layerFill = complete >= depth ? null : (built - complete) * PER_LAYER;
+  const bh = tw * 0.5;
+  return {
+    anchorY: targetAnchor + (depth - complete) * bh,
+    depth: complete,
+    layerFill,
+  };
+}
+
+export function nextLayoutPoint(current, target, dtMs, reduce = false) {
+  if (!current || reduce) return { ...target };
+  const amount = 1 - Math.exp(-Math.max(0, dtMs) / 180);
+  const next = {};
+  for (const key of ["x", "y", "tw"]) next[key] = current[key] + (target[key] - current[key]) * amount;
+  return next;
+}
+
 export function loadingHighlight(opacity, pulse, glow) {
   const sceneOpacity = Math.min(1, Math.max(0, opacity));
   return {
@@ -125,15 +161,20 @@ export function overviewHitWidth(tw) {
   return Math.max(140, GRID * tw * 1.12);
 }
 
-export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap = Infinity) {
+export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap = Infinity, viewportHeight = Infinity) {
   const towerTop = anchor - diamondWidth / 4;
   const towerLabelTop = diamondWidth / 2 + 22;
   if (width > 700) {
-    return { top: towerTop, height: null, shoulder: diamondWidth / 4, labelTop: towerLabelTop };
+    const labelTop = Number.isFinite(viewportHeight)
+      ? Math.max(2, Math.min(towerLabelTop, viewportHeight - towerTop - 48))
+      : towerLabelTop;
+    return { top: towerTop, height: null, shoulder: diamondWidth / 4, labelTop };
   }
   const height = Math.max(44, Math.min(72, minAnchorGap - 4));
   const labelTop = Math.max(2, (height - 44) / 2);
-  return { top: towerTop + towerLabelTop - labelTop, height, shoulder: 0, labelTop };
+  const desiredTop = towerTop + towerLabelTop - labelTop;
+  const top = Number.isFinite(viewportHeight) ? Math.max(0, Math.min(desiredTop, viewportHeight - height - 4)) : desiredTop;
+  return { top, height, shoulder: 0, labelTop };
 }
 
 export function overviewLabelPosition(width, ox, anchorY, tw) {
@@ -171,6 +212,7 @@ export function overviewBlockLabels(nextBlocks, labelsEnabled, overviewSettled) 
 }
 
 export function overviewLayout(width, count = NODE_IDS.length, height = 900) {
+  if (count <= 0) return { contentWidth: width, tw: 0, positions: [], anchors: [] };
   if (count <= 2) {
     const mobile = width <= 700;
     return { contentWidth:width, tw:mobile ? Math.max(12,Math.min(20,width/28)) : Math.max(26,Math.min(46,width/36)), positions:count===1 ? [width/2] : [width*(mobile?0.27:0.32),width*(mobile?0.73:0.68)], anchors:Array(count).fill(height*0.3) };
@@ -309,7 +351,7 @@ if (typeof document !== "undefined") {
       ctx.stroke();
     }
 
-    function drawTowerGlow(p, depth, pal, highlight, opacity = 1) {
+    function drawTowerGlow(p, depth, pal, highlight, opacity = 1, topLayer = 0) {
       if (highlight <= 0.01 || opacity <= 0.01) return;
       ctx.save();
       ctx.globalAlpha = opacity * highlight * (effectiveLight() ? 0.45 : 0.7);
@@ -318,8 +360,8 @@ if (typeof document !== "undefined") {
       ctx.strokeStyle = pal.top;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(p(0, 0, 0).x, p(0, 0, 0).y);
-      for (const point of [p(GRID, 0, 0), p(GRID, 0, -depth - 1), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1), p(0, GRID, 0)]) {
+      ctx.moveTo(p(0, 0, topLayer).x, p(0, 0, topLayer).y);
+      for (const point of [p(GRID, 0, topLayer), p(GRID, 0, -depth - 1), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1), p(0, GRID, topLayer)]) {
         ctx.lineTo(point.x, point.y);
       }
       ctx.closePath();
@@ -327,7 +369,7 @@ if (typeof document !== "undefined") {
       ctx.restore();
     }
 
-    function drawTower(node, ox, anchorY, tw, depthCount, fill, pulse, highlight, opacity = 1, push = 0) {
+    function drawTower(node, ox, anchorY, tw, depthCount, fill, pulse, highlight, opacity = 1, push = 0, layerFill = null) {
       const pal = palette(node, activeNode(node));
       const bh = tw * 0.5;
       const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - push - layer * bh - GRID * (tw / 4));
@@ -342,7 +384,8 @@ if (typeof document !== "undefined") {
       ctx.globalAlpha = opacity * pal.alpha * 0.55;
       for (let i = 1; i < GRID; i++) line(p(i, GRID, 0), p(i, GRID, -depthCount - 1), pal.edge);
       for (let j = 1; j < GRID; j++) line(p(GRID, j, 0), p(GRID, j, -depthCount - 1), pal.edge);
-      const done = Math.floor(fill);
+      const topFill = layerFill === null ? fill : PER_LAYER;
+      const done = Math.floor(topFill);
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
@@ -358,13 +401,33 @@ if (typeof document !== "undefined") {
           poly(face, null, pal.grid, 0);
         }
       }
-      drawTowerGlow(p, depthCount, pal, highlight, opacity);
+      if (layerFill !== null) {
+        const building = Math.floor(layerFill);
+        for (let idx = 0; idx <= building && idx < PER_LAYER; idx++) {
+          const { gx, gy } = gridCell(idx);
+          const top = [p(gx, gy, 1), p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx, gy + 1, 1)];
+          if (idx < building) {
+            ctx.globalAlpha = opacity * pal.alpha;
+            poly([p(gx, gy + 1, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)], pal.side, pal.edge, 0);
+            poly([p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx + 1, gy, 0)], pal.dark, pal.edge, 0);
+            poly(top, pal.top, pal.edge, 0);
+          } else {
+            const loading = loadingHighlight(opacity, pulse, pal.glow);
+            ctx.globalAlpha = pal.alpha * loading.opacity;
+            poly(top, pal.top, pal.edge, loading.glow);
+          }
+        }
+      }
+      drawTowerGlow(p, depthCount, pal, highlight, opacity, layerFill === null ? 0 : 1);
       ctx.globalAlpha = 1;
     }
 
     let displayed = null;   // eased fill of today's layer
     let pushStart = -1e9;   // time the last midnight push began
     const previewHighlight = Object.fromEntries(NODE_IDS.map((node) => [node, 0]));
+    const knownProgress = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
+    const buildProgress = Object.fromEntries(NODE_IDS.map((node) => [node, 0]));
+    const previewGeometry = {};
     let scene = { node: "", progress: 0 };
     let prev = performance.now();
 
@@ -392,12 +455,26 @@ if (typeof document !== "undefined") {
       const ids = choices().filter(choice => !choice.hidden).map(choice=>choice.dataset.selectNode);
       const layout = overviewLayout(W,ids.length,H);
       const scrollLeft = overview?.scrollLeft || 0;
+      for (const node of ids) {
+        const index = ids.indexOf(node);
+        previewGeometry[node] = nextLayoutPoint(previewGeometry[node], {
+          x: layout.positions[index], y: layout.anchors[index], tw: layout.tw,
+        }, dt, reduce);
+        knownProgress[node] = retainedSyncProgress(liveElement(node)?.dataset?.syncPercent, knownProgress[node]);
+        buildProgress[node] = nextBuildProgress(buildProgress[node], (knownProgress[node] ?? 0) / 100, dt, reduce);
+      }
       const baseTw = layout.tw;
-      const overviewY = (node) => layout.anchors[ids.indexOf(node)] ?? H*0.3;
+      const overviewY = (node) => previewGeometry[node]?.y ?? H*0.3;
+      const overviewTw = (node) => previewGeometry[node]?.tw ?? baseTw;
       const hovered = document.body.dataset.hoverNode;
-      const overviewDepth = (node) => previewDepth(H, overviewY(node), baseTw);
-      const overviewX = (node) => (layout.positions[ids.indexOf(node)] ?? W/2) - scrollLeft;
-      const drawOrder=[...ids].sort((a,b)=>overviewY(a)-overviewY(b));
+      const overviewDepth = (node) => previewDepth(H, overviewY(node), overviewTw(node));
+      const overviewX = (node) => (previewGeometry[node]?.x ?? W/2) - scrollLeft;
+      const overviewBuild = (node, tw = overviewTw(node), anchorY = overviewY(node), depth = overviewDepth(node)) =>
+        constructionGeometry(anchorY, depth, tw, buildProgress[node]);
+      const constructionTop = (construction, tw) =>
+        construction.anchorY - (construction.layerFill === null ? 0 : tw * 0.5);
+      const overviewTop = (node) => constructionTop(overviewBuild(node), overviewTw(node));
+      const drawOrder=[...ids].sort((a,b)=>overviewTop(a)-overviewTop(b));
       const sortedAnchors = layout.anchors.slice().sort((a,b)=>a-b);
       const minAnchorGap = Math.min(...sortedAnchors.slice(1).map((anchor,index)=>anchor-sortedAnchors[index]));
       if (overview) {
@@ -408,14 +485,19 @@ if (typeof document !== "undefined") {
         choices().forEach((choice) => {
           const index = ids.indexOf(choice.dataset.selectNode);
           if(index<0) return;
-          choice.style.left = `${layout.positions[index]}px`;
-          const diamondWidth=GRID*baseTw*1.12;
-          const hitWidth=overviewHitWidth(baseTw);
-          const geometry=overviewChoiceGeometry(W,overviewY(choice.dataset.selectNode),diamondWidth,minAnchorGap);
+          const node = choice.dataset.selectNode;
+          choice.style.left = `${previewGeometry[node].x}px`;
+          const tw = overviewTw(node);
+          const construction = overviewBuild(node, tw);
+          const diamondWidth=GRID*tw*1.12;
+          const hitWidth=overviewHitWidth(tw);
+          const actualTop = constructionTop(construction, tw);
+          const controlAnchor = W <= 700 ? Math.min(actualTop, overviewY(node)) : actualTop;
+          const geometry=overviewChoiceGeometry(W,controlAnchor,diamondWidth,minAnchorGap,H);
           choice.style.width=`${hitWidth}px`;
           choice.style.top=`${geometry.top}px`;
           choice.style.height=`${geometry.height ?? H-geometry.top}px`;
-          choice.style.zIndex=String(Math.round(overviewY(choice.dataset.selectNode)));
+          choice.style.zIndex=String(Math.round(overviewTop(node)));
           choice.style.paddingTop="0";
           choice.style.setProperty("--tower-shoulder",`${geometry.shoulder}px`);
           choice.style.setProperty("--label-top",`${geometry.labelTop}px`);
@@ -426,13 +508,18 @@ if (typeof document !== "undefined") {
           previewHighlight[node] = reduce
             ? (hovered === node ? 1 : 0)
             : nextHighlight(previewHighlight[node], hovered === node, dt);
-          const tw = baseTw * (1 + 0.12 * previewHighlight[node]);
-          drawTower(node, overviewX(node), overviewY(node), tw,
-            sceneDepth(H, overviewY(node), tw, overviewY(node), baseTw), fill, pulse, previewHighlight[node], activeNode(node) ? 1 : 0.62);
+          const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
+          const fullDepth = sceneDepth(H, overviewY(node), tw, overviewY(node), overviewTw(node));
+          const construction = overviewBuild(node, tw, overviewY(node), fullDepth);
+          drawTower(node, overviewX(node), construction.anchorY, tw,
+            construction.depth, fill, pulse, previewHighlight[node], activeNode(node) ? 1 : 0.62, 0, construction.layerFill);
         }
         const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
-        for (const node of ids) showOverviewLabel(node, blockLabels[node], overviewX(node), overviewY(node),
-          baseTw * (1 + 0.12 * previewHighlight[node]));
+        for (const node of ids) {
+          const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
+          const construction = overviewBuild(node, tw);
+          showOverviewLabel(node, blockLabels[node], overviewX(node), constructionTop(construction, tw), tw);
+        }
         showFocusedLabel("", 0, 0, 0, 0);
         return;
       }
@@ -442,47 +529,63 @@ if (typeof document !== "undefined") {
         const focusedY = H * 0.6;
         if (scene.node) {
           const startHighlight = previewHighlight[scene.node];
-          const startTw = baseTw * (1 + 0.12 * startHighlight);
-          const anchorY = overviewY(scene.node) + (focusedY - overviewY(scene.node)) * amount;
+          const startTw = overviewTw(scene.node) * (1 + 0.12 * startHighlight);
           const tw = startTw + (focusedTw - startTw) * amount;
           for (const node of drawOrder) {
             if (node === scene.node) {
+              const source = overviewBuild(node, startTw);
+              const destination = overviewBuild(node, focusedTw, focusedY, previewDepth(H, focusedY, focusedTw));
+              const anchorY = source.anchorY + (destination.anchorY - source.anchorY) * amount;
               drawTower(
                 node,
                 overviewX(node) + (focusedX - overviewX(node)) * amount,
                 anchorY,
                 tw,
-                sceneDepth(H, anchorY, tw, overviewY(node), baseTw),
+                source.depth,
                 fill,
                 pulse,
                 startHighlight + (1 - startHighlight) * amount,
                 activeNode(node) ? 1 : 0.62 + 0.38 * amount,
+                0,
+                source.layerFill,
               );
+              const focusedConstruction = { ...source, anchorY };
+              showFocusedLabel(scene.node, amount,
+                overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount, constructionTop(focusedConstruction, tw), tw);
             } else if (overviewState.opacity > 0.001) {
-              drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
-                (activeNode(node) ? 1 : 0.62) * overviewState.opacity);
+              const construction = overviewBuild(node);
+              drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, fill, pulse, 0,
+                (activeNode(node) ? 1 : 0.62) * overviewState.opacity, 0, construction.layerFill);
             }
           }
-          showFocusedLabel(scene.node, amount,
-            overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount, anchorY, tw);
         } else {
-          for (const node of drawOrder) drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
-            activeNode(node) ? 1 : 0.62);
+          for (const node of drawOrder) {
+            const construction = overviewBuild(node);
+            drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, fill, pulse, 0,
+              activeNode(node) ? 1 : 0.62, 0, construction.layerFill);
+          }
           showFocusedLabel("", 0, 0, 0, 0);
         }
         const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
-        for (const node of ids) showOverviewLabel(node, blockLabels[node], overviewX(node), overviewY(node),
-          baseTw * (1 + 0.12 * previewHighlight[node]), overviewState.opacity);
+        for (const node of ids) {
+          const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
+          const construction = overviewBuild(node, tw);
+          showOverviewLabel(node, blockLabels[node], overviewX(node), constructionTop(construction, tw),
+            tw, overviewState.opacity);
+        }
         return;
       }
       const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
       const anchorY = H * 0.6;
       const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0 after a rollover
-      const visible = sceneDepth(H, anchorY, tw, overviewY(scene.node), baseTw);
-      drawTower(selected, ox, anchorY, tw, visible, fill, pulse, 1, 1, push);
+      const sourceTw = overviewTw(selected) * (1 + 0.12 * previewHighlight[selected]);
+      const source = overviewBuild(selected, sourceTw);
+      const destination = overviewBuild(selected, tw, anchorY, previewDepth(H, anchorY, tw));
+      const construction = { ...source, anchorY: destination.anchorY };
+      drawTower(selected, ox, construction.anchorY, tw, construction.depth, fill, pulse, 1, 1, push, construction.layerFill);
 
-      showFocusedLabel(selected, 1, ox, anchorY, tw, push);
+      showFocusedLabel(selected, 1, ox, constructionTop(construction, tw), tw, push);
     }
 
     render(performance.now()); // one static frame (also covers a hidden tab)
@@ -501,7 +604,7 @@ if (typeof document !== "undefined") {
       });
       for (const node of NODE_IDS.filter((node) => node !== "bitcoin")) {
         const live = liveElement(node);
-        if (live) observer.observe(live, { attributes: true, attributeFilter: ["data-next-block"] });
+        if (live) observer.observe(live, { attributes: true, attributeFilter: ["data-next-block", "data-sync-percent"] });
       }
       window.addEventListener("live-updated", () => render(performance.now()));
       window.addEventListener("node-status-updated", () => render(performance.now()));

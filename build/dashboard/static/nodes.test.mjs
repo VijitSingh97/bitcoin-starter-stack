@@ -1,6 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyHover, formatBytes, formatCompactBytes, formatHashrate, formatMoneroFees, formatUpdated, formatUptime, moneroView, selectionController } from "./nodes.js";
+import { applyHover, formatBytes, formatCompactBytes, formatHashrate, formatMoneroFees, formatUpdated, formatUptime, moneroView, selectionController, updateTowerProgress } from "./nodes.js";
+
+test("tower progress follows fresh node status and survives temporary outages or deactivation", () => {
+  const live = { dataset: {} };
+  updateTowerProgress(live, { enabled: true, available: false });
+  assert.equal(live.dataset.syncPercent, undefined);
+  updateTowerProgress(live, { enabled: true, available: true, sync_percent: 23.75 });
+  assert.equal(live.dataset.syncPercent, "23.75");
+  for (const data of [{ available: false }, { available: true, enabled: false, sync_percent: 0 },
+    { available: true }, { available: true, sync_percent: null }, { available: true, sync_percent: NaN }]) {
+    updateTowerProgress(live, data);
+    assert.equal(live.dataset.syncPercent, "23.75");
+  }
+  updateTowerProgress(live, { available: true, sync_percent: 48.5 });
+  assert.equal(live.dataset.syncPercent, "48.5");
+  updateTowerProgress(live, { available: true, synced: true });
+  assert.equal(live.dataset.syncPercent, "100");
+  updateTowerProgress(live, { available: true, sync_percent: -1 });
+  assert.equal(live.dataset.syncPercent, "0");
+  updateTowerProgress(live, { available: true, sync_percent: 101 });
+  assert.equal(live.dataset.syncPercent, "100");
+});
 
 function dashboard() {
   const overview = { hidden: false, scrollTop: 0, scrollLeft: 0 };

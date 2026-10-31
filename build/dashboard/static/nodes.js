@@ -5,6 +5,14 @@ export function normalizeNode(node) {
   return NODES.has(node) ? node : "";
 }
 
+export function updateTowerProgress(element, data) {
+  if (!element || data?.enabled === false || data?.available !== true) return;
+  const progress = data.synced === true ? 100 : data.sync_percent;
+  if (typeof progress === "number" && Number.isFinite(progress)) {
+    element.dataset.syncPercent = String(Math.max(0, Math.min(100, progress)));
+  }
+}
+
 export function applyHover(doc, node) {
   doc.body.dataset.hoverNode = normalizeNode(node);
 }
@@ -211,7 +219,9 @@ if (typeof document !== "undefined") {
     document.getElementById("monero-state").textContent = view.state;
     const details = document.getElementById("monero-details");
     details.hidden = !view.details;
-    document.getElementById("monero-live").dataset.nextBlock = view.nextBlock || "";
+    const live = document.getElementById("monero-live");
+    live.dataset.nextBlock = view.nextBlock || "";
+    updateTowerProgress(live, data);
     if (!view.details) return;
     document.getElementById("monero-version").textContent = view.version;
     document.getElementById("monero-uptime").textContent = view.uptime;

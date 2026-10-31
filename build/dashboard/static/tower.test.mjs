@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -73,6 +73,76 @@ test("nextHighlight eases both into and out of the highlighted state", () => {
   const shrinking = nextHighlight(1, false, 60);
   assert.ok(shrinking > 0 && shrinking < 1);
   assert.ok(nextHighlight(shrinking, false, 60) < shrinking);
+});
+
+test("sync progress keeps the last usable value through transient outages", () => {
+  assert.equal(retainedSyncProgress("42.5"), 42.5);
+  assert.equal(retainedSyncProgress(undefined, 42.5), 42.5);
+  assert.equal(retainedSyncProgress("", 42.5), 42.5);
+  assert.equal(retainedSyncProgress("unavailable", 42.5), 42.5);
+  assert.equal(retainedSyncProgress("120", 42.5), 100);
+  assert.equal(retainedSyncProgress("-2", 42.5), 0);
+});
+
+test("tower build eases toward sync progress and honors reduced motion", () => {
+  const first = nextBuildProgress(0, 0.8, 100);
+  assert.ok(first > 0 && first < 0.8);
+  assert.ok(nextBuildProgress(first, 0.8, 100) > first);
+  assert.equal(nextBuildProgress(0, 0.8, 100, true), 0.8);
+  assert.ok(nextBuildProgress(0.8, 0.4, 100) < 0.8);
+});
+
+test("cube layers build upward while the tower base stays fixed", () => {
+  const targetAnchor = 220;
+  const depth = 12;
+  const tw = 40;
+  const bh = tw * 0.5;
+  const stages = [0, 0.2, 0.5, 0.9, 1].map((progress) => constructionGeometry(targetAnchor, depth, tw, progress));
+  const bases = stages.map((stage) => stage.anchorY + stage.depth * bh);
+  assert.ok(bases.every((base) => base === bases[0]));
+  assert.ok(stages.slice(1).every((stage, index) => stage.depth >= stages[index].depth));
+  assert.equal(stages[0].depth, 1);
+  assert.equal(stages.at(-1).depth, depth);
+  assert.equal(stages.at(-1).anchorY, targetAnchor);
+  assert.equal(stages.at(-1).layerFill, null);
+
+  const withinLayer = constructionGeometry(targetAnchor, depth, tw, 0.21);
+  const laterInLayer = constructionGeometry(targetAnchor, depth, tw, 0.24);
+  assert.equal(withinLayer.anchorY, laterInLayer.anchorY);
+  assert.ok(laterInLayer.layerFill > withinLayer.layerFill);
+});
+
+test("installed-node layouts reflow smoothly and handle an empty set", () => {
+  assert.deepEqual(overviewLayout(900, 0, 700), {
+    contentWidth: 900, tw: 0, positions: [], anchors: [],
+  });
+  assert.equal(overviewLayout(900, 3, 700).positions.length, 3);
+  assert.equal(overviewLayout(900, 6, 700).positions.length, 6);
+
+  const current = { x: 200, y: 300, tw: 30 };
+  const target = { x: 500, y: 180, tw: 42 };
+  const moving = nextLayoutPoint(current, target, 60);
+  assert.ok(moving.x > current.x && moving.x < target.x);
+  assert.ok(moving.y < current.y && moving.y > target.y);
+  assert.ok(moving.tw > current.tw && moving.tw < target.tw);
+  assert.deepEqual(nextLayoutPoint(current, target, 60, true), target);
+});
+
+test("a mobile foundation keeps its label and hit target inside the viewport", () => {
+  const geometry = overviewChoiceGeometry(375, 690, 168, 56, 700);
+  assert.ok(geometry.height >= 44);
+  assert.ok(geometry.top >= 0);
+  assert.ok(geometry.top + geometry.height <= 696);
+  assert.ok(geometry.labelTop >= 2 && geometry.labelTop < geometry.height);
+});
+
+test("a desktop foundation keeps its label attached to the visible tower top", () => {
+  const anchor = 680;
+  const diamondWidth = 168;
+  const geometry = overviewChoiceGeometry(1280, anchor, diamondWidth, Infinity, 700);
+  assert.equal(geometry.top, anchor - diamondWidth / 4);
+  assert.ok(geometry.labelTop >= 2);
+  assert.ok(geometry.top + geometry.labelTop + 48 <= 700);
 });
 
 test("loading highlight fades faster than its tower and shrinks its glow", () => {
@@ -158,7 +228,9 @@ test("focused label follows opening, closing, switching, and reduced-motion scen
 
 test("renderer keeps the focused label live through opening, switching, and closing frames", async () => {
   const style = () => ({ setProperty(name, value) { this[name] = value; } });
-  const context = new Proxy({}, { get(target, key) { return target[key] || (() => {}); } });
+  let fillCount = 0;
+  let fillStyles = [];
+  const context = new Proxy({ fill() { fillCount++; fillStyles.push(this.fillStyle); } }, { get(target, key) { return target[key] || (() => {}); } });
   const canvas = { getContext: () => context, style: style() };
   const label = { hidden: true, innerHTML: "", style: style() };
   const overview = { hidden: false, scrollLeft: 0, style: style(), addEventListener() {} };
@@ -169,7 +241,10 @@ test("renderer keeps the focused label live through opening, switching, and clos
     hidden: true, style: style(), querySelector: () => ({ style: style(), textContent: "" }),
   }]));
   const live = Object.fromEntries(NODE_IDS.map((node) => [node, {
-    dataset: { nextBlock: node === "bitcoin" ? "974001" : node === "monero" ? "3512002" : "1" },
+    dataset: {
+      nextBlock: node === "bitcoin" ? "974001" : node === "monero" ? "3512002" : "1",
+      syncPercent: node === "bitcoin" ? "33" : node === "monero" ? "62" : "100",
+    },
   }]));
   const elements = { tower: canvas, "tower-label": label, "node-overview": overview };
   for (const node of NODE_IDS) {
@@ -199,41 +274,83 @@ test("renderer keeps the focused label live through opening, switching, and clos
     now += dt;
     const frame = frames.shift();
     assert.ok(frame, "renderer should schedule another frame");
+    fillCount = 0;
+    fillStyles = [];
     frame(now);
+    return fillCount;
+  };
+  const bitcoinFillCount = () => fillStyles.filter((fill) =>
+    ["#f2a900", "rgb(198, 139, 0)", "rgb(116, 81, 0)"].includes(fill)).length;
+  const visibleTowerTop = () => {
+    if (label.hidden) return null;
+    const top = Number.parseFloat(label.style.top);
+    assert.ok(Number.isFinite(top));
+    assert.ok(top >= 8 && top < window.innerHeight, `partial-sync tower top left viewport: ${top}`);
+    return top;
   };
 
   try {
     await import(`./tower.js?render-frames=${Date.now()}`);
+    body.dataset.hoverNode = "bitcoin";
+    for (let i = 0; i < 35; i++) step(100);
+    step(100);
+    const overviewBitcoinRows = bitcoinFillCount();
+    assert.ok(Number(choices[0].style.zIndex) > Number(choices[2].style.zIndex),
+      "a shorter syncing tower should stack in front of a synced neighbor");
     body.dataset.node = "bitcoin";
     step(60);
     assert.equal(label.hidden, true);
     assert.ok(Number(overview.style.opacity) > 0 && Number(overview.style.opacity) < 1);
 
     step(100);
+    step(100);
     const openingOpacity = Number(label.style.opacity);
     const openingLeft = label.style.left;
     assert.match(label.innerHTML, /974001/);
     assert.ok(openingOpacity > 0 && openingOpacity < 1);
     assert.equal(label.hidden, false);
+    let previousTop = visibleTowerTop();
 
     step(60);
     assert.notEqual(label.style.left, openingLeft);
+    let currentTop = visibleTowerTop();
+    assert.ok(Math.abs(currentTop - previousTop) < 200);
+    previousTop = currentTop;
     assert.equal(overview.style.opacity, "0");
+    const openingRows = [];
+    for (let i = 0; i < 8 && Number(label.style.opacity) < 1; i++) {
+      openingRows.push(step(100));
+      assert.equal(bitcoinFillCount(), overviewBitcoinRows, "hover-then-focus must preserve completed cube rows");
+    }
+    assert.ok(openingRows.length > 1);
+    assert.equal(new Set(openingRows).size, 1, "focus zoom must not remove completed cube rows");
     body.dataset.node = "monero";
     step(30);
     assert.match(label.innerHTML, /974001/);
     assert.ok(Number(label.style.opacity) < 1);
-    for (let i = 0; i < 12 && !label.innerHTML.includes("3512002"); i++) step(100);
+    currentTop = visibleTowerTop();
+    assert.ok(Math.abs(currentTop - previousTop) < 200);
+    for (let i = 0; i < 12 && !label.innerHTML.includes("3512002"); i++) {
+      step(100);
+      visibleTowerTop();
+    }
     assert.match(label.innerHTML, /3512002/);
     assert.equal(label.hidden, false);
-    for (let i = 0; i < 8 && Number(label.style.opacity) < 0.8; i++) step(100);
+    for (let i = 0; i < 8 && Number(label.style.opacity) < 0.8; i++) {
+      step(100);
+      visibleTowerTop();
+    }
 
     const beforeClose = Number(label.style.opacity);
     body.dataset.node = "";
     step(50);
     assert.ok(Number(label.style.opacity) < beforeClose);
+    visibleTowerTop();
     assert.equal(overview.style.opacity, "0");
-    for (let i = 0; i < 12 && !label.hidden; i++) step(100);
+    for (let i = 0; i < 12 && !label.hidden; i++) {
+      step(100);
+      visibleTowerTop();
+    }
     assert.equal(label.hidden, true);
   } finally {
     delete globalThis.document;

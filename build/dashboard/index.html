@@ -33,7 +33,7 @@
   <div id="bitcoin-panel" class="stack-col node-panel" data-node-panel="bitcoin" hidden>
     <button class="node-panel-close" type="button" data-close-node aria-label="Close Bitcoin status">✕</button>
     <section class="card node-inactive-state"><h2>Bitcoin</h2><p class="node-state">This node is inactive. Its stored blockchain data is kept.</p></section>
-    <div id="live"><div class="loading-card{{if .LastKnownSync}} sync-card{{end}}">
+    <div id="live"{{if .LastKnownSync}} data-sync-percent="{{printf "%.6f" .Progress}}"{{end}}><div class="loading-card{{if .LastKnownSync}} sync-card{{end}}">
     {{if not .BitcoinEnabled}}
     <h2>Bitcoin</h2>
     <p>Not configured</p>
@@ -82,7 +82,7 @@
     <button class="node-panel-close" type="button" data-close-node aria-label="Close Bitcoin status">✕</button>
     <section class="card node-inactive-state"><h2>Bitcoin</h2><p class="node-state">This node is inactive. Its stored blockchain data is kept.</p></section>
     <div id="tower-stats" class="tower-stats" hidden></div>
-    <div id="live" data-blocks="{{.Blocks}}" data-next-block="{{.NextBlock}}">
+    <div id="live" data-blocks="{{.Blocks}}" data-next-block="{{.NextBlock}}" data-sync-percent="{{printf "%.6f" .Progress}}">
       {{if .InitialBlockDownload}}<section class="card sync-card" aria-label="Initial blockchain synchronization">
         <h2>Syncing Bitcoin Core</h2>
         <p class="sync-percentage" role="status">{{printf "%.2f" .Progress}}% synced</p>

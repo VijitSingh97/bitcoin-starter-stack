@@ -334,13 +334,14 @@ Open the URL printed by setup: `http://<server-ip>` for APT/source, or
 when `avahi-daemon` is installed. Automatic binding uses the default network
 interface; if it is public, a VPN, or unsupported, setup falls back to localhost.
 Set an explicit private `dashboard.bind_ip` in configuration when needed.
-The landing page shows a colored tower for each configured node. Click
-one to zoom in and open its card; close it with **×**, Escape, or a click outside
+The landing page arranges a colored tower for each installed node. Towers build
+upward in cube layers as their nodes sync, reaching their full height at 100%.
+Click one to zoom in and open its card; close it with **×**, Escape, or a click outside
 the panel. Towers continue below the screen, grow on hover or keyboard
 focus, and show a pulsing loading block on top. Names are hidden by default;
 enable **Label towers** in the gear panel to show their names, prices, and next
 block numbers. The saved default currency starts at USD. These preferences
-survive restarts. Disabled nodes show **Not configured** in their card.
+survive restarts. Deactivated nodes keep their towers, shown in grey.
 
 Every configured card shows the native status fields its daemon supplies. Across
 the chains these include node version, connections, sync progress, chain storage,
@@ -375,11 +376,12 @@ The following extra features belong to the Bitcoin card:
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
-- **Live block tower** — a day-clock: a 12×12 layer is one UTC day. It fills to the current
+- **Live block tower** — tower height follows the node's sync progress. Once synced,
+  the top is a day-clock: a 12×12 layer is one UTC day. It fills to the current
   time of day at Bitcoin's ~10-minute spacing (one cube per 10 UTC minutes); the loading
   slot **pulses**, and a **loading block N** header shows the next block. At midnight the
-  day is pushed down and a fresh one starts. Driven purely by the clock — no history or node
-  lookups. Theme-aware and paused for `prefers-reduced-motion`.
+  day is pushed down and a fresh one starts. The top animation uses the clock,
+  rather than historical block counts. Theme-aware and respects `prefers-reduced-motion`.
 
 The Monero card has the same price, fee-history, status, disk, uptime, and wallet
 sections. Its fees are native XMR-per-kB estimates. Monero wallet rows remain

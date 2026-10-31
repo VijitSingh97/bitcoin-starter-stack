@@ -1,4 +1,4 @@
-import { NODE_IDS, genericNodeView } from "./nodes.js";
+import { NODE_IDS, genericNodeView, updateTowerProgress } from "./nodes.js";
 
 export const NODE_LABELS = {
   bitcoin: "Bitcoin",
@@ -81,6 +81,7 @@ function renderNode(id, data) {
   if (details) details.hidden = !view.details;
   const live = byId(`${id}-live`);
   if (live) live.dataset.nextBlock = view.nextBlock || "";
+  updateTowerProgress(live, data);
   if (!view.details) {
     announceNodeStatus(id);
     return;
