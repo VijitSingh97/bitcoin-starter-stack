@@ -131,7 +131,8 @@ grep -Fq 'chmod 750 /node-data/zcash' <<<"$run_line" || fail "Zcash mode was not
 images_line=$(grep -n 'config> <--images>' "$FAKE_DOCKER_LOG" | head -1 | cut -d: -f1)
 run_number=$(grep -n '^docker <run>' "$FAKE_DOCKER_LOG" | cut -d: -f1)
 up_line=$(grep -n 'up> <-d>' "$FAKE_DOCKER_LOG" | cut -d: -f1)
-[ "$images_line" -lt "$run_number" ] && [ "$run_number" -lt "$up_line" ] || fail "ownership initialization did not run after image checks and before startup"
+[ "$images_line" -lt "$run_number" ] || fail "ownership initialization ran before image checks"
+[ "$run_number" -lt "$up_line" ] || fail "ownership initialization ran after startup"
 grep -q '<pull>' "$FAKE_DOCKER_LOG" && fail "ownership initialization pulled an image"
 
 new_case already-owned
