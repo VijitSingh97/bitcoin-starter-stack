@@ -961,13 +961,27 @@ case "$cmd" in
     fi
     if [ -f "$approved_config_file" ]; then cp "$approved_config_file" "$previous_approved_config"; had_previous_approved_config=1; fi
     if [ -f "$approved_env_file" ]; then cp "$approved_env_file" "$previous_approved_env"; had_previous_approved_env=1; fi
-    if ! render_current_config || ! offline_up || ! approve_current_config; then
+    apply_failed=0
+    runtime_attempted=0
+    if render_current_config; then
+      runtime_attempted=1
+      if ! offline_up || ! approve_current_config; then
+        apply_failed=1
+      fi
+    else
+      apply_failed=1
+    fi
+    if [ "$apply_failed" = 1 ]; then
       rollback_failed=0
       if [ "$had_previous_env" = 1 ]; then
         cp "$previous_env" "$env_file"
-        offline_up >/dev/null 2>&1 || rollback_failed=1
+        if [ "$runtime_attempted" = 1 ]; then
+          offline_up >/dev/null 2>&1 || rollback_failed=1
+        fi
       else
-        compose down >/dev/null 2>&1 || rollback_failed=1
+        if [ "$runtime_attempted" = 1 ]; then
+          compose down >/dev/null 2>&1 || rollback_failed=1
+        fi
         rm -f "$env_file"
       fi
       if [ "$had_previous_approved_config" = 1 ]; then cp "$previous_approved_config" "$approved_config_file"; else rm -f "$approved_config_file"; fi
