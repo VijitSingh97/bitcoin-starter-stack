@@ -179,7 +179,6 @@ grep -q 'systemctl enable --now bitcoin-starter-stack-resource-profile.timer' "$
 grep -q 'systemctl enable --now bitcoin-starter-stack-port-control.timer' "$log" || fail "package init did not start the LAN port-control timer"
 grep -q 'systemctl enable --now bitcoin-starter-stack-node-control.timer' "$log" || fail "package init did not start the node-control timer"
 
-"$wrapper" apply >/dev/null
 env_file=$state_dir/.env
 [ -f "$env_file" ] || fail "generated state is outside the package state directory"
 grep -q '^DASHBOARD_PASSWORD=$' "$env_file" || fail "fresh package install enabled dashboard authentication"
