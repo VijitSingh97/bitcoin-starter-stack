@@ -47,6 +47,15 @@ export function retainedBlockFill(nextBlock, previous = null) {
   return Number((next - 1n) % BigInt(PER_LAYER));
 }
 
+export function retainedConfirmedBlocks(nextBlock, previous = null) {
+  const value = String(nextBlock ?? "").trim();
+  if (!/^\d+$/.test(value)) return previous;
+  const next = BigInt(value);
+  if (next < 1n) return previous;
+  const confirmed = next - 1n;
+  return Number(confirmed > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : confirmed);
+}
+
 export function project(gx, gy, z, tw, bh, ox, oy) {
   return { x: ox + (gx - gy) * (tw / 2), y: oy + (gx + gy) * (tw / 4) - z * bh };
 }
@@ -76,12 +85,17 @@ export function nextBuildProgress(current, target, dtMs, reduce = false) {
   return Math.abs(next - to) < 0.0005 ? to : next;
 }
 
-export function constructionGeometry(targetAnchor, fullDepth, tw, progress) {
+export function constructionGeometry(targetAnchor, fullDepth, tw, progress, confirmedBlocks = null) {
   const depth = Math.max(1, Math.floor(fullDepth));
   const fraction = Math.min(1, Math.max(0, Number(progress) || 0));
-  const built = 1 + (depth - 1) * fraction;
-  const complete = Math.min(depth, Math.floor(built));
-  const layerFill = complete >= depth ? null : (built - complete) * PER_LAYER;
+  const capacity = depth * PER_LAYER;
+  const scaled = Math.floor(capacity * fraction);
+  const actual = confirmedBlocks === null ? null : Math.max(0, Number(confirmedBlocks) || 0);
+  const cubes = actual === null
+    ? scaled
+    : Math.min(capacity, actual, Math.max(Math.min(actual, PER_LAYER), scaled));
+  const complete = Math.min(depth, Math.floor(cubes / PER_LAYER));
+  const layerFill = complete >= depth ? null : cubes - complete * PER_LAYER;
   const bh = tw * 0.5;
   return {
     anchorY: targetAnchor + (depth - complete) * bh,
@@ -366,7 +380,7 @@ if (typeof document !== "undefined") {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(p(0, 0, topLayer).x, p(0, 0, topLayer).y);
-      for (const point of [p(GRID, 0, topLayer), p(GRID, 0, -depth - 1), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1), p(0, GRID, topLayer)]) {
+      for (const point of [p(GRID, 0, topLayer), p(GRID, 0, -depth), p(GRID, GRID, -depth), p(0, GRID, -depth), p(0, GRID, topLayer)]) {
         ctx.lineTo(point.x, point.y);
       }
       ctx.closePath();
@@ -379,26 +393,28 @@ if (typeof document !== "undefined") {
       const bh = tw * 0.5;
       const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - push - layer * bh - GRID * (tw / 4));
       const background = effectiveLight() ? "#f4f4f5" : "#0f0f0f";
-      ctx.globalAlpha=opacity;
-      poly([p(0,0,0),p(GRID,0,0),p(GRID,0,-depthCount-1),p(GRID,GRID,-depthCount-1),p(0,GRID,-depthCount-1),p(0,GRID,0)],background,null,0);
-      for (let depth = depthCount; depth >= 0; depth--) {
-        const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
-        ctx.globalAlpha = opacity * pal.alpha * fade;
-        poly([p(0, GRID, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1)], pal.side, pal.edge, 0);
-        poly([p(GRID, 0, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(GRID, 0, -depth - 1)], pal.dark, pal.edge, 0);
-      }
-      ctx.globalAlpha = opacity * pal.alpha * 0.55;
-      for (let i = 1; i < GRID; i++) line(p(i, GRID, 0), p(i, GRID, -depthCount - 1), pal.edge);
-      for (let j = 1; j < GRID; j++) line(p(GRID, j, 0), p(GRID, j, -depthCount - 1), pal.edge);
-      for (let idx = 0; idx < PER_LAYER; idx++) {
-        const { gx, gy } = gridCell(idx);
-        const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
-        ctx.globalAlpha = opacity * pal.alpha;
-        poly(face, pal.top, pal.edge, 0);
+      if (depthCount > 0) {
+        ctx.globalAlpha=opacity;
+        poly([p(0,0,0),p(GRID,0,0),p(GRID,0,-depthCount),p(GRID,GRID,-depthCount),p(0,GRID,-depthCount),p(0,GRID,0)],background,null,0);
+        for (let depth = depthCount - 1; depth >= 0; depth--) {
+          const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
+          ctx.globalAlpha = opacity * pal.alpha * fade;
+          poly([p(0, GRID, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1)], pal.side, pal.edge, 0);
+          poly([p(GRID, 0, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(GRID, 0, -depth - 1)], pal.dark, pal.edge, 0);
+        }
+        ctx.globalAlpha = opacity * pal.alpha * 0.55;
+        for (let i = 1; i < GRID; i++) line(p(i, GRID, 0), p(i, GRID, -depthCount), pal.edge);
+        for (let j = 1; j < GRID; j++) line(p(GRID, j, 0), p(GRID, j, -depthCount), pal.edge);
+        for (let idx = 0; idx < PER_LAYER; idx++) {
+          const { gx, gy } = gridCell(idx);
+          const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
+          ctx.globalAlpha = opacity * pal.alpha;
+          poly(face, pal.top, pal.edge, 0);
+        }
       }
       if (layerFill !== null) {
-        const confirmed = Math.max(0, Math.min(PER_LAYER - 1, Math.floor(layerFill)));
-        for (let idx = 0; idx <= confirmed; idx++) {
+        const confirmed = Math.max(0, Math.min(PER_LAYER, Math.floor(layerFill)));
+        for (let idx = 0; idx < confirmed; idx++) {
           const { gx, gy } = gridCell(idx);
           const top = [p(gx, gy, 1), p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx, gy + 1, 1)];
           ctx.globalAlpha = opacity;
@@ -407,14 +423,14 @@ if (typeof document !== "undefined") {
           poly([p(gx, gy + 1, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)], pal.side, pal.edge, 0);
           poly([p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx + 1, gy, 0)], pal.dark, pal.edge, 0);
           poly(top, pal.top, pal.edge, 0);
-          if (idx === confirmed) {
+          if (idx === confirmed - 1) {
             const loading = loadingHighlight(opacity, pulse, pal.glow);
             ctx.globalAlpha = pal.alpha * loading.opacity;
             poly(top, null, pal.edge, loading.glow);
           }
         }
       }
-      drawTowerGlow(p, depthCount, pal, highlight, opacity, layerFill === null ? 0 : 1);
+      if (depthCount > 0) drawTowerGlow(p, depthCount, pal, highlight, opacity, layerFill === null ? 0 : 1);
       ctx.globalAlpha = 1;
     }
 
@@ -422,6 +438,7 @@ if (typeof document !== "undefined") {
     const knownProgress = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
     const buildProgress = Object.fromEntries(NODE_IDS.map((node) => [node, 0]));
     const knownBlockFill = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
+    const knownConfirmedBlocks = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
     const displayedBlockFill = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
     const pushStart = Object.fromEntries(NODE_IDS.map((node) => [node, -1e9]));
     const previewGeometry = {};
@@ -463,6 +480,8 @@ if (typeof document !== "undefined") {
         }, dt, reduce);
         buildProgress[node] = nextBuildProgress(buildProgress[node], (knownProgress[node] ?? 0) / 100, dt, reduce);
         const targetFill = retainedBlockFill(liveElement(node)?.dataset?.nextBlock, knownBlockFill[node]);
+        knownConfirmedBlocks[node] = retainedConfirmedBlocks(
+          liveElement(node)?.dataset?.nextBlock, knownConfirmedBlocks[node]);
         knownBlockFill[node] = targetFill;
         if (targetFill === null) continue;
         if (displayedBlockFill[node] === null) displayedBlockFill[node] = targetFill;
@@ -478,7 +497,7 @@ if (typeof document !== "undefined") {
       const overviewDepth = (node) => previewDepth(H, overviewY(node), overviewTw(node));
       const overviewX = (node) => (previewGeometry[node]?.x ?? W/2) - scrollLeft;
       const overviewBuild = (node, tw = overviewTw(node), anchorY = overviewY(node), depth = overviewDepth(node)) =>
-        constructionGeometry(anchorY, depth, tw, buildProgress[node]);
+        constructionGeometry(anchorY, depth, tw, buildProgress[node], knownConfirmedBlocks[node]);
       const layerFill = (node, construction) => construction.layerFill ?? displayedBlockFill[node];
       const constructionTop = (node, construction, tw) =>
         construction.anchorY - (layerFill(node, construction) === null ? 0 : tw * 0.5);
@@ -501,6 +520,7 @@ if (typeof document !== "undefined") {
           choice.style.left = `${previewGeometry[node].x}px`;
           const tw = overviewTw(node);
           const construction = overviewBuild(node, tw);
+          choice.dataset.nodeEmpty = construction.depth === 0 && layerFill(node, construction) === 0 ? "1" : "0";
           const diamondWidth=GRID*tw*1.12;
           const hitWidth=overviewHitWidth(tw);
           const actualTop = constructionTop(node, construction, tw) - towerPush(node, construction, tw);

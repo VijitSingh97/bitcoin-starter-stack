@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, retainedBlockFill, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, assignOverviewSlots, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, retainedBlockFill, retainedConfirmedBlocks, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, assignOverviewSlots, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks", () => {
   assert.equal(GRID, 12);
@@ -52,6 +52,14 @@ test("block fill keeps the last confirmed height through missing updates", () =>
   assert.equal(retainedBlockFill("0", 37), 37);
 });
 
+test("confirmed block count distinguishes an empty chain from its first layer", () => {
+  assert.equal(retainedConfirmedBlocks("1"), 0);
+  assert.equal(retainedConfirmedBlocks("2"), 1);
+  assert.equal(retainedConfirmedBlocks("145"), 144);
+  assert.equal(retainedConfirmedBlocks("900719925474099312345"), Number.MAX_SAFE_INTEGER);
+  assert.equal(retainedConfirmedBlocks(undefined, 27), 27);
+});
+
 test("project: height moves the point up; the diamond is symmetric", () => {
   assert.equal(project(2, 2, 1, 40, 20, 0, 0).y, project(2, 2, 0, 40, 20, 0, 0).y - 20);
   assert.equal(project(1, 0, 0, 40, 20, 0, 0).x, 20);
@@ -100,7 +108,8 @@ test("cube layers build upward while the tower base stays fixed", () => {
   const bases = stages.map((stage) => stage.anchorY + stage.depth * bh);
   assert.ok(bases.every((base) => base === bases[0]));
   assert.ok(stages.slice(1).every((stage, index) => stage.depth >= stages[index].depth));
-  assert.equal(stages[0].depth, 1);
+  assert.equal(stages[0].depth, 0);
+  assert.equal(stages[0].layerFill, 0);
   assert.equal(stages.at(-1).depth, depth);
   assert.equal(stages.at(-1).anchorY, targetAnchor);
   assert.equal(stages.at(-1).layerFill, null);
@@ -109,6 +118,17 @@ test("cube layers build upward while the tower base stays fixed", () => {
   const laterInLayer = constructionGeometry(targetAnchor, depth, tw, 0.24);
   assert.equal(withinLayer.anchorY, laterInLayer.anchorY);
   assert.ok(laterInLayer.layerFill > withinLayer.layerFill);
+});
+
+test("the first confirmed blocks are literal cubes before a full layer exists", () => {
+  const empty = constructionGeometry(220, 12, 40, 0, 0);
+  const first = constructionGeometry(220, 12, 40, 1, 1);
+  const partial = constructionGeometry(220, 12, 40, 0.000001, 17);
+  const layer = constructionGeometry(220, 12, 40, 1, 144);
+  assert.deepEqual({ depth: empty.depth, fill: empty.layerFill }, { depth: 0, fill: 0 });
+  assert.deepEqual({ depth: first.depth, fill: first.layerFill }, { depth: 0, fill: 1 });
+  assert.deepEqual({ depth: partial.depth, fill: partial.layerFill }, { depth: 0, fill: 17 });
+  assert.deepEqual({ depth: layer.depth, fill: layer.layerFill }, { depth: 1, fill: 0 });
 });
 
 test("installed-node layouts reflow smoothly and handle an empty set", () => {
@@ -356,6 +376,52 @@ test("renderer keeps the focused label live through opening, switching, and clos
     delete globalThis.window;
     delete globalThis.requestAnimationFrame;
   }
+});
+
+test("renderer leaves block zero blank and draws one confirmed block as one cube", async () => {
+  const render = async (nextBlock, syncPercent = "0") => {
+    const fills = [];
+    const style = () => ({ setProperty(name, value) { this[name] = value; } });
+    const context = new Proxy({ fill() { fills.push(this.fillStyle); } }, {
+      get(target, key) { return target[key] || (() => {}); },
+    });
+    const choice = { dataset: { selectNode: "tari", nodeActive: "1" }, hidden: false, style: style() };
+    const elements = {
+      tower: { getContext: () => context, style: style() },
+      "node-overview": { hidden: false, scrollLeft: 0, style: style(), addEventListener() {} },
+      "tari-live": { dataset: { nextBlock, syncPercent } },
+    };
+    globalThis.document = {
+      body: { dataset: { node: "", towerLabels: "0" } },
+      hidden: false,
+      documentElement: { getAttribute: () => "light" },
+      getElementById: (id) => elements[id] || null,
+      querySelectorAll: () => [choice],
+      querySelector: () => choice,
+    };
+    globalThis.window = {
+      devicePixelRatio: 1,
+      innerWidth: 1280,
+      innerHeight: 900,
+      matchMedia: () => ({ matches: true }),
+      addEventListener() {},
+    };
+    globalThis.MutationObserver = class { observe() {} };
+    try {
+      await import(`./tower.js?early-blocks=${nextBlock}-${Date.now()}`);
+      assert.equal(choice.dataset.nodeEmpty, nextBlock === "1" ? "1" : "0", "an empty node needs a visible label even with tower labels off");
+      return fills.filter((fill) => fill === "#8f5cff" || fill === "rgb(112, 72, 199)" || fill === "rgb(74, 48, 133)").length;
+    } finally {
+      delete globalThis.document;
+      delete globalThis.window;
+      delete globalThis.MutationObserver;
+    }
+  };
+
+  assert.equal(await render("1"), 0, "zero confirmed blocks should leave blank space");
+  assert.equal(await render("2", "100"), 3, "one confirmed block should stay one cube at 100% of its target");
+  assert.equal(await render("144", "100"), 143 * 3, "143 confirmed blocks should remain individual cubes");
+  assert.equal(await render("145", "100"), 144 + 2, "144 confirmed blocks should become exactly one tower layer");
 });
 
 test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {

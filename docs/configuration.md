@@ -395,7 +395,8 @@ configuration is updated.
 
 The Appearance section includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
-survives restarts. With labels enabled, each tower shows its coin price and
+survives restarts. Empty nodes keep a clickable name until their first block appears.
+With labels enabled, each tower shows its coin price and
 the next block number above it. Installed towers arrange themselves to fit the
 screen and build upward in cube layers with each node's sync progress.
 Shorter syncing towers take foreground positions to keep each node visible. The
