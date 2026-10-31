@@ -210,12 +210,10 @@
         <hr>
         <div class="row"><span class="label">LAN gRPC:</span><span id="tari-rpc-exposure">—</span></div>
         <p class="node-state">For Pithead on a trusted LAN. This mining endpoint has no password support.</p>
-        <hr><div class="row"><span class="label">After-sync budget:</span><span id="tari-budget">—</span></div>
-        <p id="tari-resource-state" class="node-state"></p>
         <div class="footer"><span id="tari-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card"><h2>View-only wallets</h2><p id="tari-wallet-reason" class="node-state">Loading wallet capabilities…</p></section>
+    <section class="card chain-wallet-card" data-family-watch="tari"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
     <section class="card node-power-card" style="--node-accent:#8f5cff">
       <h2>Node controls</h2>
       <p id="tari-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -249,12 +247,10 @@
         <hr>
         <div class="row"><span class="label">LAN RPC:</span><span id="litecoin-rpc-exposure">—</span></div>
         <p class="node-state">LAN access is optional and uses a separate node login.</p>
-        <hr><div class="row"><span class="label">After-sync budget:</span><span id="litecoin-budget">—</span></div>
-        <p id="litecoin-resource-state" class="node-state"></p>
         <div class="footer"><span id="litecoin-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card"><h2>View-only wallets</h2><p id="litecoin-wallet-reason" class="node-state">Loading wallet capabilities…</p></section>
+    <section class="card chain-wallet-card" data-family-watch="litecoin"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
     <section class="card node-power-card" style="--node-accent:#4d8fd8">
       <h2>Node controls</h2>
       <p id="litecoin-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -288,12 +284,10 @@
         <hr>
         <div class="row"><span class="label">LAN RPC:</span><span id="dogecoin-rpc-exposure">—</span></div>
         <p class="node-state">LAN access is optional and uses a separate node login.</p>
-        <hr><div class="row"><span class="label">After-sync budget:</span><span id="dogecoin-budget">—</span></div>
-        <p id="dogecoin-resource-state" class="node-state"></p>
         <div class="footer"><span id="dogecoin-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card"><h2>View-only wallets</h2><p id="dogecoin-wallet-reason" class="node-state">Loading wallet capabilities…</p></section>
+    <section class="card chain-wallet-card" data-family-watch="dogecoin"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
     <section class="card node-power-card" style="--node-accent:#b88746">
       <h2>Node controls</h2>
       <p id="dogecoin-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -327,12 +321,10 @@
         <hr>
         <div class="row"><span class="label">LAN RPC:</span><span id="bitcoincash-rpc-exposure">—</span></div>
         <p class="node-state">LAN access is optional and uses a separate node login.</p>
-        <hr><div class="row"><span class="label">After-sync budget:</span><span id="bitcoincash-budget">—</span></div>
-        <p id="bitcoincash-resource-state" class="node-state"></p>
         <div class="footer"><span id="bitcoincash-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card"><h2>View-only wallets</h2><p id="bitcoincash-wallet-reason" class="node-state">Loading wallet capabilities…</p></section>
+    <section class="card chain-wallet-card" data-family-watch="bitcoincash"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
     <section class="card node-power-card" style="--node-accent:#36a852">
       <h2>Node controls</h2>
       <p id="bitcoincash-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -366,12 +358,10 @@
         <hr>
         <div class="row"><span class="label">LAN RPC:</span><span id="zcash-rpc-exposure">—</span></div>
         <p class="node-state">LAN access is optional and uses a separate node login.</p>
-        <hr><div class="row"><span class="label">After-sync budget:</span><span id="zcash-budget">—</span></div>
-        <p id="zcash-resource-state" class="node-state"></p>
         <div class="footer"><span id="zcash-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card"><h2>View-only wallets</h2><p id="zcash-wallet-reason" class="node-state">Loading wallet capabilities…</p></section>
+    <section class="card chain-wallet-card" data-family-watch="zcash"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
     <section class="card node-power-card" style="--node-accent:#d69c35">
       <h2>Node controls</h2>
       <p id="zcash-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -465,6 +455,7 @@
   <script type="module" src="/static/refresh.js"></script>
   <script type="module" src="/static/prices.js"></script>
   <script type="module" src="/static/monero-watch.js"></script>
+  <script type="module" src="/static/family-watch.js"></script>
   <script type="module" src="/static/settings.js"></script>
   {{if and .BitcoinEnabled (not .Loading)}}<script type="module" src="/static/watch.js"></script>
   <script type="module" src="/static/upgrade.js"></script>{{end}}

@@ -16,19 +16,24 @@ func (a *app) apiMoneroWatchList(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "Monero node is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if a.cfg.dashboardPassword == "" {
-		http.Error(w, "set dashboard.password to access Monero watch-only wallets", http.StatusForbidden)
-		return
-	}
 	if !a.cfg.moneroWalletEnabled {
-		writeJSON(w, map[string]any{"wallets": []MoneroWatchWallet{}, "has_password": true, "available": false})
+		writeJSON(w, map[string]any{"wallets": []MoneroWatchWallet{}, "has_password": a.cfg.dashboardPassword != "", "available": false})
 		return
 	}
 	if a.moneroWatch.Err() != nil {
 		http.Error(w, "Monero watch-only wallet storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, map[string]any{"wallets": a.moneroWatch.List(), "has_password": true, "available": true})
+	wallets := a.moneroWatch.List()
+	if a.cfg.dashboardPassword == "" {
+		var public bool
+		wallets, public = a.moneroWatch.PublicList()
+		if !public {
+			http.Error(w, "set dashboard.password to access personal Monero watch-only wallets", http.StatusForbidden)
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"wallets": wallets, "has_password": a.cfg.dashboardPassword != "", "available": true})
 }
 
 func (a *app) apiMoneroWatchAdd(w http.ResponseWriter, r *http.Request) {

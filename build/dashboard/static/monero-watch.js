@@ -11,7 +11,8 @@ export function formatXMR(atomic) {
 }
 
 export function moneroWalletView(wallet) {
-  const verified = wallet.state === "ready" && wallet.spending_status === "verified" && wallet.key_images?.complete === true && formatXMR(wallet.balance_atomic) !== "—";
+  const example = wallet.example === true;
+  const verified = !example && wallet.state === "ready" && wallet.spending_status === "verified" && wallet.key_images?.complete === true && formatXMR(wallet.balance_atomic) !== "—";
   const pending = wallet.state === "pending";
   const hasIncoming = formatXMR(wallet.received_atomic) !== "—";
   const displayAmount = atomic => formatXMR(atomic).replace(/\.?0+$/, "");
@@ -22,16 +23,19 @@ export function moneroWalletView(wallet) {
     notes.push(target > 0 ? `Scanning · ${Math.min(100, 100 * scanned / target).toFixed(1)}%` : "Scanning wallet outputs");
   }
   if (verified) notes.push("Balance verified with key images");
+  else if (example) notes.push("Public example · received funds only · current balance unknown");
   else notes.push("Spending status unknown · import current key images to verify balance");
   if (wallet.spending_status === "stale" || wallet.state === "error") notes.push("Waiting for a fresh scan");
   if (wallet.error) notes.push(String(wallet.error).slice(0, 200));
   if (wallet.key_images?.present) notes.push(`${wallet.key_images.covered_outputs ?? 0}/${wallet.key_images.total_outputs ?? 0} outputs covered`);
-  return { label: String(wallet.name || "Monero wallet"), balance, note: notes.join(" · "), verified };
+  return { label: String(wallet.name || "Monero wallet"), balance, note: notes.join(" · "), verified, example };
 }
 
 export function moneroTotal(wallets) {
-  if (!wallets.length || wallets.some(wallet => !moneroWalletView(wallet).verified)) return "Pending…";
-  const total = wallets.reduce((sum, wallet) => sum + BigInt(wallet.balance_atomic), 0n);
+  const personal = wallets.filter(wallet => wallet.example !== true);
+  if (!personal.length) return "—";
+  if (personal.some(wallet => !moneroWalletView(wallet).verified)) return "Pending…";
+  const total = personal.reduce((sum, wallet) => sum + BigInt(wallet.balance_atomic), 0n);
   return `${formatXMR(String(total)).replace(/\.?0+$/, "")} XMR`;
 }
 
@@ -160,6 +164,13 @@ if (typeof document !== "undefined") {
         stats.append(row);
         const item = el("div", "monero-wallet-entry");
         item.append(el("strong", null, view.label), el("p", "wk", `${String(wallet.address || "").slice(0, 8)}…${String(wallet.address || "").slice(-8)}`), el("p", "watch-hint", view.note));
+        if (view.example && wallet.source_url) {
+          const source = el("a", "watch-hint", "Official Monero contribution address");
+          source.href = wallet.source_url;
+          source.target = "_blank";
+          source.rel = "noopener noreferrer";
+          item.append(source);
+        }
         const keyLabel = el("label", "watch-hint", "Import signed key images (JSON)");
         const images = input(`Key images for ${view.label}`, "file");
         images.accept = ".json,application/json";
@@ -185,10 +196,11 @@ if (typeof document !== "undefined") {
           catch (error) { setMessage(error instanceof SyntaxError ? "Choose a valid JSON file." : error.message, true); }
           refresh();
         });
-        item.append(keyLabel, remove);
+        if (!view.example) item.append(keyLabel);
+        item.append(remove);
         list.append(item);
       }
-      if (data.wallets?.length > 1) {
+      if ((data.wallets || []).filter(wallet => wallet.example !== true).length > 1) {
         const total = el("div", "ws-row ws-total-row");
         total.append(el("span", "ws-name", "Total"), el("span", "ws-bal", moneroTotal(data.wallets)));
         stats.append(total);

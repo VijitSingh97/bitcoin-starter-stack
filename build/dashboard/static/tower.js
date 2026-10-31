@@ -88,6 +88,30 @@ export function nextScene(scene, requested, progress, dtMs, reduce = false) {
   return { node, progress: value };
 }
 
+export function overviewTransition(progress, selected) {
+  const opacity = 1 - smooth(progress);
+  return {
+    opacity,
+    hidden: !!selected && opacity <= 0.001,
+    interactive: !selected && opacity >= 0.999,
+  };
+}
+
+export function overviewHitWidth(tw) {
+  return Math.max(140, GRID * tw * 1.12);
+}
+
+export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap = Infinity) {
+  const towerTop = anchor - diamondWidth / 4;
+  const towerLabelTop = diamondWidth / 2 + 22;
+  if (width > 700) {
+    return { top: towerTop, height: null, shoulder: diamondWidth / 4, labelTop: towerLabelTop };
+  }
+  const height = Math.max(44, Math.min(72, minAnchorGap - 4));
+  const labelTop = Math.max(2, (height - 44) / 2);
+  return { top: towerTop + towerLabelTop - labelTop, height, shoulder: 0, labelTop };
+}
+
 export function towerLayout(W, cols = GRID) {
   if (W < WIDE_MIN) {
     return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
@@ -119,8 +143,9 @@ export function overviewLayout(width, count = NODE_IDS.length, height = 900) {
     const mobile = width <= 700;
     return { contentWidth:width, tw:mobile ? Math.max(12,Math.min(20,width/28)) : Math.max(26,Math.min(46,width/36)), positions:count===1 ? [width/2] : [width*(mobile?0.27:0.32),width*(mobile?0.73:0.68)], anchors:Array(count).fill(height*0.3) };
   }
-  const contentWidth = Math.max(width,620);
-  const spread = Math.min(contentWidth*0.94,1350);
+  const contentWidth = Math.max(width,320);
+  const spread = Math.min(contentWidth*0.94,1800);
+  const towerSpread = Math.min(spread,1350);
   const patterns = {
     3:[[0.5,0.52],[0.28,0.32],[0.72,0.3]],
     4:[[0.44,0.55],[0.23,0.38],[0.74,0.36],[0.5,0.23]],
@@ -129,7 +154,12 @@ export function overviewLayout(width, count = NODE_IDS.length, height = 900) {
     7:[[0.43,0.6],[0.22,0.47],[0.77,0.42],[0.31,0.27],[0.66,0.24],[0.48,0.35],[0.64,0.55]],
   };
   const points=patterns[count]||patterns[7];
-  return {contentWidth,tw:spread*0.205/GRID,positions:points.map(([x])=>contentWidth/2+(x-0.5)*spread),anchors:points.map(([,y])=>Math.max(155,height*y))};
+  let anchors=points.map(([,y])=>Math.max(155,height*y));
+  if(width<=700&&count===7){
+    const step=Math.max(52,Math.min(75,(height-265)/6));
+    anchors=[6,4,3,1,0,2,5].map((rank)=>155+rank*step);
+  }
+  return {contentWidth,tw:towerSpread*0.205/GRID,positions:points.map(([x])=>contentWidth/2+(x-0.5)*spread),anchors};
 }
 
 if (typeof document !== "undefined") {
@@ -312,6 +342,7 @@ if (typeof document !== "undefined") {
       hideOverviewLabels();
       const selected = document.body.dataset.node;
       scene = nextScene(scene.node, selected, scene.progress, dt, reduce);
+      const overviewState = overviewTransition(scene.progress, selected);
       const ids = choices().filter(choice => !choice.hidden).map(choice=>choice.dataset.selectNode);
       const layout = overviewLayout(W,ids.length,H);
       const scrollLeft = overview?.scrollLeft || 0;
@@ -321,21 +352,27 @@ if (typeof document !== "undefined") {
       const overviewDepth = (node) => previewDepth(H, overviewY(node), baseTw);
       const overviewX = (node) => (layout.positions[ids.indexOf(node)] ?? W/2) - scrollLeft;
       const drawOrder=[...ids].sort((a,b)=>overviewY(a)-overviewY(b));
+      const sortedAnchors = layout.anchors.slice().sort((a,b)=>a-b);
+      const minAnchorGap = Math.min(...sortedAnchors.slice(1).map((anchor,index)=>anchor-sortedAnchors[index]));
       if (overview) {
+        overview.hidden = overviewState.hidden;
+        overview.style.opacity = String(overviewState.opacity);
+        overview.style.pointerEvents = overviewState.interactive ? "" : "none";
         overview.style.setProperty("--overview-width", `${layout.contentWidth}px`);
         choices().forEach((choice) => {
           const index = ids.indexOf(choice.dataset.selectNode);
           if(index<0) return;
           choice.style.left = `${layout.positions[index]}px`;
           const diamondWidth=GRID*baseTw*1.12;
-          const top=overviewY(choice.dataset.selectNode)-diamondWidth/4;
-          choice.style.width=`${diamondWidth}px`;
-          choice.style.top=`${top}px`;
-          choice.style.height=`${H-top}px`;
+          const hitWidth=overviewHitWidth(baseTw);
+          const geometry=overviewChoiceGeometry(W,overviewY(choice.dataset.selectNode),diamondWidth,minAnchorGap);
+          choice.style.width=`${hitWidth}px`;
+          choice.style.top=`${geometry.top}px`;
+          choice.style.height=`${geometry.height ?? H-geometry.top}px`;
           choice.style.zIndex=String(Math.round(overviewY(choice.dataset.selectNode)));
           choice.style.paddingTop="0";
-          choice.style.setProperty("--tower-shoulder",`${diamondWidth/4}px`);
-          choice.style.setProperty("--label-top",`${diamondWidth/2+22}px`);
+          choice.style.setProperty("--tower-shoulder",`${geometry.shoulder}px`);
+          choice.style.setProperty("--label-top",`${geometry.labelTop}px`);
         });
       }
       if (!selected && scene.progress === 0) {

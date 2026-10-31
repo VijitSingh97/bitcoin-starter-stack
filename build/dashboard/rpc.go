@@ -50,7 +50,9 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 		req.SetBasicAuth(user, password)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.client.Do(req)
+	client := *r.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

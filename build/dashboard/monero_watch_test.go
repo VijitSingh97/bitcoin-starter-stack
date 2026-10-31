@@ -57,6 +57,13 @@ func (f *moneroWalletFixture) handler(w http.ResponseWriter, r *http.Request) {
 	if request.Method == "import_key_images" {
 		f.imported = true
 	}
+	generatedAddress, generatedViewKey := testMoneroAddress, strings.Repeat("a", 64)
+	if address, ok := f.generated["address"].(string); ok {
+		generatedAddress = address
+	}
+	if viewKey, ok := f.generated["viewkey"].(string); ok {
+		generatedViewKey = viewKey
+	}
 	imported, newOutput, generateFails, refreshFails, secondAccount, scanPending, daemonPending := f.imported, f.newOutput, f.generateFails, f.refreshFails, f.secondAccount, f.scanPending, f.daemonPending
 	f.mu.Unlock()
 	if request.Method == "generate_from_keys" && generateFails {
@@ -70,9 +77,9 @@ func (f *moneroWalletFixture) handler(w http.ResponseWriter, r *http.Request) {
 	result := any(map[string]any{})
 	switch request.Method {
 	case "generate_from_keys":
-		result = map[string]any{"address": testMoneroAddress, "info": "wallet generated"}
+		result = map[string]any{"address": generatedAddress, "info": "wallet generated"}
 	case "get_address":
-		result = map[string]any{"address": testMoneroAddress, "addresses": []any{map[string]any{"address": testMoneroAddress, "address_index": 0}}}
+		result = map[string]any{"address": generatedAddress, "addresses": []any{map[string]any{"address": generatedAddress, "address_index": 0}}}
 	case "get_height":
 		walletHeight := uint64(310)
 		if scanPending {
@@ -82,7 +89,7 @@ func (f *moneroWalletFixture) handler(w http.ResponseWriter, r *http.Request) {
 	case "get_info":
 		result = map[string]any{"synchronized": !daemonPending, "busy_syncing": daemonPending, "height": 310, "target_height": 310}
 	case "query_key":
-		result = map[string]any{"key": strings.Repeat("a", 64)}
+		result = map[string]any{"key": generatedViewKey}
 	case "get_balance":
 		balance, unlocked := uint64(1_000_000_000_000), uint64(900_000_000_000)
 		if secondAccount {
@@ -117,6 +124,10 @@ func (f *moneroWalletFixture) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func newMoneroWatchTestApp(t *testing.T, fixture *moneroWalletFixture) (*app, http.Handler, string) {
+	return newMoneroWatchTestAppWithOptions(t, fixture, false, "dashboard-secret")
+}
+
+func newMoneroWatchTestAppWithOptions(t *testing.T, fixture *moneroWalletFixture, publicExample bool, dashboardPassword string) (*app, http.Handler, string) {
 	t.Helper()
 	walletServer := httptest.NewServer(http.HandlerFunc(fixture.handler))
 	t.Cleanup(walletServer.Close)
@@ -125,8 +136,8 @@ func newMoneroWatchTestApp(t *testing.T, fixture *moneroWalletFixture) (*app, ht
 	t.Cleanup(bitcoinServer.Close)
 	stateDir := t.TempDir()
 	cfg := config{
-		rpcURL: bitcoinServer.URL, rpcUser: "rpc-user", rpcPassword: "rpc-password", dashboardPassword: "dashboard-secret",
-		stateDir: stateDir, dataDir: t.TempDir(), version: "test", moneroEnabled: true, moneroWalletEnabled: true,
+		rpcURL: bitcoinServer.URL, rpcUser: "rpc-user", rpcPassword: "rpc-password", dashboardPassword: dashboardPassword,
+		stateDir: stateDir, dataDir: t.TempDir(), version: "test", moneroEnabled: true, moneroWalletEnabled: true, moneroPublicExample: publicExample,
 		moneroRPCURL: walletServer.URL, moneroRPCUser: "wallet-user", moneroRPCPassword: "wallet-rpc-password",
 		moneroWalletRPCURL: walletServer.URL, moneroWalletRPCUser: "wallet-user", moneroWalletRPCPassword: "wallet-rpc-password", moneroWalletPassword: "encrypted-wallet-password",
 	}
@@ -610,6 +621,14 @@ func TestMoneroWalletConfigRequiresCompleteDedicatedCredentials(t *testing.T) {
 	cfg, err := envConfig()
 	if err != nil || !cfg.moneroWalletEnabled || cfg.moneroWalletRPCUser != "wallet-user" || cfg.moneroWalletPassword != "wallet-file-password" {
 		t.Fatalf("wallet configuration = %#v, %v", cfg, err)
+	}
+	if !cfg.moneroPublicExample {
+		t.Fatal("public Monero example was not enabled by default")
+	}
+	t.Setenv("MONERO_PUBLIC_EXAMPLE", "false")
+	cfg, err = envConfig()
+	if err != nil || cfg.moneroPublicExample {
+		t.Fatalf("public Monero example opt-out = %#v, %v", cfg, err)
 	}
 }
 

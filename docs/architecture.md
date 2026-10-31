@@ -119,7 +119,7 @@ that makes `tor_egress` Tor's deterministic default route.
   `dashboard.bind_ip` to make LAN exposure intentional. See
   [SECURITY.md](../SECURITY.md).
   Personal wallet views and all wallet/upgrade mutations require a configured
-  password; the exact public example is readable without one.
+  password; sourced public examples are readable without one.
 - The opt-in Upgrade button keeps the container↔host boundary intact: the
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls

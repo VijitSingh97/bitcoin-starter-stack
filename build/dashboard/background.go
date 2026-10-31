@@ -39,6 +39,9 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	if hasNode {
 		start(func() { a.prices.Run(ctx) })
 	}
+	if a.familyWatch != nil && (a.cfg.nodes[nodeLitecoin].Enabled || a.cfg.nodes[nodeBitcoinCash].Enabled) {
+		start(func() { a.familyWatch.run(ctx) })
+	}
 	if a.cfg.moneroWalletEnabled {
 		start(func() { a.moneroWatch.run(ctx, func() bool { return a.nodeWorkerRunnable(nodeMonero, true) }) })
 	}
@@ -52,27 +55,7 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		id, node := id, node
 		start(func() {
 			a.every(ctx, time.Minute, func(ctx context.Context) {
-				if !a.nodeWorkerRunnable(id, true) {
-					return
-				}
-				rpc := &rpcClient{url: node.RPCURL, user: node.RPCUser, password: node.RPCPassword, client: &http.Client{Timeout: 5 * time.Second}}
-				if node.Protocol == "zcash-json-rpc" {
-					rpc.user, rpc.password, rpc.cookiePath = "", "", node.RPCCookiePath
-					var chain zcashBlockchainInfo
-					var fee zcashStandardFee
-					if rpc.call(ctx, "getblockchaininfo", nil, &chain) == nil && chain.Blocks >= max(chain.Headers, chain.EstimatedHeight) && chain.VerificationProgress >= 0.999999 && rpc.call(ctx, "getstandardfee", nil, &fee) == nil && fee.StandardFee > 0 {
-						a.recordAdditionalFee(id, float64(fee.StandardFee))
-					}
-					return
-				}
-				var chain familyBlockchainInfo
-				if rpc.call(ctx, "getblockchaininfo", nil, &chain) != nil || chain.InitialBlockDownload {
-					return
-				}
-				var estimate feeEstimate
-				if rpc.call(ctx, "estimatesmartfee", []any{1}, &estimate) == nil && estimate.FeeRate != nil {
-					a.recordAdditionalFee(id, *estimate.FeeRate*100000)
-				}
+				a.sampleAdditionalFee(ctx, id, node)
 			})
 		})
 	}

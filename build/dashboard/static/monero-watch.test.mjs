@@ -31,6 +31,17 @@ test("Monero total never mixes incoming-only funds with verified balances", () =
   assert.equal(moneroTotal([wallet, { ...wallet, spending_status: "unknown" }]), "Pending…");
 });
 
+test("public example stays received-only and is excluded from personal totals", () => {
+  const example = { example: true, state: "ready", received_atomic: "9000000000000", balance_atomic: "8000000000000", spending_status: "verified", key_images: { complete: true } };
+  const personal = { state: "ready", balance_atomic: "1250000000000", spending_status: "verified", key_images: { complete: true } };
+  const view = moneroWalletView(example);
+  assert.equal(view.balance, "9 XMR received");
+  assert.equal(view.verified, false);
+  assert.match(view.note, /current balance unknown/);
+  assert.equal(moneroTotal([example, personal]), "1.25 XMR");
+  assert.equal(moneroTotal([example]), "—");
+});
+
 test("snapshot charts preserve single-atomic-unit changes at large balances", () => {
   const history = ["10000000000000000000", "10000000000000000001", "10000000000000000002"].map(amount_atomic => ({ amount_atomic }));
   assert.deepEqual(moneroHistoryValues(history), [0, 0.5, 1]);

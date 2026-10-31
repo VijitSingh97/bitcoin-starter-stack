@@ -52,7 +52,7 @@ the same total RAM.
 
 ## Dashboard data
 
-Panels share sync progress, block height, peers, disk space, resource profile,
+Panels share sync progress, block height, peers, disk space,
 endpoint status, and price fields. A value the native daemon cannot supply is
 shown as unavailable rather than estimated or copied from another chain. Tari
 does not report an uptime or fee estimate through its status API; a zero pruned
@@ -64,8 +64,25 @@ Litecoin and Dogecoin report 1-, 3-, and 6-block targets when enough observation
 are available. An insufficient-history response is shown as unavailable.
 Zcash displays its standard ZIP-317 fee separately from an estimate.
 
-Bitcoin watch-only wallets and Monero view-only wallets are supported. The other
-chains currently provide node monitoring without a wallet view.
+Wallet capabilities differ by chain:
+
+| Node | Dashboard wallet view |
+|---|---|
+| Bitcoin | Public addresses, descriptors, and extended public keys; confirmed UTXOs come from the local node. |
+| Monero | Primary address plus private view key, with optional signed key images. Without complete key images, the amount is received-only rather than a verified current balance. |
+| Litecoin | Address-only confirmed UTXO snapshots from the local node. |
+| Bitcoin Cash | Address-only confirmed UTXO snapshots from the local node. |
+| Dogecoin | A sourced public Dogecoin Foundation address is shown as a reference, without a balance. The current pruned daemon cannot discover an arbitrary address balance. |
+| Zcash / Zakura | A sourced Tor Project transparent address is shown as a reference, without a balance. Zakura's default checkpoint-pruned mode does not retain the address index needed for lookup. |
+| Tari | No wallet view. A view-only wallet needs a separate wallet service, public spend key, private view key, and birthday; no verified public example is bundled. |
+
+Litecoin and Bitcoin Cash use their native `scantxoutset` RPC after sync. The
+dashboard caches the confirmed result for an hour and records balance snapshots;
+it does not reconstruct transaction history, spent outputs, or mempool activity.
+New entries stay **Pending** until a scan completes. A failed refresh keeps the
+last confirmed result and marks it **Stale** or **Error** rather than replacing it
+with zero. Public examples are excluded from personal totals. No chain falls
+back to an external block explorer.
 
 ## Setup wizard
 

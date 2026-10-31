@@ -28,7 +28,7 @@ test("tower selection opens one panel, survives refresh, and closes to the chose
 
   controller.open("bitcoin", bitcoinChoice);
   assert.equal(doc.body.dataset.node, "bitcoin");
-  assert.equal(doc.overview.hidden, true);
+  assert.equal(doc.overview.hidden, false);
   assert.deepEqual(doc.panels.map((panel) => panel.hidden), [false, true]);
   assert.deepEqual(doc.choices.map((choice) => choice["aria-expanded"]), ["true", "false"]);
   assert.equal(doc.bitcoinClose.focused, 1);

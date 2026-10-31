@@ -130,8 +130,6 @@ export function genericNodeView(data, label = "Node") {
 export function applySelection(doc, node, focus = true) {
   const selected = normalizeNode(node);
   doc.body.dataset.node = selected;
-  const overview = doc.getElementById("node-overview");
-  if (overview) overview.hidden = !!selected;
   for (const panel of doc.querySelectorAll("[data-node-panel]")) {
     panel.hidden = panel.dataset.nodePanel !== selected;
   }

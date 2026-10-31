@@ -69,7 +69,16 @@ names for upgrade compatibility while the broader Node Manager takes shape.
 - 👁️ **Monero view-only wallets.** Add a main address and private view key from the
   password-protected Monero card. No private spend key or seed is accepted, and the
   dashboard cannot sign or send. Optional signed key images make spent/current balance
-  tracking accurate; without them the amount is clearly labeled received-only.
+  tracking accurate; without them the amount is clearly labeled received-only. Fresh
+  wallet state includes the sourced Monero General Fund as a received-only example.
+- 🪙 **Litecoin and Bitcoin Cash address views.** Add a public address and the
+  synced local daemon scans its live UTXO set. Results are cached hourly with
+  saved balance snapshots; pending or failed scans are never presented as zero.
+  Sourced Linux Mint and Bitcoin Cash Node examples are excluded from personal totals.
+- 🔎 **Honest reference cards.** Dogecoin and Zcash show sourced public examples
+  without balances because their current pruned modes cannot supply arbitrary
+  address lookup. Tari needs a separate view-only wallet service, so it has no
+  bundled wallet example. The dashboard never falls back to an external explorer.
 - 🔌 **Remote nodes for Pithead.** Independently enable Monero restricted RPC/ZMQ
   or Tari mining gRPC on your private LAN. Tari uses an explicit mining-method
   allowlist and needs no wallet, miner, or payout key on this server.
@@ -225,10 +234,11 @@ internet. Click a tower to see that chain's progress. Check logs with
 `./stack logs bitcoin` or `./stack logs monero` for source installs; packages
 use `sudo bitcoin-stack logs bitcoin` or `sudo bitcoin-stack logs monero`.
 
-Watch-only wallets remain pending during initial block download. After sync, the
-node scans the live UTXO set and shows confirmed balances; its chart contains
+Bitcoin, Litecoin, and Bitcoin Cash watch-only entries remain pending during
+initial block download. After sync, the node scans the live UTXO set and shows
+confirmed balances; its chart contains
 saved balance snapshots, not transaction history, spent outputs, or mempool
-activity. Initial sync transfers roughly 900 GB through Tor and can take days.
+activity. Bitcoin's initial sync transfers roughly 900 GB through Tor and can take days.
 See [Watch-only balances](docs/watch-only.md).
 Monero's initial sync also downloads and validates historical data before
 discarding the parts pruning does not retain. A pruned node saves disk, not
@@ -252,7 +262,8 @@ enable **Label towers** in the gear panel to show their names, prices, and next
 block numbers. The saved default currency starts at USD. These preferences
 survive restarts. Disabled nodes show **Not configured** in their card.
 
-Both cards show node version, uptime, connections, sync progress, chain storage,
+Every configured card shows the native status fields its daemon supplies. Across
+the chains these include node version, connections, sync progress, chain storage,
 native fee estimates with a 24-hour graph, and a nine-currency price selector.
 Monero also shows mempool size, disk capacity/free space, latest-block age,
 difficulty, estimated network hashrate, and view-only balances. Unavailable
@@ -286,9 +297,11 @@ The following extra features belong to the Bitcoin card:
 The Monero card has the same price, fee-history, status, disk, uptime, and wallet
 sections. Its fees are native XMR-per-kB estimates. Monero wallet rows remain
 pending during their first scan; amounts are verified as current only when fresh,
-complete key-image coverage is present. Notifications remain Bitcoin-only.
+complete key-image coverage is present. Litecoin and Bitcoin Cash cards accept
+address-only confirmed-UTXO snapshots. Dogecoin and Zcash show reference-only
+examples without balances, and Tari has no wallet example.
 
-The status page, notification gear, and public example can be used without a
+The status page, notification gear, and sourced public examples can be used without a
 password; when configured, the password protects the whole dashboard. Personal
 wallet views, wallet changes, and upgrades require one. LAN HTTP is unencrypted:
 use a trusted LAN or the onion service, and keep the configured dashboard port
@@ -340,7 +353,7 @@ covers downloads, DNS, and the limits of the guarantee.
 | [Supported nodes](docs/nodes.md) | All seven chains, storage and resource budgets, and Pithead remote-node settings. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
-| [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
+| [Watch-only](docs/watch-only.md) | Read-only Bitcoin, Monero, Litecoin, and Bitcoin Cash views, plus the limits of the other chains. |
 | [Tor & Privacy](docs/privacy.md) | Enforced runtime routing, LAN access, and the host-download boundary. |
 | [Architecture](docs/architecture.md) | Services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |

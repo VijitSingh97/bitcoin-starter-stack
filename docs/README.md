@@ -7,7 +7,7 @@
 | [Supported nodes](nodes.md) | All seven chains, disk and resource budgets, LAN endpoints, and Pithead remote-node access. |
 | [Hardware Requirements](hardware.md) | CPU, RAM, and disk sizing — with real numbers from a reference deployment. |
 | [Configuration](configuration.md) | Every `config.json` key, applying changes, and reusing an existing node's data. |
-| [Watch-only](watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |
+| [Watch-only](watch-only.md) | Read-only Bitcoin, Monero, Litecoin, and Bitcoin Cash views, plus the limits of the other chains. |
 | [Architecture](architecture.md) | Selected services, the network layout, and the privacy model. |
 | [Operations](operations.md) | Day-to-day commands, health checks, upgrades, backup, and troubleshooting. |
 | [Notifications & Remote Access](notifications.md) | Telegram alerts, a Healthchecks.io dead-man's switch, and reaching the dashboard over Tor. |

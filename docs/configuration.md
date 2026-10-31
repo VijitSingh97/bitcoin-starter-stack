@@ -347,6 +347,13 @@ an optional restore height and signed key-image JSON. Never place a view key,
 private spend key, seed phrase, or key images in this tracked configuration.
 See [Watch-only balances](watch-only.md#monero-view-only-wallets).
 
+Litecoin and Bitcoin Cash watch lists are also dashboard state rather than
+`config.json` settings. They accept one public address per row and persist their
+rosters, hourly confirmed-UTXO cache, and saved balance snapshots in the private
+dashboard state volume. Their sourced public examples are created automatically
+on fresh state and are excluded from personal totals. Dogecoin and Zcash show
+sourced reference addresses without balances; Tari has no bundled wallet example.
+
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials and LAN exposure, `inbound_onion`, and dashboard
 password, bind address, onion publication, and `control`. They change storage, process

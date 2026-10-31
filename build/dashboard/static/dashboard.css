@@ -307,6 +307,7 @@ body:not([data-node=""]) .node-close-backdrop { display: block; }
 }
 
 .card {
+  box-sizing: border-box;
   background: var(--card);
   border-radius: 12px;
   padding: 25px;
@@ -666,3 +667,28 @@ hr {
 #node-overview-status {position:fixed;top:75px;inset-inline:24px;text-align:center;color:var(--muted);font:0.8rem monospace;pointer-events:none;}
 .chain-wallet-card h2 {color:var(--node-accent);}
 .node-panel[data-node-active="0"] .chain-wallet-card {display:none !important;}
+.family-watch-row {position:relative;padding:12px 0;}
+.family-watch-row + .family-watch-row {border-top:1px solid var(--border);}
+.family-watch-heading {display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-family:monospace;}
+.family-watch-heading strong {overflow-wrap:anywhere;}
+.family-watch-balance {color:var(--node-accent);text-align:right;white-space:nowrap;}
+.family-watch-balance.stale {opacity:0.7;}
+.family-watch-address {display:block;margin-top:6px;color:var(--muted);font-size:0.72rem;overflow-wrap:anywhere;}
+.family-watch-note {margin:6px 0 0;color:var(--muted);font-size:0.75rem;line-height:1.45;}
+.family-watch-source {display:inline-block;margin-top:6px;color:var(--node-accent);font-size:0.75rem;}
+.family-watch-remove {display:block;margin-top:8px;padding:0;border:0;background:none;color:var(--muted);font:0.75rem monospace;cursor:pointer;}
+.family-watch-remove:hover,.family-watch-remove:focus-visible {color:#ff5252;}
+.family-watch-form {display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);}
+.family-watch-form[hidden] {display:none;}
+.family-watch-form input {min-width:0;padding:7px;border:1px solid var(--border);border-radius:4px;background:var(--tag-bg);color:var(--text);font:0.8rem monospace;}
+.family-watch-form button {padding:7px 10px;border:1px solid var(--node-accent);border-radius:4px;background:transparent;color:var(--node-accent);cursor:pointer;}
+.family-watch-form button:disabled {opacity:0.5;cursor:default;}
+.family-watch-message {grid-column:1 / -1;min-height:1.2em;margin:0;color:var(--muted);font-size:0.75rem;}
+.family-watch-error {color:#ff5252 !important;}
+
+@media (max-width:700px) {
+  .family-watch-heading {align-items:flex-start;flex-direction:column;gap:4px;}
+  .family-watch-balance {text-align:left;}
+  .family-watch-form {grid-template-columns:1fr;}
+}
+.family-watch-history { display: block; width: 100%; height: 32px; margin: 8px 0; color: var(--node-accent, var(--accent)); }

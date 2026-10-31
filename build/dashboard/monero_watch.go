@@ -52,6 +52,8 @@ type MoneroWatchWallet struct {
 	ID                    string               `json:"id"`
 	Name                  string               `json:"name"`
 	Address               string               `json:"address"`
+	Example               bool                 `json:"example"`
+	SourceURL             string               `json:"source_url,omitempty"`
 	RestoreHeight         uint64               `json:"restore_height"`
 	State                 string               `json:"state"`
 	ReceivedAtomic        string               `json:"received_atomic"`
@@ -79,18 +81,19 @@ type moneroStoredWallet struct {
 }
 
 type MoneroWatchStore struct {
-	mu          sync.RWMutex
-	path        string
-	wallets     []MoneroWatchWallet
-	err         error
-	rpcPoisoned bool
-	enabled     bool
-	password    string
-	rpc         moneroRPC
-	daemon      moneroRPC
-	gate        chan struct{}
-	queue       chan string
-	now         func() time.Time
+	mu                   sync.RWMutex
+	path                 string
+	wallets              []MoneroWatchWallet
+	err                  error
+	rpcPoisoned          bool
+	enabled              bool
+	password             string
+	rpc                  moneroRPC
+	daemon               moneroRPC
+	gate                 chan struct{}
+	queue                chan string
+	now                  func() time.Time
+	publicExamplePending bool
 }
 
 type moneroSignedKeyImage struct {
@@ -117,6 +120,7 @@ func NewMoneroWatchStore(cfg config) *MoneroWatchStore {
 	}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
+		s.publicExamplePending = cfg.moneroPublicExample
 		return s
 	}
 	if err != nil {
@@ -174,6 +178,10 @@ func (s *MoneroWatchStore) List() []MoneroWatchWallet {
 }
 
 func (s *MoneroWatchStore) Add(ctx context.Context, name, address, viewKey string, restoreHeight uint64) (MoneroWatchWallet, error) {
+	return s.add(ctx, name, address, viewKey, restoreHeight, false, "")
+}
+
+func (s *MoneroWatchStore) add(ctx context.Context, name, address, viewKey string, restoreHeight uint64, example bool, sourceURL string) (MoneroWatchWallet, error) {
 	name, address, viewKey = strings.TrimSpace(name), strings.TrimSpace(address), strings.TrimSpace(viewKey)
 	if !validMoneroName(name) {
 		return MoneroWatchWallet{}, errors.New("Name must be 1 to 40 printable characters.")
@@ -223,7 +231,7 @@ func (s *MoneroWatchStore) Add(ctx context.Context, name, address, viewKey strin
 	if err != nil {
 		return MoneroWatchWallet{}, errMoneroWatchUnavailable
 	}
-	wallet := MoneroWatchWallet{ID: id, Name: name, Address: address, RestoreHeight: restoreHeight, State: "pending", SpendingStatus: "unknown", WalletFile: walletFile}
+	wallet := MoneroWatchWallet{ID: id, Name: name, Address: address, Example: example, SourceURL: sourceURL, RestoreHeight: restoreHeight, State: "pending", SpendingStatus: "unknown", WalletFile: walletFile}
 	err = s.serialized(ctx, func(ctx context.Context) error {
 		var generated struct {
 			Address string `json:"address"`
@@ -255,6 +263,10 @@ func (s *MoneroWatchStore) Add(ctx context.Context, name, address, viewKey strin
 		return MoneroWatchWallet{}, err
 	}
 	s.mu.Lock()
+	if example && !s.publicExamplePending {
+		s.mu.Unlock()
+		return MoneroWatchWallet{}, errMoneroPublicExampleSuperseded
+	}
 	if len(s.wallets) >= maxMoneroWatchWallets {
 		s.mu.Unlock()
 		return MoneroWatchWallet{}, errors.New("At most 8 Monero wallets can be monitored.")
@@ -269,6 +281,8 @@ func (s *MoneroWatchStore) Add(ctx context.Context, name, address, viewKey strin
 	err = s.saveLocked()
 	if err != nil {
 		s.wallets = s.wallets[:len(s.wallets)-1]
+	} else {
+		s.publicExamplePending = false
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -310,6 +324,9 @@ func (s *MoneroWatchStore) ImportKeyImages(ctx context.Context, id string, uploa
 	wallet, ok := s.walletByID(id)
 	if !ok {
 		return os.ErrNotExist
+	}
+	if wallet.Example {
+		return errors.New("The public Monero example does not accept key images.")
 	}
 	if err := s.serialized(ctx, func(ctx context.Context) error {
 		if err := s.openWallet(ctx, wallet); err != nil {
@@ -353,6 +370,7 @@ func (s *MoneroWatchStore) run(ctx context.Context, active func() bool) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	if active() {
+		s.ensurePublicExample(ctx)
 		for _, wallet := range s.List() {
 			s.Queue(wallet.ID)
 		}
@@ -372,6 +390,7 @@ func (s *MoneroWatchStore) run(ctx context.Context, active func() bool) {
 			if !active() {
 				continue
 			}
+			s.ensurePublicExample(ctx)
 			wallets := s.List()
 			if len(wallets) > 0 {
 				if index >= len(wallets) {
@@ -496,7 +515,7 @@ func (s *MoneroWatchStore) applyRefresh(id string, snapshot moneroWalletSnapshot
 		wallet.ScanHeight, wallet.TargetHeight = snapshot.walletHeight, snapshot.daemonHeight
 		wallet.KeyImages.CoveredOutputs = snapshot.coveredOutputs
 		wallet.KeyImages.TotalOutputs = snapshot.totalOutputs
-		wallet.KeyImages.Complete = wallet.KeyImages.Present && snapshot.totalOutputs > 0 && snapshot.coveredOutputs == snapshot.totalOutputs
+		wallet.KeyImages.Complete = !wallet.Example && wallet.KeyImages.Present && snapshot.totalOutputs > 0 && snapshot.coveredOutputs == snapshot.totalOutputs
 		if wallet.KeyImages.Complete {
 			wallet.SpendingStatus = "verified"
 			wallet.BalanceAtomic = fmt.Sprint(snapshot.balance)
@@ -740,6 +759,13 @@ func validStoredMoneroWallet(wallet MoneroWatchWallet) bool {
 		return false
 	}
 	if wallet.SpendingStatus != "" && wallet.SpendingStatus != "unknown" && wallet.SpendingStatus != "stale" && wallet.SpendingStatus != "verified" {
+		return false
+	}
+	if wallet.Example {
+		if !validMoneroPublicExample(wallet) {
+			return false
+		}
+	} else if wallet.SourceURL != "" {
 		return false
 	}
 	for _, point := range wallet.History {

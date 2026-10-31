@@ -36,6 +36,7 @@ type config struct {
 	moneroRPCPassword       string
 	moneroDataDir           string
 	moneroWalletEnabled     bool
+	moneroPublicExample     bool
 	moneroWalletRPCURL      string
 	moneroWalletRPCUser     string
 	moneroWalletRPCPassword string
@@ -113,6 +114,7 @@ func envConfig() (config, error) {
 		return config{}, errors.New("MONERO_WALLET_RPC_USER, MONERO_WALLET_RPC_PASSWORD, and MONERO_WALLET_PASSWORD must be set together")
 	}
 	cfg.moneroWalletEnabled = cfg.moneroEnabled && walletValues == 3
+	cfg.moneroPublicExample = cfg.moneroWalletEnabled && !explicitlyDisabled(os.Getenv("MONERO_PUBLIC_EXAMPLE"))
 	var exposureErr error
 	if !cfg.bitcoinDisabled {
 		if cfg.bitcoinRPCEndpoint, exposureErr = exposedLANEndpoint("BITCOIN_RPC_EXPOSE", "BITCOIN_RPC_BIND_IP", "BITCOIN_RPC_PORT", "8332"); exposureErr != nil {

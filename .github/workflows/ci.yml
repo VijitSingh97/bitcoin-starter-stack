@@ -88,6 +88,13 @@ jobs:
           NATIVE_NODE_CHAIN: ${{ matrix.chain }}
         run: tests/test_native_nodes.sh
 
+      - name: Verify native read-only wallet balances
+        if: matrix.chain == 'litecoin' || matrix.chain == 'bitcoincash'
+        env:
+          RUN_NATIVE_WALLET_SMOKE: "1"
+          NATIVE_WALLET_CHAIN: ${{ matrix.chain }}
+        run: tests/test_native_wallets.sh
+
   macos-host:
     runs-on: macos-latest
     timeout-minutes: 15

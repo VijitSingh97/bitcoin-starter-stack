@@ -81,7 +81,6 @@ function renderNode(id, data) {
   if (details) details.hidden = !view.details;
   const live = byId(`${id}-live`);
   if (live) live.dataset.nextBlock = view.nextBlock || "";
-  setText(`${id}-wallet-reason`, data.wallet_view_reason || "Public-key balance monitoring is unavailable for this chain.");
   if (!view.details) {
     announceNodeStatus(id);
     return;
@@ -110,10 +109,6 @@ function renderNode(id, data) {
   const fees=chainFeesView(id,data);
   setText(`${id}-fees`, fees.value);
   setText(`${id}-fee-unit`, fees.label);
-  setText(`${id}-wallet-reason`, data.wallet_view_reason || "Public-key balance monitoring is unavailable for this chain.");
-  const cpus=Number(data.steady_cpus), memory=Number(data.steady_mem_limit_mb);
-  setText(`${id}-budget`,cpus>0 && memory>0 ? `${cpus} core${cpus===1?"":"s"} · ${(memory/1024).toFixed(1)} GiB RAM` : "No automatic cap");
-  setText(`${id}-resource-state`,data.resource_profile === "compact" ? "Applied after fresh node checks confirm synchronization." : "Automatic resource profile is off.");
   announceNodeStatus(id);
 }
 

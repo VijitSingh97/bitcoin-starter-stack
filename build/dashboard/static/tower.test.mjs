@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, towerLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, overviewTransition, overviewHitWidth, overviewChoiceGeometry, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -94,6 +94,13 @@ test("nextScene reverses cleanly and changes towers through the overview", () =>
   assert.deepEqual(nextScene("bitcoin", "monero", 1, 16, true), { node: "monero", progress: 1 });
 });
 
+test("overview controls fade with the other towers and only receive input when settled", () => {
+  assert.deepEqual(overviewTransition(0, ""), { opacity: 1, hidden: false, interactive: true });
+  assert.deepEqual(overviewTransition(0.5, "bitcoin"), { opacity: 0.5, hidden: false, interactive: false });
+  assert.deepEqual(overviewTransition(1, "bitcoin"), { opacity: 0, hidden: true, interactive: false });
+  assert.deepEqual(overviewTransition(0, "bitcoin"), { opacity: 1, hidden: false, interactive: false });
+});
+
 test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {
   for (const W of [375, 900, 1023]) {  // phones through the awkward mid-range
     const m = towerLayout(W);
@@ -108,6 +115,31 @@ test("towerLayout keeps the tower clear of the card zone on wide screens", () =>
     assert.equal(wide, true);
     assert.ok(ox - (GRID * tw) / 2 >= 500, `W=${W} overlaps card`);
     assert.ok(ox + (GRID * tw) / 2 <= W + 1, `W=${W} runs off screen`);
+  }
+});
+
+test("overview bouquet spreads farther on large screens without enlarging the towers", () => {
+  const span = ({ positions }) => Math.max(...positions) - Math.min(...positions);
+  const laptop = overviewLayout(1440, 7, 900);
+  const desktop = overviewLayout(1920, 7, 900);
+  assert.ok(span(desktop) > span(laptop) * 1.2);
+  assert.equal(desktop.tw, laptop.tw);
+});
+
+test("seven-tower mobile bouquet stays compact, contained, and selectable", () => {
+  for (const width of [320, 375, 560]) {
+    const layout = overviewLayout(width, 7, 700);
+    const hitWidth = overviewHitWidth(layout.tw);
+    const sortedAnchors = layout.anchors.slice().sort((a, b) => a - b);
+    const minGap = Math.min(...sortedAnchors.slice(1).map((y, index) => y - sortedAnchors[index]));
+    const targets = sortedAnchors.map((anchor) => overviewChoiceGeometry(width, anchor, 12 * layout.tw * 1.12, minGap));
+    assert.equal(layout.positions.length, 7);
+    assert.equal(layout.contentWidth, width);
+    assert.ok(hitWidth >= 140);
+    assert.ok(layout.positions.every((x) => x - hitWidth / 2 >= 0 && x + hitWidth / 2 <= layout.contentWidth));
+    assert.ok(minGap >= 52);
+    assert.ok(targets.every(({ height }) => height >= 44));
+    assert.ok(targets.slice(1).every(({ top }, index) => top >= targets[index].top + targets[index].height));
   }
 });
 

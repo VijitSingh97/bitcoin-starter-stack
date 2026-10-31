@@ -169,7 +169,8 @@ func TestBitcoinFamilyStatusUsesOnlyPublicNodeRPC(t *testing.T) {
 			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil {
 				t.Fatalf("status response = %d %s", response.Code, response.Body.String())
 			}
-			if !status.Available || status.Synced || status.Height != 100 || status.TargetHeight != 120 || status.SyncPercent != 50 || !status.Pruned || !status.PrunedAvailable || status.Version != tc.version || !status.ConnectionsAvailable || status.IncomingConnections != 1 || status.OutgoingConnections != 1 || !status.MempoolBytesAvailable || !status.FeesAvailable || status.FeeUnit != tc.unit || status.FeeEstimates[0] != tc.fee || status.WalletViewSupported || status.SteadyCPUs != 1 || status.SteadyMemLimitMB != 4096 || status.ResourceProfile != "compact" {
+			walletViewSupported := tc.id == nodeLitecoin || tc.id == nodeBitcoinCash
+			if !status.Available || status.Synced || status.Height != 100 || status.TargetHeight != 120 || status.SyncPercent != 50 || !status.Pruned || !status.PrunedAvailable || status.Version != tc.version || !status.ConnectionsAvailable || status.IncomingConnections != 1 || status.OutgoingConnections != 1 || !status.MempoolBytesAvailable || !status.FeesAvailable || status.FeeUnit != tc.unit || status.FeeEstimates[0] != tc.fee || status.WalletViewSupported != walletViewSupported || status.SteadyCPUs != 1 || status.SteadyMemLimitMB != 4096 || status.ResourceProfile != "compact" {
 				t.Fatalf("status = %#v", status)
 			}
 		})

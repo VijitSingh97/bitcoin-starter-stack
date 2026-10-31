@@ -1,8 +1,10 @@
 # Watch-only balances
 
-Bitcoin accepts public keys only. Monero uses a private view key plus optional
-signed key images. In both cases balances are read from **your own node**, so no
-third-party block explorer receives your addresses.
+Bitcoin, Litecoin, and Bitcoin Cash read confirmed unspent balances from **your
+own node**, so no third-party block explorer receives your addresses. Bitcoin
+accepts public keys only; Litecoin and Bitcoin Cash accept one public address per
+row. Monero uses a private view key plus optional signed key images. None of these
+paths accepts a private spending key or can send funds.
 
 Bitcoin **watch-only** entries hold public keys only. The node can see
 your balance and derive your addresses, but it has no private keys and
@@ -52,8 +54,32 @@ state volume to request a new scan; keep `wallets.json` and
 `balance_history.json` intact.
 
 Set `dashboard.password` in `config.json` to view personal wallets and add or remove
-entries. Fresh installs include one clearly marked public example; see
-[Public example](#public-example-and-seeding-from-configjson).
+entries. Fresh Bitcoin state includes one clearly marked public example; see
+[Bitcoin public example](#bitcoin-public-example-and-seeding-from-configjson).
+
+## Litecoin and Bitcoin Cash addresses
+
+The Litecoin and Bitcoin Cash cards accept a label and one public address. After
+the node is fully synced, the dashboard validates the address with that daemon and
+runs its native `scantxoutset` call. The result is a confirmed UTXO snapshot at the
+displayed scan height, not transaction history. Extended public keys, descriptors,
+Litecoin MWEB addresses, private keys, and seeds are not accepted in these forms.
+
+Scans run in the background and a confirmed result is reused for up to one hour.
+The row is **Pending** before its first successful scan. If the node is syncing or
+a later scan fails, a prior confirmed amount remains visible as **Stale** or
+**Error**; an unverified failure is never displayed as a zero balance. Saved
+snapshot charts and watch lists survive dashboard restarts.
+
+Fresh state includes two sourced public examples:
+
+- **Linux Mint** for Litecoin, from its
+  [official donors page](https://www.linuxmint.com/donors.php).
+- **Bitcoin Cash Node** for Bitcoin Cash, from its
+  [official project site](https://bitcoincashnode.org/en/).
+
+Examples are clearly marked and excluded from personal totals. Removing one is
+persistent; restarting the dashboard does not add it back.
 
 ## Monero view-only wallets
 
@@ -107,6 +133,28 @@ fully scanned and fresh key-image coverage is complete.
 The stack uses Monero's authenticated
 [`generate_from_keys`, `get_balance`, and `import_key_images` wallet RPCs](https://docs.getmonero.org/rpc-library/wallet-rpc/)
 inside Docker. That wallet service has no host port and no public internet route.
+
+On fresh Monero wallet state, the dashboard seeds the official **Monero General
+Fund** as a public example using the address and published view key from Monero's
+[contribution page](https://www.getmonero.org/get-started/contributing/). A view
+key is not a spending key, but it reveals received outputs, so treat personal view
+keys as sensitive. The example is always received-only: the project has not
+published complete current key images, so the dashboard does not claim an
+accurate current balance. Removing the example is persistent and it is not seeded
+into an existing wallet roster.
+
+## Reference-only cards
+
+Dogecoin shows the [Dogecoin Foundation](https://foundation.dogecoin.com/about/)
+address and Zcash shows the [Tor Project](https://donate.torproject.org/cryptocurrency/)
+transparent address as sourced examples. They intentionally have no balance:
+Dogecoin's current pruned daemon cannot discover arbitrary address UTXOs, and
+Zakura's default checkpoint-pruned mode omits the address index. The dashboard
+does not query an external explorer to fill those gaps.
+
+Tari has no bundled public example. Its view-only flow requires a separate wallet
+service plus a public spend key, private view key, and birthday; the current stack
+only runs the Tari node.
 
 ## Bitcoin: the Genesis address is a special case
 
@@ -184,7 +232,7 @@ xpub.
 - `blockfilterindex` and `prune_mb: 0` remain manual compatibility settings for
   advanced archival setups. They are not required for the default UTXO-set scan.
 
-## Public example and seeding from config.json
+## Bitcoin public example and seeding from config.json
 
 Fresh installs start with one public example address disclosed by Binance in
 2022. It is labeled **Public example** and excluded from personal totals, so its
@@ -208,9 +256,9 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 
-- **No spending keys.** Bitcoin accepts public material only. Monero accepts a
-  private view key, but rejects private spend keys and seeds; neither path can sign
-  or send.
+- **No spending keys.** Bitcoin, Litecoin, and Bitcoin Cash accept public material
+  only. Monero accepts a private view key, but rejects private spend keys and seeds;
+  none of these paths can sign or send.
 - **An xpub is still sensitive.** Anyone who has it can follow the addresses and
   balances derived from that account. It's stored in the private wallet list;
   existing Core watch-wallet files can also contain it. Keep access to the box and dashboard
@@ -218,3 +266,16 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
 - **Wallet data stays on the box.** Balances come directly from your nodes;
   wallet keys and addresses are never sent to external services. The separate BTC
   and XMR price lookups send only asset and currency names to CoinGecko through Tor.
+
+## Native wallet smoke test
+
+Maintainers can opt into isolated Litecoin and Bitcoin Cash regtest proofs. The
+test builds temporary local images, exercises funded and zero-balance addresses
+through the authenticated dashboard API, and removes its owned resources:
+
+```bash
+RUN_NATIVE_WALLET_SMOKE=1 tests/test_native_wallets.sh
+```
+
+Set `NATIVE_WALLET_CHAIN=litecoin` or `bitcoincash` to run one daemon. This test
+needs Docker and is intentionally skipped by default.

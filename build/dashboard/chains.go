@@ -216,6 +216,7 @@ func (a *app) apiAdditionalNode(w http.ResponseWriter, r *http.Request) {
 		WalletViewSupported: false, WalletViewReason: "Watch-only wallet view is not available for this node.",
 		SteadyCPUs: node.SteadyCPUs, SteadyMemLimitMB: node.SteadyMemLimitMB, ResourceProfile: node.ResourceProfile,
 	}
+	status.WalletViewSupported, status.WalletViewReason = familyWatchCapability(id)
 	if !node.Supported {
 		status.Error = "Unavailable until pruned node support exists"
 		writeJSON(w, status)
@@ -380,39 +381,27 @@ func (a *app) writeBitcoinFamilyStatus(w http.ResponseWriter, r *http.Request, n
 			status.LatestBlockAgeSeconds = max(0, time.Now().Unix()-header.Time)
 		}
 	}
+	targets := []int{1, 3, 6}
+	unit := "litoshi/vB"
 	if node.ID == nodeBitcoinCash {
-		var rate float64
-		if rpc.call(ctx, "estimatefee", nil, &rate) == nil && rate >= 0 {
-			status.FeeEstimates = []string{formatFeeRate(rate)}
-			status.FeeUnit, status.FeesAvailable = "sat/B", true
+		targets, unit = []int{1}, "sat/B"
+	} else if node.ID == nodeDogecoin {
+		unit = "DOGE/kB"
+	}
+	for _, blocks := range targets {
+		rate, ok := familyFeeRate(ctx, rpc, node.ID, blocks)
+		if !ok {
+			status.FeeEstimates = nil
+			break
 		}
-	} else {
-		for _, blocks := range []int{1, 3, 6} {
-			var estimate feeEstimate
-			if rpc.call(ctx, "estimatesmartfee", []any{blocks}, &estimate) != nil || estimate.FeeRate == nil || *estimate.FeeRate < 0 {
-				status.FeeEstimates = nil
-				break
-			}
-			value := formatFeeRate(*estimate.FeeRate)
-			if node.ID == nodeDogecoin {
-				value = strings.TrimRight(strings.TrimRight(strconv.FormatFloat(*estimate.FeeRate, 'f', 8, 64), "0"), ".")
-			}
-			status.FeeEstimates = append(status.FeeEstimates, value)
-		}
-		status.FeesAvailable = len(status.FeeEstimates) == 3
-		if status.FeesAvailable {
-			status.FeeUnit = "litoshi/vB"
-			if node.ID == nodeDogecoin {
-				status.FeeUnit = "DOGE/kB"
-			}
-		}
+		status.FeeEstimates = append(status.FeeEstimates, formatFamilyFeeRate(node.ID, rate))
+	}
+	status.FeesAvailable = len(status.FeeEstimates) == len(targets)
+	if status.FeesAvailable {
+		status.FeeUnit = unit
 	}
 	if disk := diskUsage(node.DataDir); disk.Total > 0 {
 		status.DiskTotalBytes, status.DiskFreeBytes, status.DiskAvailable = disk.Total, disk.Free, true
 	}
 	writeJSON(w, status)
-}
-
-func formatFeeRate(value float64) string {
-	return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(value*100000, 'f', 3, 64), "0"), ".")
 }
