@@ -424,10 +424,10 @@ prepare_linuxbrew_data_dirs() {
   [ "$package_managed" = brew ] && [ "$(uname -s)" = Linux ] || return 0
   local data_root=${BITCOIN_STACK_DATA_DIR:-} root_real node upper dir dir_real owner mode contents expected_owner expected_mode
   local tor_image commands='' mounts=()
-  [ -n "$data_root" ] && [ -d "$data_root" ] && [ ! -L "$data_root" ] || {
+  if [ -z "$data_root" ] || [ ! -d "$data_root" ] || [ -L "$data_root" ]; then
     echo "Linuxbrew data directory is missing or is a symbolic link: $data_root" >&2
     return 1
-  }
+  fi
   root_real=$(readlink -f -- "$data_root") || return 1
   [ "$root_real" = "$data_root" ] || {
     echo "Linuxbrew data directory must use its canonical path: $root_real" >&2
@@ -454,10 +454,10 @@ prepare_linuxbrew_data_dirs() {
       fi
       continue
     fi
-    [ -d "$dir" ] && [ ! -L "$dir" ] || {
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then
       echo "Default $node data directory is missing or is a symbolic link: $dir" >&2
       return 1
-    }
+    fi
     dir_real=$(readlink -f -- "$dir") || return 1
     [ "$dir_real" = "$root_real/$node" ] || {
       echo "Default $node data directory escapes the managed data root." >&2
