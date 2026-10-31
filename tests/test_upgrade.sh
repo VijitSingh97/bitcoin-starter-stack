@@ -52,7 +52,7 @@ git remote add origin "$bare"
 git push -q origin HEAD --tags
 # Pin the datadir via config.json (gitignored, so it survives the upgrade's
 # checkout and is re-rendered identically on every configure).
-printf '{"bitcoin": {"data_dir": "%s"}, "dashboard": {"password": "upgradetest"}}\n' "$data" >config.json
+printf '{"bitcoin": {"data_dir": "%s"}, "dashboard": {"password": "upgradetest", "bind_ip": "127.0.0.1"}}\n' "$data" >config.json
 
 # Pre-build both releases' images and tag them as the compose image refs
 # (ghcr…:0.0.2 / :0.0.1). The dashboard bakes VERSION at build time, so each
