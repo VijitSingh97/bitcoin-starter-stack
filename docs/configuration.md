@@ -32,6 +32,22 @@ Linuxbrew safely initializes empty default node directories with the container
 UIDs after images are present. It does not take ownership of non-empty or custom
 paths; correct those deliberately when the startup error identifies a mismatch.
 
+Use the command and paths for your installation:
+
+| Install | Configuration to edit | Generated private state | Apply and check |
+|---|---|---|---|
+| Source | `config.json` in the extracted directory | `.env` and `backups/` beside it | `./stack apply && ./stack status` |
+| Homebrew on macOS | `~/Library/Application Support/bitcoin-starter-stack/config/config.json` | sibling `state/` directory | `bitcoin-stack apply && bitcoin-stack status` |
+| Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` | `bitcoin-stack apply && bitcoin-stack status` |
+| APT | `/etc/bitcoin-starter-stack/config.json` | `/var/lib/bitcoin-starter-stack/.env` and `backups/` | `sudo bitcoin-stack apply && sudo bitcoin-stack status` |
+
+Installation never launches the setup wizard. Run `./stack init` for source,
+`bitcoin-stack init` for Homebrew, or `sudo bitcoin-stack init` for APT. The
+wizard prints the dashboard and selected node endpoint logins once and stores
+them in the mode-600 files above. Save the printed values in a password manager.
+Internal Monero and Tari wallet-service passwords live only in `.env`; they are
+not dashboard logins or personal wallet keys.
+
 ## config.json reference
 
 Every key is optional. The template ([config.example.json](../config.example.json))
@@ -170,7 +186,7 @@ shows the overridable settings with their defaults:
 | `bitcoin.node_password` | auto-generated | Separate Bitcoin RPC password. Existing explicit or rendered credentials remain unchanged. bitcoind receives only a salted hash (`rpcauth`). Letters and numbers only; LAN exposure requires at least 24 characters. |
 | `bitcoin.data_dir` | `./data/bitcoin` (source), managed data directory for APT/Homebrew | Where the blockchain lives on the host. APT uses `/var/lib/bitcoin-starter-stack/data/bitcoin`; Homebrew uses the platform data path above. Relative source paths resolve from the repo root. |
 | `bitcoin.dbcache_mb` | `128` | Bitcoin Core's UTXO cache size in MB. Size it to your RAM — see [Hardware](hardware.md#ram). Existing installs keep their rendered cache setting when this key is omitted; the Compose fallback remains 3000 for older `.env` files that predate this setting. |
-| `bitcoin.prune_mb` | `10000` | Keeps about 10 GB of recent block files after full validation. Existing explicit configuration and rendered state remain unchanged. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
+| `bitcoin.prune_mb` | `10000` | Keeps 10,000 MiB of recent block files after full validation. Existing explicit configuration and rendered state remain unchanged. `0` remains an advanced manual archival setting; any nonzero value must be ≥ `550`. See [Pruned node](#pruned-node). |
 | `bitcoin.inbound_onion` | `false` | `true` publishes a Tor onion service so your node accepts inbound connections and serves available blocks with no IP exposure. See [Inbound onion service](#inbound-onion-service). |
 | `bitcoin.blockfilterindex` | `false` | Advanced archival-node compatibility setting. It is incompatible with pruning and is not needed for the default pruned watch-only balance scan. |
 | `bitcoin.mem_limit_mb` | `0` (unlimited) | Optional memory cap on the bitcoin container, in MB. `0` = no limit (Docker's default). A cap turns a bitcoind memory blowup into a contained container restart instead of a whole-host OOM. **Size it above `dbcache_mb`** and leave additional room for Core's workload-dependent memory outside the cache. There is no universal fixed margin; monitor actual usage because a low cap can make bitcoind restart-loop. `configure.sh` warns if the cap is not above `dbcache_mb`. |
@@ -205,7 +221,7 @@ shows the overridable settings with their defaults:
 | `litecoin.rpc_port`, `dogecoin.rpc_port`, `bitcoincash.rpc_port` | `9332`, `22555`, `8332` | Default host port for each opt-in authenticated private-LAN RPC proxy. Each also has `rpc_expose` and `rpc_bind_ip`. |
 | `zcash.rpc_expose`, `rpc_bind_ip`, `rpc_port` | `false`, `""`, `8232` | Optional authenticated read-only dashboard proxy. Native cookie-authenticated Zakura RPC stays internal and is never published. |
 | `litecoin.node_password`, `dogecoin.node_password`, `bitcoincash.node_password`, `zcash.node_password` | auto-generated | Separate RPC or proxy passwords. LAN exposure requires at least 24 letters or numbers. |
-| `dashboard.password` | auto-generated | Enables basic auth on fresh installs. It is separate from both node passwords. The wizard prints the selected credentials once after setup. |
+| `dashboard.password` | auto-generated | Baseline basic-auth password for fresh installs. It is separate from every node password. The wizard prints it once. After a password change in the dashboard, the saved hash in `dashboard_state` takes precedence over this baseline until it is deliberately recovered; see [Operations](operations.md#dashboard-and-node-credentials). |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service and requires a non-empty `dashboard.password` — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). |
 | `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. `./stack up`/`apply` start and manage the host-side agent for you; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
 | `dashboard.bind_ip` | `127.0.0.1` | Host address for the dashboard. Use loopback for access from this machine only, or an RFC1918 address (`10/8`, `172.16/12`, or `192.168/16`) assigned to this host for LAN access. Public, wildcard, and IPv6 binds are rejected. |
@@ -216,7 +232,7 @@ shows the overridable settings with their defaults:
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
 | `notifications.alert_new_block_monero` | `false` | Monero's independent new-block Telegram alerts once synced (~720/day). The legacy `alert_new_block` key continues to mean Bitcoin. |
 | `notifications.alert_new_block_<node>` | `false` | Independent new-block alerts for `tari`, `litecoin`, `dogecoin`, `bitcoincash`, or `zcash`, sent only after that node is synced. |
-| `wallets` | Binance public example | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. The example is clearly marked and excluded from personal totals. Set `[]` to opt out. After first start the saved dashboard list is authoritative. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
+| `wallets` | Binance public example for source; empty for a pruned APT/Homebrew install | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. The example is clearly marked and excluded from personal totals. Set `[]` to opt out. After first start the saved dashboard list is authoritative. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
 
 `configure.sh` applies the defaults above for any omitted key, and generates
 strong random RPC credentials on first run (reused on later runs).
@@ -278,6 +294,12 @@ Tari's view-only wallet sidecar has a separate fixed 0.5 CPU / 512 MiB container
 ceiling. It is additional to the Tari node budget and has not completed sustained
 resource qualification.
 
+With all seven nodes selected, the base-node ceilings total 7 CPUs and 24 GiB.
+The Monero and Tari wallet sidecars add 1 CPU and 1 GiB together, for container
+ceilings totaling 8 CPUs and 25 GiB before Tor, dashboard, Docker, filesystem
+cache, and host overhead. These figures add configured ceilings; they are not
+measurements of actual use or a qualified host minimum.
+
 APT uses `bitcoin-starter-stack-resource-profile.timer`; Homebrew's user service
 runs the same helper. It never runs inside the dashboard or mounts the Docker
 socket there. Initial sync remains
@@ -295,29 +317,46 @@ Recreated containers are qualified again, so an upgrade can briefly return
 them to uncapped operation. The profile is a budget, not a guarantee that a
 workload fits; see [hardware estimates and test evidence](hardware.md).
 
-## Shared dashboard settings
+## Dashboard settings
 
-Appearance, Telegram, and Healthchecks are global. Per-node settings live in
-collapsible sections; block alerts are off by default for each node.
+The gear menu contains the global **Appearance**, **Dashboard password**,
+**Telegram**, and **Healthchecks** settings. Appearance and notifications use
+**Save**. Block alerts and LAN endpoints belong to each node instead: open a
+tower and find its settings after the wallet section and before deactivation.
+Block alerts are off by default.
 
-Each node's section lets you enable or disable its LAN RPC listener and, for
+Changing the dashboard password requires the current password, a new password,
+and the new password again. The new value must contain 12–128 characters and no
+control characters. The dashboard stores only a salted password hash in
+`/state/dashboard_auth.json` inside the private `dashboard_state` volume. This
+saved login takes precedence over `dashboard.password` and the rendered `.env`;
+the old password stops working immediately. Reload and sign in with the new
+password. Recovery is covered in
+[Operations](operations.md#dashboard-and-node-credentials).
+
+Each node's settings let you enable or disable its LAN RPC listener and, for
 Monero, its ZMQ listener, and choose the port. It reuses the node's configured
 private LAN address, or the dashboard's configured private LAN address for a
 first enable. Addresses stay in server configuration. If neither address is
 private, set one there before enabling a port. Public, wildcard, loopback, and
 IPv6 listener addresses are rejected. RPC exposure also requires a strong saved
-node password. ZMQ has no password, so only enable it on a trusted LAN.
+node password. Monero ZMQ and Tari gRPC have no application authentication, so
+enable them only on a trusted LAN or WireGuard link.
 
-Changes stay in the form until you save. Appearance and notification changes
-use **Save**. Port changes use **Save & restart**, with the affected services
-listed above the button. LAN listeners live in the Tor relay, so changing them
-restarts the relay and dashboard rather than the Bitcoin or Monero daemon.
-The dashboard can briefly reconnect; chain data and node sync are preserved.
-Port changes require the dashboard password and a running host helper. A
-private typed request stays pending while the host checks it. The helper checks
-host TCP listeners and Docker's published ports before changing `config.json`
-or restarting services. If a selected port is occupied, the panel names the
-affected listener and keeps the edits available for correction.
+Changes stay in the node form until saved. Alert-only changes use **Save**. Port
+changes use **Save & restart**, with affected services shown above the button.
+The dashboard briefly reconnects while the host helper validates the bind,
+updates `config.json` and `.env`, and restarts affected services. Chain data and
+sync state are preserved. If the port is occupied, the panel names the listener
+and retains the edits for correction.
+
+For an enabled authenticated LAN RPC endpoint, **Show password** explicitly
+reveals that node's username and password. The general status response never
+contains the secret. To rotate it, type `reset`; the host creates a new
+48-character hexadecimal password, writes it to the private host configuration and `.env`, and
+restarts the affected services. Reveal the new login and update every external
+client. Reset is unavailable when the node is inactive. Tari gRPC and Monero
+ZMQ do not display made-up credentials.
 
 For APT installs, `bitcoin-stack init`, `up`, and `apply` enable
 `bitcoin-starter-stack-port-control.timer`. Source installs reuse the host agent
@@ -327,7 +366,7 @@ Homebrew uses `bitcoin-stack host-service` through `brew services` for the same
 control requests. Port settings persist across reboot because the host
 configuration is updated.
 
-The gear panel also includes **Label towers**, off by default. It saves the
+The Appearance section includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
 survives restarts. With labels enabled, each tower shows its coin price and
 the next block number above it. Both overview towers extend below the screen.
@@ -342,14 +381,16 @@ administration RPC is never shown as a wallet connection endpoint.
 
 ## Applying changes
 
-The dashboard gear can change Telegram, Healthchecks, and `alert_new_block`
-without restarting the node. It saves a separate persistent JSON override; see
+The gear menu changes global Appearance, Telegram, Healthchecks, and the
+dashboard password. A node's own settings change its block alert and LAN
+listeners. Dashboard-saved notifications use a persistent JSON override; see
 [Dashboard settings](notifications.md#dashboard-settings). Personal wallets are
-already managed by the watch-only card and require a dashboard password.
-Notification changes follow the dashboard's optional password and work from
-localhost, the private LAN, or the onion dashboard.
+managed by the watch-only card and require a dashboard password. Authenticated
+changes work from localhost, the private LAN, or the onion dashboard.
 
-Monero view-only wallets are also managed in the dashboard, not in `config.json`.
+### Optional advanced wallet scans
+
+Monero view-only wallets are managed in the dashboard, not in `config.json`.
 Use the Monero card to submit a mainnet primary address and private view key, with
 an optional restore height and signed key-image JSON. Never place a view key,
 private spend key, seed phrase, or key images in this tracked configuration.
@@ -368,9 +409,11 @@ Litecoin and Bitcoin Cash watch lists are also dashboard state rather than
 `config.json` settings. They accept one public address per row and persist their
 rosters, hourly confirmed-UTXO cache, and saved balance snapshots in the private
 dashboard state volume. Their sourced public examples are created automatically
-on fresh state and are excluded from personal totals. Dogecoin and Zcash show
-**Wallet balance not available** and no public reference address. Tari has no
-bundled wallet example.
+on fresh state: Linux Mint for Litecoin and Bitcoin Cash Node for Bitcoin Cash.
+The Monero General Fund is a received-only example because it has no signed key
+images. All examples are excluded from personal totals. Dogecoin and Zcash show
+**Wallet balance not available** and no public reference address. Tari imports
+one view-only wallet and has no bundled example.
 
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials and LAN exposure, `inbound_onion`, and dashboard
@@ -392,8 +435,8 @@ retained block files, not the whole data directory. The node still downloads and
 "prune_mb": 10000
 ```
 
-keeps about 10 GB of recent blocks. With the live chainstate currently around
-12 GB plus indexes, wallet data, logs, and working headroom, plan for 30–60 GB
+keeps 10,000 MiB of recent blocks. With the live chainstate currently around
+11 GiB plus indexes, wallet data, logs, and working headroom, plan for 28–56 GiB
 total. Initial sync still transfers the whole historical chain, currently
 hundreds of GB (roughly 900 GB), and can take days over Tor.
 `configure.sh` rejects values between 1 and 549 because bitcoind does.

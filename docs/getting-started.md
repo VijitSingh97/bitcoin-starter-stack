@@ -9,7 +9,7 @@
   installs bring their command-line dependencies with the formula; Docker is
   still installed separately.
 - Hardware per [Hardware Requirements](hardware.md) — Bitcoin plans for
-  30–60 GB SSD space and Monero for 120–150 GiB. The other nodes need expandable
+  28–56 GiB SSD space and Monero for 120–150 GiB. The other nodes need expandable
   storage until their current full-sync totals are measured. Bitcoin and Monero
   use an experimental 1 CPU / 2 GiB steady budget; Tari, Litecoin, Dogecoin,
   Bitcoin Cash, and Zcash use 1 CPU / 4 GiB each. Shared services and host
@@ -126,13 +126,14 @@ network action.
 
 `./stack up` runs `configure.sh` on first launch, which renders a gitignored
 `.env` and creates the data directory. With no `config.json` it uses sensible
-defaults (10 GB of recent blocks, about 30–60 GB total disk) and **auto-generates**
+defaults (10,000 MiB of recent blocks, about 28–56 GiB total disk) and **auto-generates**
 separate passwords for the dashboard and each node's RPC (username defaults to
 `admin`). Existing generated credentials are retained on subsequent applies.
 
-If you skip the wizard, read the generated dashboard login locally after first
-start with `sed -n 's/^DASHBOARD_PASSWORD=/Password: /p' .env`; the username is
-`admin`. The wizard instead prints its newly created login once at the end.
+The wizard prints newly generated credentials once at the end; save them in a
+password manager. If you skip it, the mode-600 `.env` contains the baseline
+dashboard login. A password later changed in the dashboard is stored as a hash
+in dashboard state and takes precedence over that baseline.
 
 The stack's local support images are published prebuilt on GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
@@ -178,7 +179,7 @@ Selecting Monero asks for its own data directory, optional restricted LAN RPC,
 and optional LAN ZMQ for P2Pool. Selecting only Monero skips Bitcoin questions.
 Every other selected chain asks for its data directory and optional private-LAN
 RPC or gRPC listener. The wizard prints credentials only for selected nodes. See
-[Pithead remote-node setup](nodes.md#monero-as-a-remote-node-for-pithead).
+[Pithead remote-node setup](nodes.md#pithead-remote-nodes).
 
 Fresh APT and Homebrew wizard installs select `resource_profile: compact` for each
 chosen node. The managed host helper waits for three spaced, healthy, current sync checks
@@ -187,7 +188,7 @@ nodes, with no extra swap. Homebrew performs the same checks through its
 optional background service. Existing installs and
 source installs leave automatic resource limits off. The profile remains
 experimental until sustained capped operation is qualified; it is not a claim
-that a whole 2 GB VPS can host multiple nodes.
+that a whole 2 GiB VPS can host multiple nodes.
 
 The wizard writes `steady_cpus: 1` and the chain-specific memory budget into
 each selected node's `config.json` section. To change a budget, edit the
@@ -217,14 +218,17 @@ checks pass. See [resource caps](configuration.md#resource-caps).
 4. **The dashboard** at `http://localhost` (or `http://localhost:8080` for
    Homebrew) shows the configured towers. Click a tower to
    open its chain's card. It shows a connecting state until RPC comes up,
-   then sync progress. A disabled node says **Not configured**.
+   then sync progress. After its wallet section, that node's settings contain
+   block alerts, LAN ports, and any authenticated RPC credentials. The gear
+   menu contains global Appearance, Dashboard password, Telegram, and
+   Healthchecks settings. A disabled node says **Not configured**.
 
 To open it to your private LAN, set `dashboard.bind_ip` to this host's RFC1918
 address and run `bitcoin-stack apply` or `./stack apply`. Wildcard and public
 binds are rejected.
 
 The node downloads and validates the whole historical chain, currently hundreds
-of GB (roughly 900 GB), even though it later retains only 10 GB of block files.
+of GB (roughly 900 GB), even though it later retains only 10,000 MiB of block files.
 Over Tor, expect the first sync to take days. The dashboard remains informative
 during sync. Container health is visible in `docker ps` — the selected
 services define health checks, though `bitcoin` only reports healthy once

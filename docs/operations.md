@@ -19,7 +19,8 @@ The explicit `pull` command uses the host's existing Docker settings.
 
 ## Health checks
 
-All three services define Docker health checks:
+Shared services and configured node services define Docker health checks. For
+the core Bitcoin deployment:
 
 - `tor` — SOCKS port accepting connections (5 min grace for bootstrap).
 - `bitcoin` — RPC answers `getblockchaininfo`, authenticated with Core's
@@ -30,6 +31,36 @@ All three services define Docker health checks:
 
 `docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
 shows recent probe output when diagnosing.
+
+## Dashboard and node credentials
+
+Open the gear menu to change the dashboard login. Enter the current password,
+then the new password twice. It must contain 12–128 characters and no control
+characters. The old password stops working immediately; reload and sign in
+with the new one. The dashboard stores only a salted hash in
+`/state/dashboard_auth.json` inside the `dashboard_state` named volume. That
+saved login takes precedence over the baseline in `config.json` and `.env`.
+If dashboard authentication was disabled, set a password in the server
+configuration first; the web panel cannot claim a passwordless installation.
+
+If the dashboard password is forgotten, set a new baseline
+`dashboard.password` in the installation's `config.json`, then stop the
+dashboard before touching its state. While it is stopped, remove only
+`/state/dashboard_auth.json` from the correct deployment's `dashboard_state`
+named volume. Keep every other file and never delete the volume. Run the
+installation's normal apply/start flow to render `.env` and recreate the
+dashboard; it then uses the new baseline. Compose project names determine the
+actual volume name, so inspect the deployment before making this offline change
+or ask the installer administrator to perform it.
+
+Node credentials are in the selected tower's settings, after its wallet
+section. For an enabled authenticated LAN RPC listener, **Show password**
+reveals that node's username and password only after an explicit click. To
+rotate the password, type `reset`. The host helper creates a new 48-character
+hex password, updates the private node configuration and `.env`, and restarts
+the affected services. Reveal the new login and update every external client.
+Reset is unavailable for an inactive node. Monero ZMQ and Tari gRPC have no
+application authentication and therefore no password to reveal or reset.
 
 ## Upgrading
 
@@ -152,7 +183,8 @@ data and encrypted Monero wallet files:
 - the full `dashboard_state` volume: watch-only wallet roster and balance
   history (including entries that still need a rescan), pending upgrade
   request, event log, and dashboard-saved notification settings
-  (`notification_settings.json`)
+  (`notification_settings.json`), plus the saved dashboard password hash
+  (`dashboard_auth.json`)
 
 The `monero_wallets` volume is intentionally excluded because its encrypted
 wallet files contain private view-key material. After restoring onto a new
@@ -206,6 +238,14 @@ During startup that's normal (block verification can take minutes). If it
 persists: `docker compose logs bitcoin` — and if you recently changed
 credentials, make sure you re-ran `./configure.sh` *and*
 `./stack apply` so both containers got the new values.
+
+**The dashboard rejects the password from `.env`** — a password changed in the
+gear menu takes precedence over that baseline. Use the changed password or the
+offline recovery procedure in [Dashboard and node credentials](#dashboard-and-node-credentials).
+
+**A wallet app fails after an RPC credential reset** — reveal the new login in
+that node's tower settings and update the app. The previous password is no
+longer valid.
 
 **Node syncs but peer count is 0 after hours** — tor container unhealthy or
 restarted with a new identity mid-session. `docker compose restart tor bitcoin`.

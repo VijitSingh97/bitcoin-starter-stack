@@ -162,6 +162,7 @@ cat >"$stub/docker" <<'EOS'
 #!/usr/bin/env bash
 echo "docker $*" >>"$FAKE_LOG"
 case " $* " in
+  *' exec dashboard cat /state/dashboard_auth.json '*) [ -f "${FAKE_DASH_AUTH_FILE:-}" ] && cat "$FAKE_DASH_AUTH_FILE"; exit ;;
   *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
   *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_IMAGES_READY" ]; exit ;;
   *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
@@ -303,6 +304,18 @@ out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: cron entry not removed"
 grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: agent not stopped"
 printf '%s' "$out" | grep -q "upgrade-agent: stopped" || fail "ensure_agent: stop not reported"
+
+# A valid saved dashboard password keeps host controls available after the
+# original environment password is cleared; malformed state cannot authorize.
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"0123456789abcdef0123456789abcdef","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$tmp/dashboard-auth.json"
+FAKE_DASH_AUTH_FILE="$tmp/dashboard-auth.json" HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: saved dashboard authentication did not retain host controls"
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"bad","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$tmp/dashboard-auth.json"
+: >"$FAKE_LOG"
+out=$(FAKE_DASH_AUTH_FILE="$tmp/dashboard-auth.json" HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: malformed saved dashboard authentication retained host controls"
+grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: malformed saved dashboard authentication did not stop the agent"
+printf '%s' "$out" | grep -q "upgrade-agent: stopped" || fail "ensure_agent: malformed saved dashboard authentication stop was not reported"
 
 # Source installs on macOS must not install a Linux cron/setsid agent.
 rm -f "$FAKE_CRON" "$FAKE_LOG"

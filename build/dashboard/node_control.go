@@ -106,7 +106,7 @@ func (a *app) nodeRuntime() map[string]bool {
 
 func (a *app) nodeTransitioning(id string) bool {
 	status, pending := a.pendingNodeControlStatus()
-	return pending && status != nil && status.ID != "" && status.Node == id
+	return pending && status != nil && status.ID != "" && status.Node == id || a.credentialTransitioning(id)
 }
 
 func (a *app) nodeActive(id string, fallback bool) bool {
@@ -158,7 +158,7 @@ func (a *app) apiNodes(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) nodeControlAvailable() bool {
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		return false
 	}
 	info, err := os.Stat(a.nodeControlPath("capability"))
@@ -250,7 +250,7 @@ func decodeNodeControlInput(w http.ResponseWriter, r *http.Request) (nodeControl
 
 func (a *app) apiNodePower(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		http.Error(w, "a dashboard password is required for node control", http.StatusForbidden)
 		return
 	}
@@ -272,9 +272,9 @@ func (a *app) apiNodePower(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "host node control is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	a.nodeControlMu.Lock()
-	defer a.nodeControlMu.Unlock()
-	if a.nodeControlPending() {
+	a.controlMu.Lock()
+	defer a.controlMu.Unlock()
+	if a.controlRequestPending() {
 		http.Error(w, "node control request already pending", http.StatusConflict)
 		return
 	}

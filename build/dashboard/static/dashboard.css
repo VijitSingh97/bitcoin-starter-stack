@@ -224,6 +224,13 @@ body:not([data-node=""]) .node-close-backdrop { display: block; }
 .settings-dialog .settings-note { color: var(--muted); font-size: 0.8rem; }
 .settings-dialog details { margin: 10px 0; }
 .settings-dialog summary { color: var(--text); cursor: pointer; }
+.node-settings-card h2 { color: var(--node-accent); }
+.node-settings-card details { margin: 10px 0; }
+.node-settings-card summary { color: var(--text); cursor: pointer; }
+.node-settings-card label { display: block; margin: 12px 0; font-size: 0.9rem; }
+.node-settings-card .settings-check { display: flex; align-items: center; gap: 8px; }
+.node-settings-card .settings-note { color: var(--muted); font-size: 0.8rem; }
+.node-settings-card input:not([type="checkbox"]) { display: block; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 9px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
 .settings-port { margin: 10px 0 14px 24px; color: var(--muted); }
 .settings-port-fields { display: grid; grid-template-columns: minmax(100px, 140px); }
 .settings-port-fields label { margin: 4px 0; font-size: 0.75rem; }
@@ -233,6 +240,15 @@ body:not([data-node=""]) .node-close-backdrop { display: block; }
 #settings-save { background: var(--accent); color: var(--bg); }
 #settings-reset { background: var(--tag-bg); color: var(--text); }
 #settings-status { min-height: 1.5em; font-size: 0.85rem; }
+.settings-credential { margin-top: 10px; }
+.settings-credential[hidden], .settings-credential-secret[hidden] { display: none !important; }
+.settings-credential-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-credential-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--tag-bg); color: var(--text); }
+.credential-eye { width: 16px; height: 16px; fill: currentColor; }
+.settings-credential-secret { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 10px 0; font: 0.75rem monospace; }
+.settings-credential-secret dt { color: var(--muted); }
+.settings-credential-secret dd { margin: 0; overflow-wrap: anywhere; color: var(--text); }
+#settings-password-reload { background: var(--accent); color: var(--bg); }
 
 #tower {
   position: fixed;
@@ -253,7 +269,6 @@ body:not([data-node=""]) .node-close-backdrop { display: block; }
   color: var(--muted);
   white-space: nowrap;
   opacity: 0;
-  transition: opacity 0.4s;
 }
 
 #tower-label b {

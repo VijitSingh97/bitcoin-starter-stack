@@ -55,16 +55,17 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- ⚙️ **Settings that stick.** Configure global Appearance, Telegram, and Healthchecks
-  from the gear menu, with collapsible settings for each node's
-  block alerts and LAN ports. Use localhost, your private LAN, or a password-protected onion dashboard.
+- ⚙️ **Settings that stick.** Use the gear menu for Appearance, the dashboard
+  password, Telegram, and Healthchecks. Each tower keeps its own block alert,
+  LAN-port, and RPC-login controls after its wallet section. Use localhost, your
+  private LAN, or a password-protected onion dashboard.
   Saved values are visible in the settings panel, and a separate JSON override survives
   reboots and upgrades.
 - 👀 **Bitcoin balances from your own node.** Import an address, `xpub`, `zpub`, or public
   descriptor. A pruned node scans its live UTXO set without an external address indexer;
-  new imports stay pending until that scan confirms and caches a balance. A clearly
-  marked public Binance
-  address gives fresh installs an example; it is excluded from your totals.
+  new imports stay pending until that scan confirms and caches a balance. Source installs
+  include a clearly marked public Binance address as an example; pruned APT and Homebrew
+  installs start without it. Public examples are always excluded from personal totals.
   [How watch-only works](docs/watch-only.md).
 - 👁️ **Monero view-only wallets.** Add a main address and private view key from the
   password-protected Monero card. No private spend key or seed is accepted, and the
@@ -105,19 +106,40 @@ names for upgrade compatibility while the broader Node Manager takes shape.
 
 ## 🚀 Fresh install
 
-You need Linux with Docker Engine, or macOS with Docker Desktop, plus Compose
-2.33.1 or newer and an SSD. Pick the nodes your machine has room for;
-see [disk and resource planning for every chain](docs/nodes.md#storage-and-resource-planning).
-The post-sync compact budgets are **1 CPU / 2 GiB per Bitcoin or Monero node**,
-and **1 CPU / 4 GiB per Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash node**.
-Tor, the dashboard, Docker, the operating system, and the Monero and Tari
-view-only wallet services need additional room. Tari's wallet sidecar has its
-own 0.5 CPU / 512 MiB container ceiling; this is separate from the Tari node's
-1 CPU / 4 GiB post-sync budget and is not yet qualified under sustained load.
-Initial sync is uncapped, so sync one chain
-at a time on small hardware. These are editable container ceilings, not proven
-minimum VPS specifications; complete capped stability trials remain pending.
-See [Hardware Requirements](docs/hardware.md).
+You need an SSD and one of these Docker installations:
+
+- **macOS:** install Docker Desktop, start it, and enable start at login if the
+  nodes should return after a reboot.
+- **Linux:** install Docker Engine and configure it to start at boot. The user
+  running Node Manager must be able to run Docker commands.
+
+Both platforms need Docker Compose 2.33.1 or newer. Confirm Docker is running
+before setup:
+
+```bash
+docker info
+docker compose version
+```
+
+The source tarball also needs Bash, `flock`, `jq`, and OpenSSL. On Ubuntu,
+install the command-line prerequisites with `sudo apt install bash jq openssl
+util-linux iproute2 curl`. On macOS, install them with `brew install bash flock
+jq openssl` and ensure Homebrew's `bin` directory is on `PATH`.
+
+Pick only nodes your machine has room for. Each selected node still downloads
+and validates its full history before pruning. The known disk allowances for
+all supported chains except Tari total roughly **260–430 GiB**, before growth,
+temporary work, Docker images, and host headroom. Tari has no defensible current
+full-sync total; put it on expandable storage. See [node storage planning](docs/nodes.md#storage-and-resource-planning).
+
+The optional post-sync compact profile caps Bitcoin and Monero at **1 CPU / 2
+GiB each** and the other five nodes at **1 CPU / 4 GiB each**. Selecting all
+seven therefore sets base-node ceilings totaling **7 CPUs and 24 GiB**. The
+Monero and Tari wallet sidecars add **0.5 CPU / 512 MiB each**, bringing the
+container ceilings to **8 CPUs and 25 GiB**, plus Tor, the dashboard, Docker,
+filesystem cache, and the operating system. These are editable ceilings, not
+measured average use or qualified minimum hardware. Initial sync is uncapped;
+sync one chain at a time on a smaller host. See [Hardware Requirements](docs/hardware.md).
 
 | Per node | Initial sync: planning estimate | After sync: default container cap |
 |---|---|---|
@@ -131,40 +153,13 @@ is uncapped by default; a smaller host can work but may take longer. Each node's
 wizard installs activate those caps after healthy sync checks; source installs
 leave automatic caps off. See [changing resource caps](docs/configuration.md#resource-caps).
 
-### 1. Install, then run the wizard
+### 1. Install the current release
 
-Homebrew support for macOS and Linux is prepared for the first release that
-contains this packaging. The formula is not published yet; current release
-`v1.31.1` does not include it. Once released:
-
-```bash
-brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
-brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
-bitcoin-stack init
-```
-
-Homebrew installation is inert and leaves Docker untouched. Install and start
-Docker Desktop on macOS, or Docker Engine with Compose on Linux, before running
-the wizard. See the [Homebrew guide](docs/homebrew.md) for data paths, the
-optional background service, and upgrade steps.
-
-The Ubuntu APT package is prepared for the next release. The feed and signing
-key are not public yet. When that release is published, first follow the
-[official feed and signing-key setup](docs/privacy.md#package-feed), then run:
-
-```bash
-sudo apt update
-sudo apt install bitcoin-starter-stack
-sudo bitcoin-stack init
-```
-
-Package installation is inert: it does not start containers or launch setup.
-Run `sudo bitcoin-stack init` explicitly. For a downloaded `.deb`, replace the
-install command with `sudo apt install ./bitcoin-starter-stack_VERSION_all.deb`,
-then run the same wizard. The first package release supports fresh installs; it
-does not migrate an existing source-managed production node.
-
-Until the feed is public, install the published release tarball:
+The current published release is `v1.31.1`. It provides a source tarball; it
+does not yet publish an APT package or Homebrew formula. It predates the
+unreleased package and multi-node changes documented on this branch, so use the
+README bundled in that tarball for its exact feature set.
+Install and start Docker first, then download the release:
 
 ```bash
 curl --fail --location --output bitcoin-starter-stack.tar.gz \
@@ -174,19 +169,50 @@ cd bitcoin-starter-stack
 ./stack init
 ```
 
-Development branches use unpublished image tags and need their images built in
-a separate development environment; they are not a fresh-install path.
+The download and extraction do not start Docker containers. `./stack init` is
+the explicit setup step. It writes private configuration, asks which nodes to
+run, and offers to download and start their images.
+
+Homebrew support for macOS and Linux is prepared but unreleased. After a release
+publishes the generated formula, its commands will be:
+
+```bash
+brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
+brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
+bitcoin-stack init
+```
+
+`brew install` will be inert: it will not start Docker, run setup, pull images,
+or start nodes. See the [Homebrew guide](docs/homebrew.md) for current release
+status, paths, the optional background service, and upgrades.
+
+The Ubuntu APT package is also prepared but unreleased; the feed and signing key
+are not public. After they are published, installation will end with:
+
+```bash
+sudo apt update
+sudo apt install bitcoin-starter-stack
+sudo bitcoin-stack init
+```
+
+APT installation will also be inert. Run `sudo bitcoin-stack init` explicitly.
+The first package release is for fresh installs and will not migrate an existing
+source-managed node. Development branches use unpublished image tags and are
+not an installation path.
 
 ### 2. Accept the safe defaults
 
-Choose Bitcoin, Monero, or both. Press Enter at the dashboard password prompt
-to generate a strong password. Each selected node gets its own different RPC
-password, with username `admin`. The wizard prints the credentials once at the
-end; save them in your password manager. A package install choosing both looks like:
+Enter any comma-separated combination of `bitcoin`, `monero`, `tari`,
+`litecoin`, `dogecoin`, `bitcoincash`, and `zcash`. Press Enter at the password
+prompt to generate a strong dashboard password. Every authenticated node
+endpoint gets a different generated password with username `admin`. Tari's
+optional LAN gRPC endpoint has no password and belongs only on a trusted LAN.
+The wizard prints the selected service credentials once at the end; save them
+in your password manager. A Bitcoin and Monero setup looks like:
 
 ```text
 Dashboard password (letters/numbers) [Enter = strong random]:
-Nodes to run — bitcoin, monero (experimental), or both [bitcoin]: both
+Nodes to run (comma-separated: bitcoin, monero, tari, litecoin, dogecoin, bitcoincash, zcash) [bitcoin]: bitcoin,monero
 Dashboard bind address (loopback or private LAN) [127.0.0.1]:
 Bitcoin data directory [/var/lib/bitcoin-starter-stack/data/bitcoin]:
 Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] n
@@ -208,19 +234,16 @@ wizard does not change Docker's proxy or daemon configuration. These initial
 APT and container downloads happen on the host; once running, node peers,
 prices, alerts, and dashboard update checks use the stack's Tor container.
 
-Keep `127.0.0.1` to open the dashboard only on the node. For trusted-LAN access,
-enter the server's private IPv4 address, such as `192.168.1.117`; wildcard and
-public addresses are rejected. The source wizard uses `./data/bitcoin` and also
-asks about the optional Upgrade button, which defaults to off.
+Keep `127.0.0.1` to open the dashboard only on this machine. For trusted-LAN
+access, enter this machine's private IPv4 address, such as `192.168.1.117`.
+This is the local address Docker should listen on, not the address of another
+computer or a public internet address. Wildcard, public, and IPv6 addresses are
+rejected. The source wizard uses `./data/<node>` and asks about the optional
+Upgrade button, which defaults to off.
 
-Fresh APT and Homebrew wizard installs select the experimental compact resource profile:
-initial sync is uncapped, then the managed host helper checks for healthy, current sync
-before applying the configured per-node caps: 1 CPU and 2 GiB for Bitcoin or
-Monero, and 1 CPU and 4 GiB for the other nodes. The wizard writes these values to `config.json` so you can edit
-them and run `bitcoin-stack apply` (`sudo` for APT). Existing installs and
-source installs keep automatic limits off. Homebrew's optional user service and
-APT's host timer enforce the handoff. This mechanism applies a budget;
-the longer stability tests still decide whether that budget is sufficient.
+Fresh APT and Homebrew wizard installs will select the experimental compact
+resource profile. Source installs leave automatic caps off. The values are
+editable in `config.json`; see [resource caps](docs/configuration.md#resource-caps).
 
 If you answer **n** at the final question, start later with:
 
@@ -234,7 +257,37 @@ For a source install, use `./stack pull`, `./stack up`, and `./stack status`.
 `pull` is the explicit network action; routine `up` and `apply` use local images
 only and never build or download implicitly.
 
-### 3. Open the dashboard and let your nodes sync
+### 3. Know where configuration and passwords live
+
+| Install | Edit this file | Generated state and passwords | Apply / start / check |
+|---|---|---|---|
+| Source tarball | `config.json` in the extracted directory | `.env` and `backups/` in that directory | `./stack apply` / `./stack up` / `./stack status` |
+| Homebrew on macOS | `~/Library/Application Support/bitcoin-starter-stack/config/config.json` | sibling `state/` directory | `bitcoin-stack apply` / `bitcoin-stack up` / `bitcoin-stack status` |
+| Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` | same Homebrew commands |
+| APT | `/etc/bitcoin-starter-stack/config.json` | `/var/lib/bitcoin-starter-stack/.env` and `backups/` | `sudo bitcoin-stack apply` / `up` / `status` |
+
+`config.json` and `.env` are mode 600. The wizard prints the dashboard and
+selected node endpoint credentials once; the same values remain in those
+private files so the stack can restart. Internal wallet-service credentials are
+generated into `.env` and are separate from the dashboard login and personal
+view-only wallet material. If you later change the dashboard password from the
+gear menu, its saved hash takes precedence over the baseline in `config.json`
+and `.env`. Never enter a private spend key or seed phrase.
+
+Edit `config.json`, keep its JSON syntax valid, run the install's `apply`
+command, then run `status`. `apply` recreates only containers whose settings
+changed and does not download images. Use `pull` first when a new image is
+needed. The complete field reference is in [Configuration](docs/configuration.md).
+
+Source installs update with `./stack upgrade` when installed from a Git
+checkout. For a release tarball, run `./stack backup`, unpack the newer release
+over the existing directory, then run `./configure.sh`, `./stack pull`, and
+`./stack apply`. Future package installs use their package manager, followed by
+`bitcoin-stack pull` and `bitcoin-stack apply`: `brew upgrade
+bitcoin-starter-stack` for Homebrew or `sudo apt install --only-upgrade
+bitcoin-starter-stack` for APT. Back up first.
+
+### 4. Open the dashboard and let your nodes sync
 
 Open `http://localhost` on an APT or source install. Homebrew defaults to
 `http://localhost:8080`. If you chose a private LAN address, use the same port
@@ -255,10 +308,21 @@ the initial validation work. Tari's view-only wallet likewise waits for both the
 base node and native wallet scan; a blank birthday scans from genesis. No chain
 has a fixed sync-time guarantee.
 
+Wallet monitoring is optional and separate from node setup. Source installs may
+show a public Binance Bitcoin example; pruned APT/Homebrew installs start with
+no Bitcoin example. Fresh dashboard state includes the Monero General Fund as a
+received-only public example, plus sourced Linux Mint Litecoin and Bitcoin Cash
+Node examples. Tari accepts one imported view-only wallet. Dogecoin and Zcash
+wallet balances are unavailable. Personal entries never contribute to or share
+credentials with these examples. Monero and Tari scans are advanced optional
+features that use view-only material; neither accepts a private spend key or
+seed phrase.
+
 Containers use Docker's `unless-stopped` policy. They return after a reboot when
-Docker starts at boot, unless you explicitly stopped them. Day-to-day commands,
-upgrades, backups, and troubleshooting are in [Operations](docs/operations.md),
-and [Getting Started](docs/getting-started.md) has the fuller walkthrough.
+Docker starts, unless you explicitly stopped them. On Linux, enable Docker at
+boot. On macOS, Docker Desktop must start after login; the optional Homebrew
+service also waits for Docker and a completed configuration. Day-to-day commands,
+upgrades, backups, and troubleshooting are in [Operations](docs/operations.md).
 
 ## 📈 Monitoring
 
@@ -281,6 +345,13 @@ difficulty, estimated network hashrate, and view-only balances. Unavailable
 metrics show a dash.
 The **Open ports** section shows configured LAN RPC/ZMQ access or **Disabled**;
 it does not scan ports or expose the internal administration listener.
+After the wallet section, the selected tower's settings let an authenticated
+user change its block alert and LAN listeners. An enabled authenticated RPC
+listener also has an explicit **Show password** action. Resetting it requires
+typing `reset`, generates a new password, restarts the affected services, and
+requires every external client to use the new login. Credential reset is
+unavailable while that node is inactive. Monero ZMQ and Tari gRPC have no
+application password and belong only on a trusted LAN or WireGuard link.
 The following extra features belong to the Bitcoin card:
 
 - **Node mode** — a **Full** or **Pruned** badge in the header.
@@ -313,9 +384,12 @@ address-only confirmed-UTXO snapshots. Tari accepts one native view-only wallet
 and keeps confirmed, available, timelocked, and pending amounts distinct.
 Dogecoin and Zcash show **Wallet balance not available** with no address card.
 
-The status page, notification gear, and sourced public examples can be used without a
-password; when configured, the password protects the whole dashboard. Personal
-wallet views, wallet changes, and upgrades require one. LAN HTTP is unencrypted:
+The gear menu contains global Appearance, Dashboard password, Telegram, and
+Healthchecks settings. Changing the dashboard password requires the current
+password plus the new value twice; the old login stops working immediately, so
+reload and sign in again. When configured, the password protects the whole
+dashboard. Personal wallet views, wallet changes, node settings, and upgrades
+require it. LAN HTTP is unencrypted:
 use a trusted LAN or the onion service, and keep the configured dashboard port
 off the public internet.
 

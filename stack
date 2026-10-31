@@ -835,6 +835,18 @@ upgrade_agent() {
 # entirely if the operator runs the agent under systemd (docs/operations.md).
 # ponytail: cron can't restart a crashed agent until reboot — use the systemd
 # unit if that matters to you.
+dashboard_auth_configured() {
+  [ -n "$(env_get DASHBOARD_PASSWORD)" ] && return 0
+  local saved_auth
+  saved_auth=$(docker exec dashboard cat /state/dashboard_auth.json 2>/dev/null || true)
+  jq -e '
+    type == "object" and keys == ["hash", "iterations", "salt", "version"] and
+    .version == 1 and .iterations == 210000 and
+    (.salt | type == "string" and test("^[0-9a-f]{32}$")) and
+    (.hash | type == "string" and test("^[0-9a-f]{64}$"))
+  ' <<<"$saved_auth" >/dev/null 2>&1
+}
+
 ensure_agent() {
   if [ "$package_managed" = brew ]; then
     echo "Host controls and automatic post-sync caps: brew services start bitcoin-starter-stack"
@@ -848,7 +860,7 @@ ensure_agent() {
   if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
     return 0 # managed by systemd — stay out of its way
   fi
-  if [ -n "$(env_get DASHBOARD_PASSWORD)" ]; then
+  if dashboard_auth_configured; then
     line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
     (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
       echo "WARN  could not install the upgrade-agent @reboot cron entry"
@@ -940,6 +952,69 @@ case "$cmd" in
       echo "Port settings could not be applied with the installed images."
       exit 1
     }
+    unlock_config
+    ;;
+  apply-credential-settings)
+    node=${1:-}
+    case "$node" in
+      bitcoin) services=(bitcoin dashboard) ;;
+      monero) services=(monero monero-wallet dashboard) ;;
+      litecoin | dogecoin | bitcoincash) services=("$node" dashboard) ;;
+      zcash) services=(dashboard) ;;
+      *) echo "Unsupported credential target: $node" >&2; exit 1 ;;
+    esac
+    lock_config
+    [ "$(jq -r --arg node "$node" 'if .[$node] | has("active") then .[$node].active == true else true end' "$config_file")" = true ] || {
+      echo "Cannot apply credentials for an inactive node." >&2
+      exit 1
+    }
+    credential_limits=${BITCOIN_STACK_CREDENTIAL_LIMITS:-}
+    if [ "$node" != zcash ] && [ -z "$credential_limits" ]; then
+      credential_limits=$(docker inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$node")
+    fi
+    if [ "$node" != zcash ] && [[ ! "$credential_limits" =~ ^[0-9]+\ [0-9]+\ -?[0-9]+$ ]]; then
+      echo "Current node resource limits could not be preserved." >&2
+      exit 1
+    fi
+    "$stack_root/configure.sh"
+    guard_package_containers
+    compose up -d --pull never --no-build --no-deps "${services[@]}" || {
+      echo "RPC credentials could not be applied with the installed images."
+      exit 1
+    }
+    if [ "$node" != zcash ]; then
+      read -r nano_cpus memory_bytes memory_swap <<<"$credential_limits"
+      update_args=()
+      [ "$nano_cpus" = 0 ] || update_args+=(--cpus "$(awk -v value="$nano_cpus" 'BEGIN { printf "%.9f", value / 1000000000 }')")
+      if [ "$memory_bytes" != 0 ]; then
+        update_args+=(--memory "$memory_bytes" --memory-swap "$memory_swap")
+      elif [ "$memory_swap" != 0 ]; then
+        echo "Current node resource limits are inconsistent." >&2
+        exit 1
+      fi
+      [ "${#update_args[@]}" = 0 ] || docker update "${update_args[@]}" "$node" >/dev/null || {
+        echo "Current node resource limits could not be restored." >&2
+        exit 1
+      }
+    fi
+    credential_wait=${BITCOIN_STACK_CREDENTIAL_WAIT_SECONDS:-300}
+    [[ "$credential_wait" =~ ^[0-9]+$ ]] && [ "$credential_wait" -ge 1 ] && [ "$credential_wait" -le 3600 ] || {
+      echo "Invalid credential readiness timeout." >&2
+      exit 1
+    }
+    credential_deadline=$((SECONDS + credential_wait))
+    while true; do
+      credential_ready=1
+      for service in "${services[@]}"; do
+        [ "$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$service" 2>/dev/null || true)" = "running healthy" ] || credential_ready=0
+      done
+      [ "$credential_ready" = 0 ] || break
+      [ "$SECONDS" -lt "$credential_deadline" ] || {
+        echo "Credential services did not become ready." >&2
+        exit 1
+      }
+      sleep 2
+    done
     unlock_config
     ;;
   upgrade) do_upgrade ;;

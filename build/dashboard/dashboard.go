@@ -107,8 +107,8 @@ type app struct {
 	moneroFees       *MoneroFeeHistory
 	familyWatch      *familyWatchManager
 	tariWatch        *TariWatchStore
-	portControlMu    sync.Mutex
-	nodeControlMu    sync.Mutex
+	dashboardAuth    *dashboardAuth
+	controlMu        sync.Mutex
 	ctx              context.Context
 }
 
@@ -125,6 +125,10 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 		return nil, err
 	}
 	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger, additionalFees: make(map[string][]float64), nodeHealth: make(map[string]nodeHealthSnapshot)}
+	a.dashboardAuth, err = newDashboardAuth(cfg.stateDir, cfg.dashboardPassword)
+	if err != nil {
+		return nil, err
+	}
 	a.watch = NewWatchStore(cfg.stateDir)
 	if a.watch.ScanErr() != nil {
 		a.log.Print("watch balance cache unavailable; pruned balance scans disabled until the cache is repaired and the dashboard restarts")

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { familyAccessView, familyAmount, familyHistoryPoints, familySourceURL, familyWalletView } from "./family-watch.js";
+import { familyAccessView, familyAmount, familyHistoryPoints, familySourceURL, familyWalletPost, familyWalletView } from "./family-watch.js";
+
+test("Litecoin and Bitcoin Cash labels are optional", () => {
+  assert.deepEqual(familyWalletPost("litecoin", "", " Laddress "), { label: "Litecoin wallet", address: "Laddress" });
+  assert.deepEqual(familyWalletPost("bitcoincash", " Savings ", " qaddress "), { label: "Savings", address: "qaddress" });
+});
 
 test("family amounts preserve the backend decimal string including verified zero", () => {
   assert.equal(familyAmount("0.00000000"), "0.00000000");

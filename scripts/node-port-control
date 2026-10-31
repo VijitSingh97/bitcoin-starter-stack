@@ -14,14 +14,20 @@ lsof_bin=${LSOF_BIN:-/usr/sbin/lsof}
 ifconfig_bin=${IFCONFIG_BIN:-/sbin/ifconfig}
 host_os=${PORT_CONTROL_OS:-$(uname -s)}
 control_state=$state_root/port-control
+credential_state=$state_root/credential-control
 request_path=/state/port-control.request
 processing_path=/state/port-control.processing
 capability_path=/state/port-control.capability
+credential_request_path=/state/credential-control.request
+credential_processing_path=/state/credential-control.processing
+credential_capability_path=/state/credential-control.capability
 now=${PORT_CONTROL_NOW_EPOCH:-$(date +%s)}
 
 [ -r "$env_file" ] || exit 0
 mkdir -p "$control_state"
 chmod 700 "$control_state"
+mkdir -p "$credential_state"
+chmod 700 "$credential_state"
 exec 9>"$control_state/.lock"
 flock -n 9 || exit 0
 
@@ -53,6 +59,33 @@ write_status() {
 
 clear_processing() {
   dashboard_exec rm -f "$processing_path" >/dev/null 2>&1 || true
+}
+
+write_credential_status() {
+  status=$(jq -nc --arg id "$1" --arg node "$2" --arg state "$3" --arg message "$4" --argjson affected_services "${5:-[]}" \
+    '{id:$id,node:$node,state:$state,message:$message,affected_services:$affected_services}')
+  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+    'umask 077; cat >/state/.credential-control.status.tmp; mv /state/.credential-control.status.tmp /state/credential-control.status' >/dev/null
+}
+
+clear_credential_processing() {
+  dashboard_exec rm -f "$credential_processing_path" >/dev/null 2>&1 || true
+}
+
+remove_credential_capability() {
+  dashboard_exec rm -f "$credential_capability_path" >/dev/null 2>&1 || true
+}
+
+write_credential_capability() {
+  jq -nc --argjson timestamp "$now" '{timestamp:$timestamp}' | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+    'umask 077; cat >/state/.credential-control.capability.tmp; mv /state/.credential-control.capability.tmp /state/credential-control.capability' >/dev/null
+}
+
+credential_resource_limits() {
+  [ "$1" != zcash ] || return 0
+  limits=$($docker_bin inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$1" 2>/dev/null) || return 1
+  printf '%s' "$limits" | grep -Eq '^[0-9]+ [0-9]+ -?[0-9]+$' || return 1
+  printf '%s\n' "$limits"
 }
 
 private_ipv4() {
@@ -246,13 +279,295 @@ host_ipv4_addresses() {
   printf '%s\n' "$addresses"
 }
 
-password=$(env_get DASHBOARD_PASSWORD)
-if [ -z "$password" ]; then
+process_credential_request() {
+  if ! dashboard_exec test -f "$credential_processing_path" >/dev/null 2>&1; then
+    dashboard_exec test -f "$credential_request_path" >/dev/null 2>&1 || return 1
+    if dashboard_exec sh -c \
+      'test -e /state/port-control.request || test -e /state/port-control.processing || test -e /state/node-control.request || test -e /state/node-control.processing' \
+      >/dev/null 2>&1; then
+      dashboard_exec mv "$credential_request_path" "$credential_processing_path" >/dev/null 2>&1 || return 0
+      conflict_request=$(dashboard_exec cat "$credential_processing_path" 2>/dev/null || true)
+      conflict_id=$(printf '%s' "$conflict_request" | jq -r 'if type == "object" and (.id | type == "string") then .id else "" end' 2>/dev/null || true)
+      conflict_node=$(printf '%s' "$conflict_request" | jq -r 'if type == "object" and (.node | type == "string") then .node else "" end' 2>/dev/null || true)
+      write_credential_status "$conflict_id" "$conflict_node" rejected "Another node setting change is pending." '[]'
+      clear_credential_processing
+      return 0
+    fi
+    dashboard_exec mv "$credential_request_path" "$credential_processing_path" >/dev/null 2>&1 || return 0
+  fi
+
+  credential_size=$(dashboard_exec sh -c 'wc -c < /state/credential-control.processing' 2>/dev/null | tr -d ' ' || true)
+  case "$credential_size" in '' | *[!0-9]*) credential_size=2049 ;; esac
+  if [ "$credential_size" -gt 2048 ]; then
+    write_credential_status "" "" rejected "Invalid request." '[]'
+    clear_credential_processing
+    return 0
+  fi
+  credential_request=$(dashboard_exec cat "$credential_processing_path" 2>/dev/null || true)
+  if ! printf '%s' "$credential_request" | jq -e --argjson now "$now" '
+    type == "object" and keys == ["id", "node", "requested_at"] and
+    (.id | type == "string" and test("^[0-9a-f]{32}$")) and
+    (.node == "bitcoin" or .node == "monero" or .node == "litecoin" or .node == "dogecoin" or .node == "bitcoincash" or .node == "zcash") and
+    (.requested_at | type == "number" and floor == . and . >= $now - 300 and . <= $now + 30)
+  ' >/dev/null 2>&1; then
+    write_credential_status "" "" rejected "Invalid request." '[]'
+    clear_credential_processing
+    return 0
+  fi
+
+  credential_id=$(printf '%s' "$credential_request" | jq -r .id)
+  credential_node=$(printf '%s' "$credential_request" | jq -r .node)
+  case "$credential_node" in
+    bitcoin) credential_services='["bitcoin","dashboard"]' ;;
+    monero) credential_services='["monero","monero-wallet","dashboard"]' ;;
+    litecoin) credential_services='["litecoin","dashboard"]' ;;
+    dogecoin) credential_services='["dogecoin","dashboard"]' ;;
+    bitcoincash) credential_services='["bitcoincash","dashboard"]' ;;
+    zcash) credential_services='["dashboard"]' ;;
+  esac
+  credential_seen=$credential_state/seen
+  remember_credential_seen() {
+    printf '%s\n' "$credential_id" >>"$credential_seen"
+    chmod 600 "$credential_seen"
+    credential_seen_tmp=$(mktemp "$credential_state/.seen.tmp.XXXXXX")
+    tail -n 256 "$credential_seen" >"$credential_seen_tmp"
+    chmod 600 "$credential_seen_tmp"
+    mv "$credential_seen_tmp" "$credential_seen"
+  }
+
+  credential_inflight=$credential_state/inflight
+  credential_transaction_before=$credential_state/transaction.before
+  credential_transaction_after=$credential_state/transaction.after
+  credential_limits_file=$credential_state/transaction.limits
+  credential_intent_file=$credential_state/transaction.intent
+  credential_result_file=$credential_state/transaction.result
+  if [ -s "$credential_result_file" ]; then
+    if jq -e --arg id "$credential_id" --arg node "$credential_node" '
+      type == "object" and keys == ["affected_services", "id", "message", "node", "state"] and
+      .id == $id and .node == $node and
+      (.state == "applied" or .state == "failed") and
+      (.message | type == "string") and
+      (.affected_services | type == "array" and all(.[]; type == "string"))
+    ' "$credential_result_file" >/dev/null 2>&1; then
+      credential_result_state=$(jq -r .state "$credential_result_file")
+      credential_result_message=$(jq -r .message "$credential_result_file")
+      credential_result_services=$(jq -c .affected_services "$credential_result_file")
+      write_credential_status "$credential_id" "$credential_node" "$credential_result_state" "$credential_result_message" "$credential_result_services"
+      rm -f "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+      remember_credential_seen
+      clear_credential_processing
+      rm -f "$credential_result_file"
+      return 0
+    fi
+    if [ ! -s "$credential_inflight" ]; then
+      rm -f "$credential_result_file"
+    else
+      write_credential_status "$credential_id" "$credential_node" failed "An interrupted credential reset requires recovery." "$credential_services"
+      remove_credential_capability
+      return 0
+    fi
+  fi
+  if [ -r "$credential_seen" ] && grep -Fxq "$credential_id" "$credential_seen"; then
+    write_credential_status "$credential_id" "$credential_node" rejected "Request already processed." "$credential_services"
+    clear_credential_processing
+    return 0
+  fi
+  mkdir -p "$config_root"
+  exec 8>"$config_lock"
+  flock 8
+  credential_committed=0
+  credential_committed_snapshot=$credential_transaction_after
+  credential_rollback_snapshot=$credential_transaction_before
+  credential_recovering_rollback=0
+  prior_inflight=$(cat "$credential_inflight" 2>/dev/null || true)
+  if [ -n "$prior_inflight" ] && [ "$prior_inflight" != "$credential_id" ]; then
+    write_credential_status "$credential_id" "$credential_node" failed "An interrupted credential reset requires recovery." "$credential_services"
+    remove_credential_capability
+    return 0
+  fi
+  if [ "$prior_inflight" = "$credential_id" ] && [ -f "$credential_transaction_before" ] &&
+    [ -f "$credential_transaction_after" ] && [ -f "$credential_limits_file" ] && [ -f "$credential_intent_file" ]; then
+    credential_intent=$(cat "$credential_intent_file")
+    if [ "$credential_intent" = rollback ]; then
+      credential_recovering_rollback=1
+      credential_recovery_source=$credential_transaction_before
+      credential_recovery_other=$credential_transaction_after
+    elif [ "$credential_intent" = apply ]; then
+      credential_recovery_source=$credential_transaction_after
+      credential_recovery_other=$credential_transaction_before
+    else
+      write_credential_status "$credential_id" "$credential_node" failed "Interrupted credential reset could not be recovered safely." "$credential_services"
+      remove_credential_capability
+      return 0
+    fi
+    if cmp -s "$config_file" "$credential_recovery_source"; then
+      credential_committed=1
+    elif cmp -s "$config_file" "$credential_recovery_other"; then
+      credential_recovery_tmp=$(mktemp "$config_root/.config.credential-recovery.XXXXXX")
+      cp "$credential_recovery_source" "$credential_recovery_tmp"
+      chmod 600 "$credential_recovery_tmp"
+      mv "$credential_recovery_tmp" "$config_file"
+      credential_committed=1
+    else
+      write_credential_status "$credential_id" "$credential_node" failed "Interrupted credential reset could not be recovered safely." "$credential_services"
+      remove_credential_capability
+      return 0
+    fi
+  fi
+  if [ "$credential_committed" != 1 ] && ! new_password=$(openssl rand -hex 24); then
+    write_credential_status "$credential_id" "$credential_node" failed "RPC password could not be generated." "$credential_services"
+    remove_credential_capability
+    clear_credential_processing
+    return 0
+  fi
+  credential_attempt=0
+  while [ "$credential_committed" != 1 ] && [ "$credential_attempt" -lt 3 ]; do
+    credential_attempt=$((credential_attempt + 1))
+    credential_config_snapshot=$(mktemp "$credential_state/.config.snapshot.XXXXXX")
+    credential_config_tmp=$(mktemp "$config_root/.config.credential-control.XXXXXX")
+    credential_validate_dir=$(mktemp -d "$credential_state/.validate.XXXXXX")
+    chmod 600 "$credential_config_snapshot" "$credential_config_tmp"
+    if [ -f "$config_file" ]; then
+      credential_had_config=1
+      cat "$config_file" >"$credential_config_snapshot"
+    else
+      credential_had_config=0
+      printf '{}\n' >"$credential_config_snapshot"
+    fi
+    if ! jq -e --arg node "$credential_node" '
+      type == "object" and
+      (.[$node] | type == "object") and
+      (if $node == "bitcoin" and (.bitcoin | has("enabled") | not) then true else .[$node].enabled == true end) and
+      (if .[$node] | has("active") then .[$node].active == true else true end) and
+      .[$node].rpc_expose == true
+    ' "$credential_config_snapshot" >/dev/null 2>&1; then
+      rm -rf "$credential_config_snapshot" "$credential_config_tmp" "$credential_validate_dir"
+      remember_credential_seen
+      clear_credential_processing
+      write_credential_status "$credential_id" "$credential_node" rejected "LAN RPC is not enabled for this node." "$credential_services"
+      return 0
+    fi
+    printf '%s' "$new_password" | jq --arg node "$credential_node" --rawfile password /dev/stdin \
+      '.[$node].node_password=$password' "$credential_config_snapshot" >"$credential_config_tmp"
+    cp "$credential_config_tmp" "$credential_validate_dir/config.json"
+    if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$credential_validate_dir" \
+      BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+      rm -rf "$credential_config_snapshot" "$credential_config_tmp" "$credential_validate_dir"
+      remember_credential_seen
+      clear_credential_processing
+      write_credential_status "$credential_id" "$credential_node" rejected "RPC password could not be saved." "$credential_services"
+      return 0
+    fi
+    rm -rf "$credential_validate_dir"
+    if { [ "$credential_had_config" = 1 ] && [ -f "$config_file" ] && cmp -s "$credential_config_snapshot" "$config_file"; } ||
+      { [ "$credential_had_config" = 0 ] && [ ! -e "$config_file" ]; }; then
+      [ "$credential_had_config" = 1 ] || {
+        rm -f "$credential_config_snapshot" "$credential_config_tmp"
+        break
+      }
+      cp "$credential_config_snapshot" "$credential_transaction_before"
+      cp "$credential_config_tmp" "$credential_transaction_after"
+      if ! credential_limits=$(credential_resource_limits "$credential_node"); then
+        rm -f "$credential_config_snapshot" "$credential_config_tmp" "$credential_transaction_before" "$credential_transaction_after"
+        break
+      fi
+      printf '%s\n' "$credential_limits" >"$credential_limits_file"
+      printf 'apply\n' >"$credential_intent_file"
+      printf '%s\n' "$credential_id" >"$credential_inflight"
+      chmod 600 "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+      mv "$credential_config_tmp" "$config_file"
+      rm -f "$credential_config_snapshot"
+      credential_committed=1
+      break
+    fi
+    rm -f "$credential_config_snapshot" "$credential_config_tmp"
+  done
+  if [ "$credential_committed" != 1 ]; then
+    rm -f "$credential_inflight" "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file"
+    remember_credential_seen
+    clear_credential_processing
+    write_credential_status "$credential_id" "$credential_node" failed "RPC password could not be saved." "$credential_services"
+    remove_credential_capability
+    return 0
+  fi
+
+  credential_limits=$(cat "$credential_limits_file")
+  if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+    BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+    BITCOIN_STACK_CREDENTIAL_LIMITS="$credential_limits" \
+    "$stack_root/stack" apply-credential-settings "$credential_node" >/dev/null 2>&1; then
+    if [ "$credential_recovering_rollback" = 1 ]; then
+      credential_final_state=failed
+      credential_final_message="RPC password could not be applied; prior credentials were restored."
+    else
+      credential_final_state=applied
+      credential_final_message="RPC password reset."
+    fi
+  else
+    remove_credential_capability
+    if [ "$credential_recovering_rollback" = 1 ]; then
+      write_credential_status "$credential_id" "$credential_node" failed "Prior RPC credentials could not be restored; recovery will retry." "$credential_services"
+      return 0
+    fi
+    credential_intent_tmp=$(mktemp "$credential_state/.transaction.intent.XXXXXX")
+    printf 'rollback\n' >"$credential_intent_tmp"
+    chmod 600 "$credential_intent_tmp"
+    mv "$credential_intent_tmp" "$credential_intent_file"
+    if ! cmp -s "$credential_committed_snapshot" "$config_file"; then
+      write_credential_status "$credential_id" "$credential_node" failed "RPC password could not be applied and configuration changed during recovery." "$credential_services"
+      return 0
+    fi
+    credential_rollback_tmp=$(mktemp "$config_root/.config.credential-control-rollback.XXXXXX")
+    cat "$credential_rollback_snapshot" >"$credential_rollback_tmp"
+    chmod 600 "$credential_rollback_tmp"
+    mv "$credential_rollback_tmp" "$config_file"
+    if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+      BITCOIN_STACK_CREDENTIAL_LIMITS="$credential_limits" \
+      "$stack_root/stack" apply-credential-settings "$credential_node" >/dev/null 2>&1; then
+      credential_final_state=failed
+      credential_final_message="RPC password could not be applied; prior credentials were restored."
+    else
+      write_credential_status "$credential_id" "$credential_node" failed "Prior RPC credentials could not be restored; recovery will retry." "$credential_services"
+      return 0
+    fi
+  fi
+  credential_result_tmp=$(mktemp "$credential_state/.transaction.result.XXXXXX")
+  jq -nc --arg id "$credential_id" --arg node "$credential_node" --arg state "$credential_final_state" \
+    --arg message "$credential_final_message" --argjson affected_services "$credential_services" \
+    '{id:$id,node:$node,state:$state,message:$message,affected_services:$affected_services}' >"$credential_result_tmp"
+  chmod 600 "$credential_result_tmp"
+  mv "$credential_result_tmp" "$credential_result_file"
+  write_credential_status "$credential_id" "$credential_node" "$credential_final_state" "$credential_final_message" "$credential_services"
+  rm -f "$credential_committed_snapshot" "$credential_rollback_snapshot" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+  remember_credential_seen
+  clear_credential_processing
+  rm -f "$credential_result_file"
+  return 0
+}
+
+dashboard_auth_configured() {
+  [ -n "$(env_get DASHBOARD_PASSWORD)" ] && return 0
+  dashboard_auth=$(dashboard_exec cat /state/dashboard_auth.json 2>/dev/null || true)
+  printf '%s' "$dashboard_auth" | jq -e '
+    type == "object" and keys == ["hash", "iterations", "salt", "version"] and
+    .version == 1 and .iterations == 210000 and
+    (.salt | type == "string" and test("^[0-9a-f]{32}$")) and
+    (.hash | type == "string" and test("^[0-9a-f]{64}$"))
+  ' >/dev/null 2>&1
+}
+
+if ! dashboard_auth_configured; then
   dashboard_exec rm -f "$capability_path" >/dev/null 2>&1 || true
+  remove_credential_capability
   exit 0
 fi
 dashboard_exec sh -c \
   'umask 077; printf "ready\n" > /state/.port-control.capability.tmp; mv /state/.port-control.capability.tmp /state/port-control.capability' >/dev/null
+write_credential_capability
+if process_credential_request; then
+  exit 0
+fi
 
 if ! dashboard_exec test -f "$processing_path" >/dev/null 2>&1; then
   dashboard_exec test -f "$request_path" >/dev/null 2>&1 || exit 0

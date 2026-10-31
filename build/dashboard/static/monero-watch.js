@@ -52,10 +52,11 @@ export function walletImport(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !["name", "address", "view_key", "restore_height"].includes(key))) {
     throw new Error("Use a view-only JSON file with address, view_key, and optional name and restore_height. Spending keys and seeds are not accepted.");
   }
+  if (value.name !== undefined && typeof value.name !== "string") throw new Error("Wallet name must be text.");
   if (typeof value.address !== "string" || typeof value.view_key !== "string" || !/^[0-9a-fA-F]{64}$/.test(value.view_key)) throw new Error("A primary address and 64-character private view key are required.");
   const height = value.restore_height ?? 0;
   if (!Number.isSafeInteger(height) || height < 0) throw new Error("Restore height must be a non-negative whole number.");
-  return { name: String(value.name || ""), address: value.address, view_key: value.view_key, restore_height: height };
+  return { name: value.name?.trim() || "Monero wallet", address: value.address, view_key: value.view_key, restore_height: height };
 }
 
 export function keyImagesImport(value) {
@@ -94,13 +95,15 @@ if (typeof document !== "undefined") {
       node.maxLength = maxLength;
       return node;
     };
-    const name = input("Monero wallet label", "text", 40);
+    const name = input("Monero wallet label (optional)", "text", 40);
     const address = input("Primary Monero address", "text", 95);
     const viewKey = input("Private view key (never a spend key)", "password", 64);
     const height = input("Restore height (0 scans from the beginning)", "number");
     height.min = "0";
     height.step = "1";
-    name.required = address.required = viewKey.required = true;
+    address.required = viewKey.required = true;
+    const scanOptions = el("details");
+    scanOptions.append(el("summary", null, "Scan options (optional)"), height);
     const fileLabel = el("label", "watch-hint", "Or upload a view-only JSON file");
     const file = input("View-only wallet JSON", "file");
     file.accept = ".json,application/json";
@@ -109,7 +112,7 @@ if (typeof document !== "undefined") {
     add.type = "submit";
     add.disabled = true;
     for (const field of [name, address, viewKey, height, file]) field.disabled = true;
-    form.append(name, address, viewKey, height, fileLabel, add);
+    form.append(name, address, viewKey, scanOptions, fileLabel, add);
     const hint = el("p", "watch-hint", "View keys reveal incoming funds and cannot spend. A restore height after your first payment misses earlier funds. Import signed key images to verify spending and current balance; update them after new payments or spending. Never upload a seed or private spend key.");
     card.append(heading, list, form, hint, message);
     let allowed = false;

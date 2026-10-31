@@ -79,6 +79,13 @@ export function familySourceURL(value) {
   }
 }
 
+export function familyWalletPost(node, label, address) {
+  return {
+    label: String(label || "").trim() || `${LABELS[node] || "Chain"} wallet`,
+    address: String(address || "").trim(),
+  };
+}
+
 if (typeof document !== "undefined") {
   const el = (tag, className, text) => {
     const element = document.createElement(tag);
@@ -102,7 +109,7 @@ if (typeof document !== "undefined") {
 
     label.type = "text";
     label.maxLength = 80;
-    label.placeholder = "Label";
+    label.placeholder = "Label (optional)";
     label.setAttribute("aria-label", `${LABELS[node]} wallet label`);
     address.type = "text";
     address.maxLength = 160;
@@ -215,7 +222,7 @@ if (typeof document !== "undefined") {
         const response = await fetch(`/api/${node}/watch`, {
           method: "POST",
           headers: { ...HEADERS, "Content-Type": "application/json" },
-          body: JSON.stringify({ label: label.value, address: address.value }),
+          body: JSON.stringify(familyWalletPost(node, label.value, address.value)),
         });
         if (!response.ok) throw new Error(await requestError(response, "Address could not be added."));
         label.value = "";

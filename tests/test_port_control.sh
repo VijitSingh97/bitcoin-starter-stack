@@ -28,6 +28,8 @@ if [ "$1" = inspect ]; then
     '{{.Id}}:tor') printf '%s\n' tor-id ;;
     *project.config_files*':tor-id') printf '%s\n' "${FAKE_TOR_CONFIG_FILES:-$BITCOIN_STACK_ROOT/docker-compose.yml}" ;;
     *project.config_files*) printf '%s\n' "${FAKE_CONFIG_FILES:-$BITCOIN_STACK_ROOT/docker-compose.yml}" ;;
+    *HostConfig.NanoCpus*) printf '%s\n' "${FAKE_NODE_LIMITS:-0 0 0}" ;;
+    *State.Health*) printf 'running healthy\n' ;;
     '{{json .NetworkSettings.Ports}}:tor-id') printf '%s\n' "$FAKE_TOR_PORTS" ;;
     '{{json .NetworkSettings.Ports}}:'*)
       if [ -n "${FAKE_OTHER_PORTS:-}" ]; then printf '%s\n' "$FAKE_OTHER_PORTS"; else printf '%s\n' '{}'; fi
@@ -40,6 +42,9 @@ if [ "$1" = ps ] && [ "$2" = -q ]; then
   exit 0
 fi
 if [ "$1" = compose ]; then
+  exit 0
+fi
+if [ "$1" = update ]; then
   exit 0
 fi
 [ "$1" = exec ] || exit 1
@@ -143,6 +148,7 @@ EOF
   unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL
   unset FAKE_IP_FAIL FAKE_LSOF_FAIL FAKE_LSOF_HANG FAKE_LSOF_PID_FILE FAKE_IFCONFIG_FAIL
   unset FAKE_LSOF_LISTENERS FAKE_IFCONFIG_ADDRESSES
+  unset FAKE_NODE_LIMITS
   : >"$FAKE_DOCKER_LOG"
   : >"$FAKE_STACK_LOG"
 }
@@ -153,6 +159,14 @@ request() {
 
 status() {
   jq -r "$1" "$FAKE_DASH_STATE/port-control.status"
+}
+
+credential_request() {
+  printf '%s\n' "$1" >"$FAKE_DASH_STATE/credential-control.request"
+}
+
+credential_status() {
+  jq -r "$1" "$FAKE_DASH_STATE/credential-control.status"
 }
 
 bounded_lsof() {
@@ -650,6 +664,125 @@ sed -i.bak 's/DASHBOARD_PASSWORD=.*/DASHBOARD_PASSWORD=/' "$case_root/state/.env
 : >"$FAKE_DASH_STATE/port-control.capability"
 scripts/node-port-control
 [ ! -e "$FAKE_DASH_STATE/port-control.capability" ] || fail "passwordless dashboard retained a capability"
+[ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "passwordless dashboard received credential control"
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"0123456789abcdef0123456789abcdef","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$FAKE_DASH_STATE/dashboard_auth.json"
+scripts/node-port-control
+[ "$(jq -r .timestamp "$FAKE_DASH_STATE/credential-control.capability")" = 1000 ] || fail "saved dashboard authentication did not enable credential control"
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"bad","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$FAKE_DASH_STATE/dashboard_auth.json"
+scripts/node-port-control
+[ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "malformed saved dashboard authentication enabled credential control"
+
+new_case credential-reset
+jq 'del(.bitcoin.enabled)' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+old_password=$(jq -r .bitcoin.node_password "$case_root/config/config.json")
+credential_request '{"id":"abababababababababababababababab","node":"bitcoin","requested_at":1000}'
+scripts/node-port-control
+new_password=$(jq -r .bitcoin.node_password "$case_root/config/config.json")
+[ "$new_password" != "$old_password" ] || fail "credential reset kept the old password"
+printf '%s' "$new_password" | grep -Eq '^[0-9a-f]{48}$' || fail "credential reset did not generate a 48-hex password"
+[ "$(credential_status .state)" = applied ] || fail "credential reset was not applied"
+[ "$(credential_status .node)" = bitcoin ] || fail "credential status omitted the node"
+[ "$(credential_status '.affected_services | join(",")')" = bitcoin,dashboard ] || fail "Bitcoin credential reset named the wrong services"
+grep -qx 'apply-credential-settings bitcoin' "$FAKE_STACK_LOG" || fail "credential reset did not use the bounded apply command"
+grep -q "$new_password" "$FAKE_DOCKER_LOG" "$FAKE_STACK_LOG" && fail "generated credential leaked into command logs"
+if [ -e "$FAKE_DASH_STATE/credential-control.request" ] || [ -e "$FAKE_DASH_STATE/credential-control.processing" ]; then
+  fail "credential request was not consumed"
+fi
+
+credential_request '{"id":"abababababababababababababababab","node":"bitcoin","requested_at":1000}'
+scripts/node-port-control
+[ "$(credential_status .state)" = rejected ] || fail "replayed credential reset was accepted"
+[ "$(grep -c '^apply-credential-settings bitcoin$' "$FAKE_STACK_LOG")" = 1 ] || fail "credential replay invoked apply"
+
+new_case credential-conflict
+request '{"id":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","changes":[{"port":"bitcoin_rpc","enabled":false}],"requested_at":1000}'
+credential_request '{"id":"dededededededededededededededede","node":"bitcoin","requested_at":1000}'
+scripts/node-port-control
+[ "$(credential_status .state)" = rejected ] || fail "credential reset raced another control request"
+[ -e "$FAKE_DASH_STATE/port-control.request" ] || fail "credential conflict consumed the other request"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "credential conflict invoked apply"
+
+new_case credential-disabled
+credential_request '{"id":"efefefefefefefefefefefefefefefef","node":"litecoin","requested_at":1000}'
+scripts/node-port-control
+[ "$(credential_status .state)" = rejected ] || fail "credential reset accepted a closed LAN RPC"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "closed LAN credential reset invoked apply"
+
+new_case credential-inactive
+jq '.bitcoin.active=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+old_password=$(jq -r .bitcoin.node_password "$case_root/config/config.json")
+credential_request '{"id":"ffffffffffffffffffffffffffffffff","node":"bitcoin","requested_at":1000}'
+scripts/node-port-control
+[ "$(credential_status .state)" = rejected ] || fail "credential reset accepted an inactive node"
+[ "$(jq -r .bitcoin.node_password "$case_root/config/config.json")" = "$old_password" ] || fail "inactive credential reset changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "inactive credential reset invoked apply"
+
+new_case credential-apply-failure
+old_password=$(jq -r .monero.node_password "$case_root/config/config.json")
+export FAKE_APPLY_FAIL_ONCE=1
+credential_request '{"id":"12121212121212121212121212121213","node":"monero","requested_at":1000}'
+scripts/node-port-control
+[ "$(jq -r .monero.node_password "$case_root/config/config.json")" = "$old_password" ] || fail "failed credential apply did not restore the prior password"
+[ "$(credential_status .state)" = failed ] || fail "failed credential apply status was not recorded"
+[ "$(credential_status '.affected_services | join(",")')" = monero,monero-wallet,dashboard ] || fail "Monero credential reset named the wrong services"
+[ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "failed credential apply retained a capability"
+[ "$(grep -c '^apply-credential-settings monero$' "$FAKE_STACK_LOG")" = 2 ] || fail "failed credential apply did not restore affected services"
+
+new_case credential-interrupted
+mkdir -p "$case_root/state/credential-control"
+cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.before"
+jq '.bitcoin.node_password="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$case_root/config/config.json" >"$case_root/state/credential-control/transaction.after"
+printf '0 0 0\n' >"$case_root/state/credential-control/transaction.limits"
+printf 'apply\n' >"$case_root/state/credential-control/transaction.intent"
+printf '13131313131313131313131313131313\n' >"$case_root/state/credential-control/inflight"
+chmod 600 "$case_root/state/credential-control"/*
+printf '%s\n' '{"id":"13131313131313131313131313131313","node":"bitcoin","requested_at":1000}' >"$FAKE_DASH_STATE/credential-control.processing"
+scripts/node-port-control
+[ "$(jq -r .bitcoin.node_password "$case_root/config/config.json")" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ] ||
+  fail "interrupted credential reset generated a second password"
+[ "$(credential_status .state)" = applied ] || fail "interrupted credential reset did not resume"
+[ ! -e "$case_root/state/credential-control/inflight" ] || fail "completed credential transaction was not cleared"
+
+new_case credential-terminal-replay
+mkdir -p "$case_root/state/credential-control"
+printf '%s\n' '{"id":"15151515151515151515151515151515","node":"bitcoin","state":"applied","message":"RPC password reset.","affected_services":["bitcoin","dashboard"]}' >"$case_root/state/credential-control/transaction.result"
+cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.before"
+cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.after"
+printf '0 0 0\n' >"$case_root/state/credential-control/transaction.limits"
+printf 'apply\n' >"$case_root/state/credential-control/transaction.intent"
+printf '15151515151515151515151515151515\n' >"$case_root/state/credential-control/inflight"
+chmod 600 "$case_root/state/credential-control"/*
+printf '%s\n' '{"id":"15151515151515151515151515151515","node":"bitcoin","requested_at":1000}' >"$FAKE_DASH_STATE/credential-control.processing"
+scripts/node-port-control
+[ "$(credential_status .state)" = applied ] || fail "terminal credential result was not replayed"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "terminal credential replay applied another password"
+[ ! -e "$case_root/state/credential-control/transaction.result" ] || fail "terminal credential result was not cleared"
+[ ! -e "$case_root/state/credential-control/inflight" ] || fail "terminal credential replay did not clear recovery state"
+[ ! -e "$FAKE_DASH_STATE/credential-control.processing" ] || fail "terminal credential replay did not consume the request"
+
+new_case credential-double-failure
+old_password=$(jq -r .bitcoin.node_password "$case_root/config/config.json")
+export FAKE_APPLY_FAIL=1
+credential_request '{"id":"14141414141414141414141414141414","node":"bitcoin","requested_at":1000}'
+scripts/node-port-control
+[ "$(jq -r .bitcoin.node_password "$case_root/config/config.json")" = "$old_password" ] || fail "double failure did not select the prior password"
+[ "$(credential_status .state)" = failed ] || fail "double failure status was not recorded"
+[ "$(cat "$case_root/state/credential-control/transaction.intent")" = rollback ] || fail "double failure did not preserve rollback intent"
+for artifact in transaction.before transaction.after transaction.limits transaction.intent inflight; do
+  [ -s "$case_root/state/credential-control/$artifact" ] || fail "double failure discarded $artifact"
+done
+[ -s "$FAKE_DASH_STATE/credential-control.processing" ] || fail "double failure discarded the pending recovery request"
+[ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "double failure retained a credential capability"
+export FAKE_APPLY_FAIL=0
+scripts/node-port-control
+[ "$(jq -r .bitcoin.node_password "$case_root/config/config.json")" = "$old_password" ] || fail "recovery retry changed the prior password"
+[ "$(credential_status .state)" = failed ] || fail "recovery retry did not retain the failed result"
+[ "$(credential_status .message)" = "RPC password could not be applied; prior credentials were restored." ] || fail "recovery retry did not report restored credentials"
+[ ! -e "$case_root/state/credential-control/inflight" ] || fail "recovery retry did not clear the transaction"
+[ ! -e "$FAKE_DASH_STATE/credential-control.processing" ] || fail "recovery retry did not consume the request"
+[ "$(grep -c '^apply-credential-settings bitcoin$' "$FAKE_STACK_LOG")" = 3 ] || fail "double failure recovery did not retry the selected baseline"
 
 new_case apply-failure
 export FAKE_APPLY_FAIL_ONCE=1
@@ -684,6 +817,32 @@ PATH=$saved_path
 [ "$(jq -r '.bitcoin.rpc_port' "$case_root/config/config.json")" = 48332 ] || fail "actual stack open lost its port"
 grep -q 'compose .*up -d --pull never --no-build --no-deps tor dashboard' "$FAKE_DOCKER_LOG" ||
   fail "actual stack open did not target only Tor and dashboard"
+
+credential_targets='bitcoin:bitcoin dashboard
+monero:monero monero-wallet dashboard
+litecoin:litecoin dashboard
+dogecoin:dogecoin dashboard
+bitcoincash:bitcoincash dashboard
+zcash:dashboard'
+export FAKE_NODE_LIMITS='1000000000 2147483648 2147483648'
+printf '%s\n' "$credential_targets" | while IFS=: read -r node services; do
+  : >"$FAKE_DOCKER_LOG"
+  PATH=$tmp:$PATH "$case_root/root/stack" apply-credential-settings "$node"
+  grep -q "compose .*up -d --pull never --no-build --no-deps $services" "$FAKE_DOCKER_LOG" ||
+    fail "$node credential apply targeted the wrong services"
+  if [ "$node" != zcash ]; then
+    grep -q "update --cpus 1.000000000 --memory 2147483648 --memory-swap 2147483648 $node" "$FAKE_DOCKER_LOG" ||
+      fail "$node credential apply did not restore its resource limits"
+  fi
+done
+if PATH=$tmp:$PATH "$case_root/root/stack" apply-credential-settings tari >/dev/null 2>&1; then
+  fail "passwordless Tari interface accepted a credential apply"
+fi
+jq '.bitcoin.active=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+if PATH=$tmp:$PATH "$case_root/root/stack" apply-credential-settings bitcoin >/dev/null 2>&1; then
+  fail "direct credential apply started an inactive node"
+fi
 
 grep -q '^ProtectSystem=strict$' packaging/systemd/bitcoin-starter-stack-port-control.service || fail "systemd service is not filesystem-hardened"
 grep -q '^RestrictAddressFamilies=AF_UNIX AF_NETLINK$' packaging/systemd/bitcoin-starter-stack-port-control.service ||

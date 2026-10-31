@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, overviewTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -75,6 +75,12 @@ test("nextHighlight eases both into and out of the highlighted state", () => {
   assert.ok(nextHighlight(shrinking, false, 60) < shrinking);
 });
 
+test("loading highlight fades faster than its tower and shrinks its glow", () => {
+  assert.deepEqual(loadingHighlight(1, 0.5, 10), { opacity: 0.55, glow: 16 });
+  assert.deepEqual(loadingHighlight(0.5, 0.5, 10), { opacity: 0.1375, glow: 8 });
+  assert.deepEqual(loadingHighlight(0, 0.5, 10), { opacity: 0, glow: 0 });
+});
+
 test("nextScene reverses cleanly and changes towers through the overview", () => {
   const opening = nextScene("", "bitcoin", 0, 60);
   assert.equal(opening.node, "bitcoin");
@@ -94,11 +100,146 @@ test("nextScene reverses cleanly and changes towers through the overview", () =>
   assert.deepEqual(nextScene("bitcoin", "monero", 1, 16, true), { node: "monero", progress: 1 });
 });
 
+test("scene timing is frame-rate independent and reverses without jumping", () => {
+  const advance = (step) => {
+    let scene = { node: "", progress: 0 };
+    for (let elapsed = 0; elapsed < SCENE_MS; elapsed += step) {
+      scene = nextScene(scene.node, "bitcoin", scene.progress, Math.min(step, SCENE_MS - elapsed));
+    }
+    return scene;
+  };
+  assert.deepEqual(advance(10), { node: "bitcoin", progress: 1 });
+  assert.deepEqual(advance(100), { node: "bitcoin", progress: 1 });
+
+  const halfway = nextScene("bitcoin", "bitcoin", 0, SCENE_MS / 2);
+  const reversing = nextScene(halfway.node, "", halfway.progress, 140);
+  const resumed = nextScene(reversing.node, "bitcoin", reversing.progress, 140);
+  assert.equal(reversing.progress, 0.3);
+  assert.equal(resumed.progress, halfway.progress);
+});
+
+test("neighbors disappear before zoom and return only after the camera is home", () => {
+  for (const progress of [0, 0.1, 0.24, 0.25, 0.4, 0.7, 1]) {
+    const phase = scenePhase(progress);
+    if (phase.zoomAmount > 0) assert.equal(phase.overviewOpacity, 0, `progress=${progress}`);
+    if (phase.overviewOpacity > 0) assert.equal(phase.zoomAmount, 0, `progress=${progress}`);
+  }
+  assert.deepEqual(scenePhase(0), { overviewOpacity: 1, zoomAmount: 0 });
+  assert.deepEqual(scenePhase(1), { overviewOpacity: 0, zoomAmount: 1 });
+});
+
 test("overview controls fade with the other towers and only receive input when settled", () => {
   assert.deepEqual(overviewTransition(0, ""), { opacity: 1, hidden: false, interactive: true });
-  assert.deepEqual(overviewTransition(0.5, "bitcoin"), { opacity: 0.5, hidden: false, interactive: false });
+  assert.deepEqual(overviewTransition(0.125, "bitcoin"), { opacity: 0.5, hidden: false, interactive: false });
+  assert.deepEqual(overviewTransition(0.5, "bitcoin"), { opacity: 0, hidden: true, interactive: false });
   assert.deepEqual(overviewTransition(1, "bitcoin"), { opacity: 0, hidden: true, interactive: false });
   assert.deepEqual(overviewTransition(0, "bitcoin"), { opacity: 1, hidden: false, interactive: false });
+});
+
+test("focused label follows opening, closing, switching, and reduced-motion scenes", () => {
+  let scene = nextScene("", "bitcoin", 0, 200);
+  const opening = focusedLabelTransition(scenePhase(scene.progress).zoomAmount, "974001");
+  assert.equal(opening.hidden, false);
+  assert.ok(opening.opacity > 0 && opening.opacity < 1);
+
+  scene = nextScene(scene.node, "", scene.progress, 30);
+  const closing = focusedLabelTransition(scenePhase(scene.progress).zoomAmount, "974001");
+  assert.ok(closing.opacity < opening.opacity);
+
+  scene = nextScene("bitcoin", "monero", 0, 200);
+  const switched = focusedLabelTransition(scenePhase(scene.progress).zoomAmount, scene.node === "monero" ? "3512002" : "974001");
+  assert.equal(scene.node, "monero");
+  assert.ok(switched.opacity > 0 && switched.opacity < 1);
+
+  scene = nextScene("bitcoin", "monero", 1, 16, true);
+  assert.deepEqual(focusedLabelTransition(scene.progress, "3512002"), { opacity: 1, hidden: false });
+  assert.deepEqual(focusedLabelTransition(0.5, ""), { opacity: 0, hidden: true });
+});
+
+test("renderer keeps the focused label live through opening, switching, and closing frames", async () => {
+  const style = () => ({ setProperty(name, value) { this[name] = value; } });
+  const context = new Proxy({}, { get(target, key) { return target[key] || (() => {}); } });
+  const canvas = { getContext: () => context, style: style() };
+  const label = { hidden: true, innerHTML: "", style: style() };
+  const overview = { hidden: false, scrollLeft: 0, style: style(), addEventListener() {} };
+  const choices = NODE_IDS.map((node) => ({
+    dataset: { selectNode: node, nodeActive: "1" }, hidden: false, style: style(),
+  }));
+  const overviewLabels = Object.fromEntries(NODE_IDS.map((node) => [node, {
+    hidden: true, style: style(), querySelector: () => ({ style: style(), textContent: "" }),
+  }]));
+  const live = Object.fromEntries(NODE_IDS.map((node) => [node, {
+    dataset: { nextBlock: node === "bitcoin" ? "974001" : node === "monero" ? "3512002" : "1" },
+  }]));
+  const elements = { tower: canvas, "tower-label": label, "node-overview": overview };
+  for (const node of NODE_IDS) {
+    elements[`tower-overview-label-${node}`] = overviewLabels[node];
+    elements[node === "bitcoin" ? "live" : `${node}-live`] = live[node];
+  }
+  const body = { dataset: { node: "", towerLabels: "1" } };
+  const frames = [];
+  globalThis.document = {
+    body,
+    hidden: false,
+    documentElement: { getAttribute: () => "dark" },
+    getElementById: (id) => elements[id] || null,
+    querySelectorAll: () => choices,
+    querySelector: (selector) => choices.find((choice) => selector.includes(`"${choice.dataset.selectNode}"`)) || null,
+  };
+  globalThis.window = {
+    devicePixelRatio: 1,
+    innerWidth: 1280,
+    innerHeight: 900,
+    matchMedia: () => ({ matches: false }),
+    addEventListener() {},
+  };
+  globalThis.requestAnimationFrame = (callback) => { frames.push(callback); };
+  let now = performance.now() + 100;
+  const step = (dt) => {
+    now += dt;
+    const frame = frames.shift();
+    assert.ok(frame, "renderer should schedule another frame");
+    frame(now);
+  };
+
+  try {
+    await import(`./tower.js?render-frames=${Date.now()}`);
+    body.dataset.node = "bitcoin";
+    step(60);
+    assert.equal(label.hidden, true);
+    assert.ok(Number(overview.style.opacity) > 0 && Number(overview.style.opacity) < 1);
+
+    step(100);
+    const openingOpacity = Number(label.style.opacity);
+    const openingLeft = label.style.left;
+    assert.match(label.innerHTML, /974001/);
+    assert.ok(openingOpacity > 0 && openingOpacity < 1);
+    assert.equal(label.hidden, false);
+
+    step(60);
+    assert.notEqual(label.style.left, openingLeft);
+    assert.equal(overview.style.opacity, "0");
+    body.dataset.node = "monero";
+    step(30);
+    assert.match(label.innerHTML, /974001/);
+    assert.ok(Number(label.style.opacity) < 1);
+    for (let i = 0; i < 12 && !label.innerHTML.includes("3512002"); i++) step(100);
+    assert.match(label.innerHTML, /3512002/);
+    assert.equal(label.hidden, false);
+    for (let i = 0; i < 8 && Number(label.style.opacity) < 0.8; i++) step(100);
+
+    const beforeClose = Number(label.style.opacity);
+    body.dataset.node = "";
+    step(50);
+    assert.ok(Number(label.style.opacity) < beforeClose);
+    assert.equal(overview.style.opacity, "0");
+    for (let i = 0; i < 12 && !label.hidden; i++) step(100);
+    assert.equal(label.hidden, true);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.window;
+    delete globalThis.requestAnimationFrame;
+  }
 });
 
 test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {

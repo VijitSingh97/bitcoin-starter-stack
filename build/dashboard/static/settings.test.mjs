@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance } from "./settings.js";
+import { readFile } from "node:fs/promises";
+import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload } from "./settings.js";
 
 test("settings remain read-only unless the server confirms configuration access", () => {
   assert.equal(configurationAccess({ can_configure: true }), true);
@@ -103,6 +104,9 @@ test("port status polling stops when the settings dialog closes", () => {
 test("port progress stays in the live port status", () => {
   assert.equal(settingsSaveMessage(false), "");
   assert.equal(settingsSaveMessage(true), "Settings saved.");
+  assert.equal(portStatusNode("", "monero", []), "monero");
+  assert.equal(portStatusNode("litecoin_rpc", "monero", []), "litecoin");
+  assert.equal(portStatusNode("", "", ["zcash"]), "zcash");
 });
 
 test("blank secret fields keep saved secrets without copying them into the request", () => {
@@ -147,4 +151,51 @@ test("replacement secrets are sent only for enabled services", () => {
     healthchecks_url: " https://example.com/ping ", alert_new_block_bitcoin: true, alert_new_block_monero: false });
   assert.equal(payload.telegram_bot_token, "sample-token");
   assert.equal(payload.healthchecks_url, "https://example.com/ping");
+});
+
+test("node and global saves use independent HTTP scopes and payloads", async () => {
+  const requests = [];
+  const fetcher = async (url, options) => {
+    requests.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : undefined });
+    return { ok: true, json: async () => ({ can_configure: true }) };
+  };
+  await requestSettings("bitcoin", "GET", undefined, fetcher);
+  const nodePayload = scopedSettingsPayload("monero", { alert_new_block_monero: true, telegram_bot_token: "must-not-leak" });
+  await requestSettings("monero", "POST", nodePayload, fetcher);
+  const globalPayload = scopedSettingsPayload("global", {
+    telegram_enabled: true,
+    telegram_bot_token: "replacement-token",
+    telegram_chat_id: "42",
+    healthchecks_enabled: true,
+    healthchecks_url: "https://example.com/ping",
+    tower_labels: true,
+    default_currency: "CNY",
+    alert_new_block_monero: true,
+  });
+  await requestSettings("global", "POST", globalPayload, fetcher);
+  assert.deepEqual(requests[0], { url: "/api/settings?scope=nodes", method: "GET", body: undefined });
+  assert.deepEqual(requests[1], {
+    url: "/api/settings?scope=nodes", method: "POST", body: { alert_new_block_monero: true },
+  });
+  assert.equal(requests[2].url, "/api/settings?scope=global");
+  assert.equal(requests[2].body.telegram_bot_token, "replacement-token");
+  assert.equal(requests[2].body.healthchecks_url, "https://example.com/ping");
+  assert.equal(requests[2].body.tower_labels, true);
+  assert.equal(requests[2].body.default_currency, "CNY");
+  assert.equal(Object.keys(requests[2].body).some((field) => field.startsWith("alert_new_block")), false);
+  await assert.rejects(
+    requestSettings("bitcoin", "POST", { alert_new_block: true }, async () => ({ ok: false, text: async () => "node settings rejected" })),
+    /node settings rejected/,
+  );
+});
+
+test("node settings move into each tower ahead of node deactivation", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const source = await readFile(new URL("./settings.js", import.meta.url), "utf8");
+  assert.match(html, /<fieldset id="settings-node-alerts" hidden>/);
+  assert.match(source, /card\.className = "card node-settings-card"/);
+  assert.match(source, /nodeForm\.dataset\.nodeSettingsForm = node/);
+  assert.match(source, /details\.append\(nodeStatus, impact, actions\)/);
+  assert.match(source, /power\.before\(card\)/);
+  assert.match(source, /saveScope\(node, view\.form, view\.status, view\.save\)/);
 });

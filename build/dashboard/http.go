@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +35,10 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/tari/watch", a.apiTariWatch)
 	mux.HandleFunc("POST /api/tari/watch", a.apiTariWatchAdd)
 	mux.HandleFunc("DELETE /api/tari/watch/{id}", a.apiTariWatchRemove)
+	mux.HandleFunc("POST /api/settings/password", a.apiDashboardPassword)
+	mux.HandleFunc("GET /api/settings/credentials", a.apiCredentialsGet)
+	mux.HandleFunc("POST /api/settings/credentials/reveal", a.apiCredentialsReveal)
+	mux.HandleFunc("POST /api/settings/credentials/reset", a.apiCredentialsReset)
 	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
 	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
 	mux.HandleFunc("GET /api/settings/ports", a.apiPortControlGet)
@@ -60,12 +63,12 @@ func (a *app) auth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if a.cfg.dashboardPassword == "" {
+		if !a.hasDashboardPassword() {
 			next.ServeHTTP(w, r)
 			return
 		}
 		_, password, ok := r.BasicAuth()
-		valid := ok && len(password) == len(a.cfg.dashboardPassword) && subtle.ConstantTimeCompare([]byte(password), []byte(a.cfg.dashboardPassword)) == 1
+		valid := ok && a.dashboardPasswordMatches(password)
 		if !valid {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Bitcoin Node Status"`)
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
@@ -180,14 +183,14 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entries := a.watch.Entries()
-	if a.cfg.dashboardPassword == "" && !publicExampleOnly(entries) {
+	if !a.hasDashboardPassword() && !publicExampleOnly(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
 		return
 	}
 	var chain blockchainInfo
 	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
 	view := a.watch.ListWithChain(a.walletRPC, chain)
-	view["has_password"] = a.cfg.dashboardPassword != ""
+	view["has_password"] = a.hasDashboardPassword()
 	writeJSON(w, view)
 }
 
@@ -199,7 +202,7 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
 		return
 	}
@@ -271,7 +274,7 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
 		return
 	}
@@ -322,7 +325,7 @@ func (a *app) apiUpgradeStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiUpgradeRequest(w http.ResponseWriter, r *http.Request) {
-	if !a.cfg.control || a.cfg.dashboardPassword == "" {
+	if !a.cfg.control || !a.hasDashboardPassword() {
 		http.Error(w, "upgrade control is disabled — set dashboard.control", 403)
 		return
 	}

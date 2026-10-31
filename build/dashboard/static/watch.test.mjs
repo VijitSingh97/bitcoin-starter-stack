@@ -10,9 +10,17 @@ import {
   shortKey,
   totalLabel,
   walletKeyForPost,
+  walletPost,
   walletView,
   watchHint,
 } from "./watch.js";
+
+test("an omitted Bitcoin label gets the first unused wallet name", () => {
+  assert.deepEqual(walletPost("", "bc1qaddress", "legacy", "", [
+    { name: "Wallet 1" }, { name: "Wallet_2" }, { name: "wallet 3" }, { name: "Binance (public)", example: true },
+  ]), { name: "Wallet 4", key: "bc1qaddress", birthday: "" });
+  assert.equal(walletPost(" Cold ", "bc1qaddress", "legacy", "", []).name, "Cold");
+});
 
 test("balanceLabel shows the balance when ready", () => {
   assert.equal(balanceLabel({ state: "ok", btc: "1.5" }), "1.5 BTC");

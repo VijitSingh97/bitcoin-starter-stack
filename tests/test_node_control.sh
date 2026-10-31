@@ -123,5 +123,12 @@ request '{"id":"55555555555555555555555555555555","node":"bitcoin","active":fals
 "$root/scripts/node-control"
 [ ! -e "$dashboard_state/node-control.capability" ] || fail "control enabled without dashboard authentication"
 [ "$(jq -r .bitcoin.active "$config/config.json")" = true ] || fail "unauthenticated request changed config"
+rm -f "$dashboard_state/node-control.request"
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"0123456789abcdef0123456789abcdef","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$dashboard_state/dashboard_auth.json"
+"$root/scripts/node-control"
+[ "$(cat "$dashboard_state/node-control.capability")" = ready ] || fail "saved dashboard authentication did not enable node control"
+printf '%s\n' '{"version":1,"iterations":210000,"salt":"bad","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$dashboard_state/dashboard_auth.json"
+"$root/scripts/node-control"
+[ ! -e "$dashboard_state/node-control.capability" ] || fail "malformed saved dashboard authentication enabled node control"
 
 echo "PASS: test_node_control.sh"

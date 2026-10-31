@@ -27,14 +27,15 @@ function validBirthday(value, today) {
 export function tariWalletImport(value, today = todayISO()) {
   const keys = ["name", "public_spend_key", "view_key", "birthday"];
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) {
-    throw new Error("Use view-only JSON with name, public_spend_key, view_key, and optional birthday. Seeds and private spend keys are not accepted.");
+    throw new Error("Use view-only JSON with public_spend_key, view_key, and optional name and birthday. Seeds and private spend keys are not accepted.");
   }
-  const name = typeof value.name === "string" ? value.name.trim() : "";
+  if (value.name !== undefined && typeof value.name !== "string") throw new Error("Wallet name must be text.");
+  const name = value.name?.trim() || "Tari wallet";
   const publicSpendKey = typeof value.public_spend_key === "string" ? value.public_spend_key.trim() : "";
   const viewKey = typeof value.view_key === "string" ? value.view_key.trim() : "";
   if (value.birthday !== undefined && typeof value.birthday !== "string") throw new Error("Birthday must be a date in YYYY-MM-DD format.");
   const birthday = typeof value.birthday === "string" ? value.birthday.trim() : "";
-  if (!name || name.length > 80) throw new Error("A wallet name is required.");
+  if (name.length > 80) throw new Error("Wallet name must be 80 characters or fewer.");
   if (!HEX_KEY.test(publicSpendKey)) throw new Error("A 64-character public spend key is required.");
   if (!HEX_KEY.test(viewKey)) throw new Error("A 64-character private view key is required.");
   if (!validBirthday(birthday, today)) throw new Error(`Birthday must be blank or a valid date from ${BIRTHDAY_MIN} through ${today}.`);
@@ -131,14 +132,16 @@ if (typeof document !== "undefined") {
       node.maxLength = maxLength;
       return node;
     };
-    const name = input("Wallet name", "text", 80);
+    const name = input("Wallet name (optional)", "text", 80);
     const publicSpendKey = input("Public spend key", "text", 64);
     const viewKey = input("Private view key", "password", 64);
     viewKey.autocomplete = "new-password";
     const birthday = input("Wallet birthday (optional)", "date");
     birthday.min = BIRTHDAY_MIN;
     birthday.max = todayISO();
-    name.required = publicSpendKey.required = viewKey.required = true;
+    publicSpendKey.required = viewKey.required = true;
+    const scanOptions = el("details");
+    scanOptions.append(el("summary", null, "Scan options (optional)"), birthday);
     const fileLabel = el("label", "watch-hint", "Or upload view-only wallet JSON");
     const file = input("Tari view-only wallet JSON", "file");
     file.accept = ".json,application/json";
@@ -148,7 +151,7 @@ if (typeof document !== "undefined") {
     const hint = el("p", "watch-hint", "The private view key reveals funds but cannot spend them. The spend key entered here is public. Leave the birthday blank to scan from genesis. Never enter a seed or private spend key.");
     const message = el("p", "watch-msg");
     message.setAttribute("role", "status");
-    form.append(name, publicSpendKey, viewKey, birthday, fileLabel, add);
+    form.append(name, publicSpendKey, viewKey, scanOptions, fileLabel, add);
     card.replaceChildren(heading, status, list, form, hint, message);
     let last = { wallets: [] };
     let busy = false;

@@ -10,6 +10,7 @@
 // for tower.test.mjs; the canvas wiring is guarded on `document`.
 export const GRID = 12;
 export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
+export const SCENE_MS = 700;
 // Side-by-side card + tower (and balances floating above the tower) only above
 // this width; below it everything stacks. Kept in sync with the CSS media
 // queries. Set high enough that the ~460px balances block clears the card and
@@ -73,28 +74,51 @@ export function nextHighlight(current, active, dtMs) {
   return current + (target - current) * amount;
 }
 
+export function loadingHighlight(opacity, pulse, glow) {
+  const sceneOpacity = Math.min(1, Math.max(0, opacity));
+  return {
+    opacity: sceneOpacity * sceneOpacity * (0.2 + 0.7 * pulse),
+    glow: (glow + 12 * pulse) * sceneOpacity,
+  };
+}
+
 export function nextScene(scene, requested, progress, dtMs, reduce = false) {
   if (reduce) return { node: requested, progress: requested ? 1 : 0 };
   let node = scene;
   let value = progress;
   if (requested !== node && value <= 0.001) node = requested;
   const opening = !!requested && requested === node;
-  value = nextHighlight(value, opening, dtMs);
-  if (opening && value >= 0.999) value = 1;
-  if (!opening && value <= 0.001) {
+  value = Math.min(1, Math.max(0, value + (opening ? 1 : -1) * Math.max(0, dtMs) / SCENE_MS));
+  if (value >= 1 - 1e-9) value = 1;
+  if (value <= 1e-9) value = 0;
+  if (!opening && value === 0) {
     value = 0;
     node = requested;
   }
   return { node, progress: value };
 }
 
+export function scenePhase(progress) {
+  const value = Math.min(1, Math.max(0, progress));
+  return {
+    overviewOpacity: 1 - smooth(value / 0.25),
+    zoomAmount: smooth((value - 0.25) / 0.75),
+  };
+}
+
 export function overviewTransition(progress, selected) {
-  const opacity = 1 - smooth(progress);
+  const opacity = scenePhase(progress).overviewOpacity;
   return {
     opacity,
     hidden: !!selected && opacity <= 0.001,
     interactive: !selected && opacity >= 0.999,
   };
+}
+
+export function focusedLabelTransition(progress, nextBlock) {
+  const block = String(nextBlock || "").trim();
+  const opacity = block ? Math.min(1, Math.max(0, progress)) : 0;
+  return { opacity, hidden: !block || opacity <= 0.001 };
 }
 
 export function overviewHitWidth(tw) {
@@ -222,11 +246,6 @@ if (typeof document !== "undefined") {
     }
 
     const liveElement = (node) => document.getElementById(node === "bitcoin" ? "live" : `${node}-live`);
-    const liveData = () => {
-      const el = liveElement(document.body.dataset.node || "bitcoin");
-      return (el && el.dataset) || {};
-    };
-
     const nextBlocks = () => Object.fromEntries(NODE_IDS.map((node) =>
       [node, liveElement(node)?.dataset?.nextBlock]));
 
@@ -236,16 +255,31 @@ if (typeof document !== "undefined") {
       for (const element of Object.values(overviewLabels)) if (element) element.hidden = true;
     }
 
-    function showOverviewLabel(node, text, ox, anchorY, tw) {
+    function showOverviewLabel(node, text, ox, anchorY, tw, opacity = 1) {
       const element = overviewLabels[node];
-      if (!element || !text) return;
+      if (!element || !text || opacity <= 0.001) return;
       const number = element.querySelector("b");
       number.textContent = text.slice("loading block ".length);
       number.style.color = activeNode(node) ? NODE_COLORS[node] : NODE_COLORS.zcash;
       const position = overviewLabelPosition(W, ox, anchorY, tw);
       element.style.left = `${position.left}px`;
       element.style.top = `${position.top}px`;
+      element.style.opacity = String(opacity);
       element.hidden = false;
+    }
+
+    function showFocusedLabel(node, progress, ox, anchorY, tw, push = 0) {
+      if (!label) return;
+      const next = node ? liveElement(node)?.dataset?.nextBlock : "";
+      const state = focusedLabelTransition(progress, next);
+      label.hidden = state.hidden;
+      label.style.opacity = String(state.opacity);
+      if (state.hidden) return;
+      label.style.setProperty("--accent", activeNode(node) ? NODE_COLORS[node] : NODE_COLORS.zcash);
+      const topY = project(0, 0, 0, tw, tw * 0.5, ox, anchorY - push - N * (tw / 4)).y;
+      label.style.left = `${ox}px`;
+      label.style.top = `${Math.max(8, topY - 40)}px`;
+      label.innerHTML = `loading block <b>${next}</b>`;
     }
 
     function poly(pts, fill, stroke, glow) {
@@ -258,9 +292,11 @@ if (typeof document !== "undefined") {
         ctx.fill();
       }
       if (glow) { ctx.shadowBlur = glow; ctx.shadowColor = stroke; }
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
       ctx.shadowBlur = 0;
     }
 
@@ -314,8 +350,9 @@ if (typeof document !== "undefined") {
           ctx.globalAlpha = opacity * pal.alpha;
           poly(face, pal.top, pal.edge, 0);
         } else if (idx === done) {
-          ctx.globalAlpha = opacity * pal.alpha * (0.2 + 0.7 * pulse);
-          poly(face, pal.top, pal.edge, pal.glow + 12 * pulse);
+          const loading = loadingHighlight(opacity, pulse, pal.glow);
+          ctx.globalAlpha = pal.alpha * loading.opacity;
+          poly(face, pal.top, pal.edge, loading.glow);
         } else {
           ctx.globalAlpha = opacity * pal.alpha * 0.35;
           poly(face, null, pal.grid, 0);
@@ -396,14 +433,11 @@ if (typeof document !== "undefined") {
         const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
         for (const node of ids) showOverviewLabel(node, blockLabels[node], overviewX(node), overviewY(node),
           baseTw * (1 + 0.12 * previewHighlight[node]));
-        if (label) {
-          label.hidden = true;
-          label.style.opacity = "0";
-        }
+        showFocusedLabel("", 0, 0, 0, 0);
         return;
       }
       if (scene.progress < 1 || selected !== scene.node) {
-        const amount = smooth(scene.progress);
+        const amount = scenePhase(scene.progress).zoomAmount;
         const { ox: focusedX, tw: focusedTw } = towerLayout(W);
         const focusedY = H * 0.6;
         if (scene.node) {
@@ -424,23 +458,23 @@ if (typeof document !== "undefined") {
                 startHighlight + (1 - startHighlight) * amount,
                 activeNode(node) ? 1 : 0.62 + 0.38 * amount,
               );
-            } else {
+            } else if (overviewState.opacity > 0.001) {
               drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
-                (activeNode(node) ? 1 : 0.62) * (1 - amount));
+                (activeNode(node) ? 1 : 0.62) * overviewState.opacity);
             }
           }
+          showFocusedLabel(scene.node, amount,
+            overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount, anchorY, tw);
         } else {
           for (const node of drawOrder) drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
             activeNode(node) ? 1 : 0.62);
+          showFocusedLabel("", 0, 0, 0, 0);
         }
-        if (label) {
-          label.hidden = true;
-          label.style.opacity = "0";
-        }
+        const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
+        for (const node of ids) showOverviewLabel(node, blockLabels[node], overviewX(node), overviewY(node),
+          baseTw * (1 + 0.12 * previewHighlight[node]), overviewState.opacity);
         return;
       }
-      if (label) label.hidden = false;
-      if (label) label.style.setProperty("--accent", activeNode(selected) ? NODE_COLORS[selected] : NODE_COLORS.zcash);
       const { ox, tw } = towerLayout(W);
       const bh = tw * 0.5;
       const anchorY = H * 0.6;
@@ -448,19 +482,7 @@ if (typeof document !== "undefined") {
       const visible = sceneDepth(H, anchorY, tw, overviewY(scene.node), baseTw);
       drawTower(selected, ox, anchorY, tw, visible, fill, pulse, 1, 1, push);
 
-      // "loading block N" header above the tower's back corner
-      if (label) {
-        const next = liveData().nextBlock;
-        if (next) {
-          const topY = project(0, 0, 0, tw, bh, ox, anchorY - push - N * (tw / 4)).y;
-          label.style.left = ox + "px";
-          label.style.top = Math.max(8, topY - 40) + "px";
-          label.innerHTML = 'loading block <b>' + next + "</b>";
-          label.style.opacity = "1";
-        } else {
-          label.style.opacity = "0";
-        }
-      }
+      showFocusedLabel(selected, 1, ox, anchorY, tw, push);
     }
 
     render(performance.now()); // one static frame (also covers a hidden tab)

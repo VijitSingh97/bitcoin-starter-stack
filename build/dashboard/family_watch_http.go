@@ -34,13 +34,13 @@ func (a *app) apiFamilyWatchList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	supported, reason := familyWatchCapability(id)
 	active := node.Enabled && a.nodeActive(id, node.Enabled)
-	response := map[string]any{"supported": supported, "enabled": node.Enabled, "active": active, "has_password": a.cfg.dashboardPassword != "", "reason": reason, "wallets": []familyWatchWalletView{}}
+	response := map[string]any{"supported": supported, "enabled": node.Enabled, "active": active, "has_password": a.hasDashboardPassword(), "reason": reason, "wallets": []familyWatchWalletView{}}
 	if !supported {
 		writeJSON(w, response)
 		return
 	}
 	store := a.familyWatch.stores[id]
-	wallets, err := store.list(a.cfg.dashboardPassword == "")
+	wallets, err := store.list(!a.hasDashboardPassword())
 	if errors.Is(err, os.ErrPermission) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", http.StatusForbidden)
 		return
@@ -139,7 +139,7 @@ func (a *app) familyWatchMutation(w http.ResponseWriter, r *http.Request, id str
 		http.Error(w, reason, http.StatusNotImplemented)
 		return nil, false
 	}
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		http.Error(w, "set dashboard.password to manage watch-only wallets", http.StatusForbidden)
 		return nil, false
 	}

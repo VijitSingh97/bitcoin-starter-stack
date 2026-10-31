@@ -17,13 +17,13 @@ temporary compaction space, or future growth.
 
 | Node | Default retained history | Disk planning allowance | Sync budget | Post-sync compact budget | Qualification |
 |---|---:|---:|---:|---:|---|
-| Bitcoin Core | 10,000 MiB of block files | 30–60 GB total | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB | Short capped trial passed; 24-hour qualification pending |
+| Bitcoin Core | 10,000 MiB of block files | 28–56 GiB total | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB | Short capped trial passed; 24-hour qualification pending |
 | Monero | Native pruned mode | 120–150 GiB; upstream reported about 105 GiB pruned on October 5, 2026 | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB, plus its wallet service | Not yet qualified |
 | Tari | 10,000-block pruning horizon | No current measured total; use an expandable volume and measure after first sync | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB for the node, plus a 0.5 CPU / 512 MiB view-only wallet sidecar | Node startup and native wallet lifecycle/authentication proven; funded pruned full-sync balance and sustained caps not qualified |
-| Litecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
-| Dogecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
-| Bitcoin Cash Node | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Signed upstream binary and runtime startup proven; full sync not qualified |
-| Zcash / Zakura | Pruned state with 10,000 retained blocks | Upstream's published snapshot was roughly 11 GB when checked; plan 30–60 GB on an expandable volume until a full sync is measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Pruning, Tor bootstrap, and RPC proven; full sync not qualified |
+| Litecoin | 10,000 MiB of block files | Provisional 28–56 GiB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
+| Dogecoin | 10,000 MiB of block files | Provisional 28–56 GiB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
+| Bitcoin Cash Node | 10,000 MiB of block files | Provisional 28–56 GiB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Signed upstream binary and runtime startup proven; full sync not qualified |
+| Zcash / Zakura | Pruned state with 10,000 retained blocks | Upstream's published snapshot was roughly 10 GiB when checked; plan 28–56 GiB on an expandable volume until a full sync is measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Pruning, Tor bootstrap, and RPC proven; full sync not qualified |
 
 All six non-Bitcoin adapters have passed native-daemon startup and dashboard
 checks on an Apple Silicon Mac using Docker Desktop. These checks cover Tor
@@ -35,6 +35,10 @@ The Litecoin, Dogecoin, Bitcoin Cash, and Zcash figures are planning allowances,
 not measured usage. Tari has no defensible total-size estimate yet, so do not put
 it on a fixed small volume. The dashboard shows live chain and free-disk values;
 record the final size after the first complete sync and leave growth headroom.
+The combined planning range for the six chains with byte estimates is roughly
+260–430 GiB before growth, temporary compaction space, Docker images, and host
+headroom. Tari is additional and unknown; a pruning horizon is a block count,
+not a disk-size estimate.
 
 Monero's base figure comes from its
 [official remote-node guide](https://docs.getmonero.org/interacting/remote-nodes/).
@@ -51,6 +55,12 @@ it is not included in the Tari base node's 1 CPU / 4 GiB budget and is not yet
 qualified under sustained load. Sync one chain at a time on a small
 host. A container cap on a larger test machine does not qualify a real VPS with
 the same total RAM.
+
+Selecting all seven nodes sets base-node ceilings totaling 7 CPUs and 24 GiB.
+The Monero and Tari wallet sidecars add 0.5 CPU and 512 MiB each, making 8 CPUs
+and 25 GiB of container ceilings before Tor, dashboard, Docker, filesystem cache,
+and the host. This is cap arithmetic, not measured simultaneous use or a
+qualified minimum machine.
 
 Tari's native wallet database is owner-only but not encrypted by its wallet
 password: Tari v6.1 stores the private view key in plaintext SQLite data. Use an
@@ -83,6 +93,14 @@ Wallet capabilities differ by chain:
 | Zcash / Zakura | **Wallet balance not available.** Zakura's default checkpoint-pruned mode does not retain the address index needed for lookup. No public reference address is shown. |
 | Tari | One native view-only wallet using a public spend key, private view key, and optional `YYYY-MM-DD` birthday. Blank birthday scans from genesis. No seed or private spend key is accepted. |
 
+On fresh dashboard state, Monero includes the sourced Monero General Fund as a
+received-only example, Litecoin includes Linux Mint, and Bitcoin Cash includes
+Bitcoin Cash Node. Source installs may also seed a public Binance Bitcoin
+address; pruned APT and Homebrew installs default to no Bitcoin example. Public
+examples are excluded from personal totals. Tari has no example and accepts one
+imported view-only wallet. Dogecoin and Zcash have neither wallet lookup nor an
+example.
+
 Litecoin and Bitcoin Cash use their native `scantxoutset` RPC after sync. The
 dashboard caches the confirmed result for an hour and records balance snapshots;
 it does not reconstruct transaction history, spent outputs, or mempool activity.
@@ -114,6 +132,19 @@ Package data defaults to `/var/lib/bitcoin-starter-stack/data/<node>`. Source
 installs default to `./data/<node>`. Choose a mounted SSD path in the wizard when
 the default disk is too small.
 
+The wizard configures nodes and service logins. Monero and Tari view-only scans
+are optional advanced steps performed later in their dashboard cards. Keep node
+endpoint credentials separate from personal view-only material, and never enter
+a private spend key or seed phrase.
+
+After setup, open a tower to manage that node. Its settings appear after its
+wallet section and before deactivation, and contain the new-block alert, LAN
+listeners, and credentials for enabled authenticated RPC. **Show password** is
+an explicit reveal. Credential reset requires typing `reset`, restarts affected
+services, and makes every external client update its saved password. It is not
+available while the node is inactive. Global Appearance, Dashboard password,
+Telegram, and Healthchecks remain in the gear menu.
+
 ## Private-LAN endpoints
 
 All node endpoints are off by default and accept only an IPv4 address assigned
@@ -134,6 +165,10 @@ malformed, conflicting, and already-used bindings before applying a change.
 The public P2P runtime stays behind Tor whether or not a LAN endpoint is
 enabled. These LAN services are plaintext inside the trusted network. Never
 forward them to the public internet.
+
+The dashboard shows credentials only for the authenticated endpoints in this
+table. Monero ZMQ and Tari gRPC are intentionally unauthenticated and never show
+a username or password.
 
 ## Pithead remote nodes
 
@@ -159,3 +194,4 @@ helper gracefully stops only that daemon and its dependent wallet service,
 keeps its data and configuration, and leaves its tower visible but inactive.
 Activating it starts the same configured service again. At least one node must
 remain configured; deactivation is different from deleting a chain or its data.
+Reactivate the node before attempting an RPC credential reset.

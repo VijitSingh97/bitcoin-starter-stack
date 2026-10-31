@@ -1,6 +1,12 @@
+import { credentialSettingsController } from "./credentials.js";
+
 const extraNodes = ["tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
 const allNodes = ["bitcoin", "monero", ...extraNodes];
 const allPortIDs = ["bitcoin_rpc", "monero_rpc", "monero_zmq", "tari_grpc", "litecoin_rpc", "dogecoin_rpc", "bitcoincash_rpc", "zcash_rpc"];
+const nodePortIDs = {
+  bitcoin: ["bitcoin_rpc"], monero: ["monero_rpc", "monero_zmq"], tari: ["tari_grpc"],
+  litecoin: ["litecoin_rpc"], dogecoin: ["dogecoin_rpc"], bitcoincash: ["bitcoincash_rpc"], zcash: ["zcash_rpc"],
+};
 
 export function notificationPayload(values) {
   const payload = {
@@ -25,13 +31,46 @@ export function configurationAccess(data) {
 }
 
 export function notificationChanged(saved, payload) {
-  const fields = ["telegram_enabled", "telegram_chat_id", "healthchecks_enabled", "alert_new_block_monero", "tower_labels"];
-  if (extraNodes.some(node => payload[`alert_new_block_${node}`] !== !!saved?.[`alert_new_block_${node}`])) return true;
-  if (fields.some((field) => payload[field] !== saved?.[field])) return true;
-  if (payload.default_currency !== normalizeDefaultCurrency(saved?.default_currency)) return true;
-  if (payload.alert_new_block !== (saved?.alert_new_block_bitcoin ?? saved?.alert_new_block)) return true;
-  if (Object.hasOwn(payload, "telegram_bot_token") && payload.telegram_bot_token !== saved?.telegram_bot_token) return true;
-  return Object.hasOwn(payload, "healthchecks_url") && payload.healthchecks_url !== saved?.healthchecks_url;
+  return Object.entries(payload).some(([field, value]) => {
+    const previous = field === "alert_new_block" ? saved?.alert_new_block_bitcoin ?? saved?.alert_new_block
+      : field === "default_currency" ? normalizeDefaultCurrency(saved?.default_currency)
+      : saved?.[field];
+    return value !== previous;
+  });
+}
+
+export function settingsEndpoint(scope = "global", method = "GET") {
+  return scope === "global" ? (method === "GET" ? "/api/settings" : "/api/settings?scope=global") : "/api/settings?scope=nodes";
+}
+
+export function portStatusNode(port, submittedNode = "", changedNodes = []) {
+  return Object.keys(nodePortIDs).find((node) => nodePortIDs[node].includes(port))
+    || (allNodes.includes(submittedNode) ? submittedNode : "")
+    || changedNodes.find((node) => allNodes.includes(node))
+    || "";
+}
+
+export function scopedSettingsPayload(scope, values) {
+  if (scope !== "global") {
+    const field = scope === "bitcoin" ? "alert_new_block" : `alert_new_block_${scope}`;
+    return { [field]: values?.[field] === true };
+  }
+  const payload = notificationPayload(values || {});
+  for (const field of Object.keys(payload)) if (field.startsWith("alert_new_block")) delete payload[field];
+  return payload;
+}
+
+export async function requestSettings(scope = "global", method = "GET", payload, fetcher = fetch) {
+  const response = await fetcher(settingsEndpoint(scope, method), {
+    method,
+    headers: payload ? { "Content-Type": "application/json", "X-Requested-With": "fetch" } : {},
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+  });
+  if (!response.ok) {
+    const text = (await response.text()).trim();
+    throw new Error(text.length <= 200 ? text : "Could not update settings.");
+  }
+  return response.json();
 }
 
 export function configuredNodeVisibility(data) {
@@ -153,7 +192,44 @@ if (typeof document !== "undefined") {
   const defaultCurrency = byId("default-currency");
   const save = byId("save");
   const reset = byId("reset");
-  const portImpact = byId("port-impact");
+  const nodeAccents = { bitcoin: "#f2a900", monero: "#ff6600", tari: "#8f5cff", litecoin: "#4d8fd8", dogecoin: "#b88746", bitcoincash: "#36a852", zcash: "#d69c35" };
+  const nodeViews = {};
+  for (const node of allNodes) {
+    const details = byId(`${node}-alerts`);
+    const panel = document.querySelector(`[data-node-panel="${node}"]`);
+    const power = panel?.querySelector(".node-power-card");
+    if (!details || !power) continue;
+    details.querySelector("summary").textContent = "Alerts and LAN access";
+    const card = document.createElement("section");
+    card.className = "card node-settings-card";
+    card.style.setProperty("--node-accent", nodeAccents[node]);
+    const heading = document.createElement("h2");
+    heading.textContent = "Node settings";
+    const nodeForm = document.createElement("form");
+    nodeForm.dataset.nodeSettingsForm = node;
+    const nodeStatus = document.createElement("p");
+    nodeStatus.className = "settings-note";
+    nodeStatus.setAttribute("role", "status");
+    nodeStatus.setAttribute("aria-live", "polite");
+    const impact = document.createElement("p");
+    impact.className = "settings-note";
+    impact.textContent = "Will restart services: Tor relay, dashboard.";
+    impact.hidden = true;
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    const nodeSave = document.createElement("button");
+    nodeSave.type = "submit";
+    nodeSave.textContent = "Save";
+    actions.append(nodeSave);
+    details.append(nodeStatus, impact, actions);
+    nodeForm.append(details);
+    card.append(heading, nodeForm);
+    power.before(card);
+    nodeViews[node] = { card, form: nodeForm, status: nodeStatus, impact, save: nodeSave };
+  }
+  byId("port-status")?.remove();
+  byId("port-impact")?.remove();
+  const credentialSettings = credentialSettingsController(dialog, document);
   let saved = {};
   let savedPorts = {};
   let allowed = false;
@@ -163,6 +239,8 @@ if (typeof document !== "undefined") {
   let portRequestID = "";
   let ambiguousPortDraft;
   let ambiguousStatusPrefix = "";
+  let ambiguousStatusTarget;
+  let submittedPortNode = "";
   let stagedPortDraft;
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
@@ -177,6 +255,7 @@ if (typeof document !== "undefined") {
     enabled: row.querySelector("[data-port-enabled]").checked,
     host_port: Number(row.querySelector("[data-port-number]").value),
   }]));
+  const changesForNode = (node, changes = portChanges(savedPorts, portDraft())) => changes.filter((change) => nodePortIDs[node].includes(change.port));
 
   const applyPortDraft = (draft, remember = true) => {
     for (const [id, values] of Object.entries(draft || {})) {
@@ -200,8 +279,13 @@ if (typeof document !== "undefined") {
       enabled.disabled = locked;
       row.querySelector("[data-port-number]").disabled = locked || !enabled.checked;
     }
-    portImpact.hidden = changes.length === 0 && !pending;
-    save.textContent = changes.length > 0 ? "Save & restart" : pending ? "Restart pending" : "Save";
+    for (const [node, view] of Object.entries(nodeViews)) {
+      const nodeChanges = changesForNode(node, changes);
+      view.impact.hidden = nodeChanges.length === 0;
+      view.save.textContent = nodeChanges.length > 0 ? (pending ? "Restart pending" : "Save & restart") : "Save";
+      view.save.disabled = !allowed || pending;
+    }
+    save.textContent = "Save";
     save.disabled = !allowed || pending;
     reset.disabled = !allowed || pending || !saved.overridden;
     return changes;
@@ -235,16 +319,24 @@ if (typeof document !== "undefined") {
       row.querySelector("[data-port-number]").value = port.host_port || "";
     }
     if (stagedPortDraft) applyPortDraft(stagedPortDraft, false);
-    byId("port-status").textContent = portStatusMessage(view) || (!view.available && Object.keys(view.ports).length
-      ? "LAN port changes require a dashboard password and the installed host helper."
-      : "");
+    const message = portStatusMessage(view);
+    const changedNodes = Object.keys(nodeViews).filter((node) => changesForNode(node).length);
+    const messageNode = portStatusNode(view.port, submittedPortNode, changedNodes);
+    for (const [node, nodeView] of Object.entries(nodeViews)) {
+      nodeView.status.textContent = message && node === messageNode
+        ? message
+        : !view.available && nodePortIDs[node].some((id) => view.ports[id])
+          ? "LAN port changes require a dashboard password and the installed host helper."
+          : "";
+    }
     clearTimeout(portPoll);
-    if (shouldPollPort(dialog.open, view.state)) portPoll = setTimeout(loadPortControl, 2000);
+    if (shouldPollPort(dialog.open || !!document.body.dataset.node, view.state)) portPoll = setTimeout(loadPortControl, 2000);
     updatePortPlan();
+    if (view.state && view.state !== "pending") submittedPortNode = "";
     return view;
   };
 
-  const clearSecrets = () => { token.value = ""; url.value = ""; };
+  const clearSecrets = () => { token.value = ""; chat.value = ""; url.value = ""; };
   const updateInputs = () => {
     token.disabled = chat.disabled = !allowed || !telegramEnabled.checked;
     url.disabled = !allowed || !healthchecksEnabled.checked;
@@ -252,24 +344,35 @@ if (typeof document !== "undefined") {
     token.required = chat.required && !saved.telegram_bot_token;
     url.required = allowed && healthchecksEnabled.checked && !saved.healthchecks_url;
   };
-  const render = (data) => {
-    saved = data;
+  const render = (data, scope = "global") => {
+    saved = { ...saved, ...data };
     allowed = configurationAccess(data);
-    telegramEnabled.checked = !!data.telegram_enabled;
-    healthchecksEnabled.checked = !!data.healthchecks_enabled;
-    bitcoinNewBlock.checked = !!(data.alert_new_block_bitcoin ?? data.alert_new_block);
-    moneroNewBlock.checked = !!data.alert_new_block_monero;
+    if (scope === "global") {
+      telegramEnabled.checked = !!data.telegram_enabled;
+      healthchecksEnabled.checked = !!data.healthchecks_enabled;
+    }
+    if (Object.hasOwn(data, "alert_new_block_bitcoin") || Object.hasOwn(data, "alert_new_block")) bitcoinNewBlock.checked = !!(data.alert_new_block_bitcoin ?? data.alert_new_block);
+    if (Object.hasOwn(data, "alert_new_block_monero")) moneroNewBlock.checked = !!data.alert_new_block_monero;
     const nodes = configuredNodeVisibility(data);
-    for (const node of allNodes) byId(`${node}-alerts`).hidden = !nodes[node];
-    for (const [node,input] of Object.entries(extraNewBlock)) { input.checked = !!data[`alert_new_block_${node}`]; input.disabled = !allowed; }
-    byId("node-alerts").hidden = !Object.values(nodes).some(Boolean);
+    for (const node of allNodes) {
+      byId(`${node}-alerts`).hidden = !nodes[node];
+      if (nodeViews[node]) nodeViews[node].card.hidden = !nodes[node];
+    }
+    for (const [node,input] of Object.entries(extraNewBlock)) {
+      if (Object.hasOwn(data, `alert_new_block_${node}`)) input.checked = !!data[`alert_new_block_${node}`];
+      input.disabled = !allowed;
+    }
     renderPortControl(data.port_control);
-    towerLabels.checked = !!data.tower_labels;
-    defaultCurrency.value = normalizeDefaultCurrency(data.default_currency);
-    applyAppearance(data);
-    token.value = data.telegram_bot_token || "";
-    chat.value = data.telegram_chat_id || "";
-    url.value = data.healthchecks_url || "";
+    if (scope === "global") {
+      towerLabels.checked = !!data.tower_labels;
+      defaultCurrency.value = normalizeDefaultCurrency(data.default_currency);
+      applyAppearance(data);
+      if (Object.hasOwn(data, "telegram_chat_id")) chat.value = data.telegram_chat_id || "";
+      if (dialog.open) {
+        if (Object.hasOwn(data, "telegram_bot_token")) token.value = data.telegram_bot_token || "";
+        if (Object.hasOwn(data, "healthchecks_url")) url.value = data.healthchecks_url || "";
+      } else clearSecrets();
+    }
     token.placeholder = "Paste your bot token";
     url.placeholder = "https://hc-ping.com/…";
     reset.disabled = !allowed || !data.overridden;
@@ -277,17 +380,8 @@ if (typeof document !== "undefined") {
     updateInputs();
     updatePortPlan();
   };
-  async function request(method = "GET", payload) {
-    const response = await fetch("/api/settings", {
-      method,
-      headers: payload ? { "Content-Type": "application/json", "X-Requested-With": "fetch" } : {},
-      ...(payload ? { body: JSON.stringify(payload) } : {}),
-    });
-    if (!response.ok) {
-      const text = (await response.text()).trim();
-      throw new Error(text.length <= 200 ? text : "Could not update settings.");
-    }
-    return response.json();
+  async function request(method = "GET", payload, scope = "global") {
+    return requestSettings(scope, method, payload);
   }
   async function requestPortControl(method = "GET", payload) {
     const response = await fetch("/api/settings/ports", {
@@ -313,23 +407,24 @@ if (typeof document !== "undefined") {
         const outcome = portSubmissionOutcome(view, changes);
         if (outcome === "queued") {
           ambiguousPortDraft = undefined;
-          status.textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
+          (ambiguousStatusTarget || status).textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
         } else if (outcome === "applied") {
           ambiguousPortDraft = undefined;
           stagedPortDraft = undefined;
           updatePortPlan(false);
-          status.textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
+          (ambiguousStatusTarget || status).textContent = settingsSaveMessage(ambiguousStatusPrefix !== "");
         } else {
           ambiguousPortDraft = undefined;
           applyPortDraft(draft);
-          status.textContent = `${ambiguousStatusPrefix}The restart request status is unknown; review the LAN port values before trying again.`;
+          (ambiguousStatusTarget || status).textContent = `${ambiguousStatusPrefix}The restart request status is unknown; review the LAN port values before trying again.`;
         }
         ambiguousStatusPrefix = "";
+        ambiguousStatusTarget = undefined;
       }
     }
-    catch { if (dialog.open) portPoll = setTimeout(loadPortControl, 2000); }
+    catch { if (dialog.open || document.body.dataset.node) portPoll = setTimeout(loadPortControl, 2000); }
   }
-  async function load() {
+  async function load(scope = "global") {
     allowed = false;
     save.disabled = reset.disabled = true;
     telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = defaultCurrency.disabled = true;
@@ -338,32 +433,37 @@ if (typeof document !== "undefined") {
     for (const input of Object.values(extraNewBlock)) input.disabled = true;
     status.textContent = "Loading…";
     try {
-      render(await request());
+      render(await request("GET", undefined, scope), scope);
       status.textContent = allowed ? "" : "Settings are unavailable.";
     }
     catch (error) { status.textContent = error.message; }
   }
-  byId("open").addEventListener("click", () => { dialog.showModal(); load(); });
+  byId("open").addEventListener("click", () => { dialog.showModal(); credentialSettings.openPassword(); load(); });
   byId("close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { clearSecrets(); clearTimeout(portPoll); });
+  dialog.addEventListener("close", () => { clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
+  window.addEventListener("node-selected", (event) => {
+    credentialSettings.closeNode();
+    if (event.detail?.node) {
+      credentialSettings.openNode();
+      load("nodes");
+    }
+  });
   telegramEnabled.addEventListener("change", updateInputs);
   healthchecksEnabled.addEventListener("change", updateInputs);
   for (const row of Object.values(portRows)) {
     for (const input of row.querySelectorAll("input")) input.addEventListener("input", () => updatePortPlan(true));
   }
 
-  const settingsPayload = () => notificationPayload({
-    telegram_enabled: telegramEnabled.checked,
-    telegram_bot_token: token.value,
-    telegram_chat_id: chat.value,
-    healthchecks_enabled: healthchecksEnabled.checked,
-    healthchecks_url: url.value,
-    alert_new_block_bitcoin: bitcoinNewBlock.checked,
-    alert_new_block_monero: moneroNewBlock.checked,
-    ...Object.fromEntries(Object.entries(extraNewBlock).map(([node,input]) => [`alert_new_block_${node}`,input.checked])),
-    tower_labels: towerLabels.checked,
-    default_currency: defaultCurrency.value,
-  });
+  const settingsPayload = (scope = "global") => scopedSettingsPayload(scope, scope === "global" ? {
+      telegram_enabled: telegramEnabled.checked,
+      telegram_bot_token: token.value,
+      telegram_chat_id: chat.value,
+      healthchecks_enabled: healthchecksEnabled.checked,
+      healthchecks_url: url.value,
+      tower_labels: towerLabels.checked,
+      default_currency: defaultCurrency.value,
+    } : { [scope === "bitcoin" ? "alert_new_block" : `alert_new_block_${scope}`]:
+      (scope === "bitcoin" ? bitcoinNewBlock : scope === "monero" ? moneroNewBlock : extraNewBlock[scope]).checked });
 
   const validatePortPlan = (changes) => {
     for (const row of Object.values(portRows)) row.querySelector("[data-port-number]").setCustomValidity("");
@@ -380,69 +480,83 @@ if (typeof document !== "undefined") {
     return true;
   };
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  const saveScope = async (scope, scopeForm, targetStatus, targetSave) => {
     if (!allowed) return;
-    const changes = updatePortPlan(true);
+    const allChanges = updatePortPlan(true);
+    const changes = scope === "global" ? [] : changesForNode(scope, allChanges);
     const draft = portDraft();
     const portPlanValid = validatePortPlan(changes);
-    const formValid = form.reportValidity();
+    const formValid = scopeForm.reportValidity();
     if (!portPlanValid || !formValid) return;
-    const payload = settingsPayload();
+    const payload = settingsPayload(scope);
     const saveNotifications = notificationChanged(saved, payload);
     if (!saveNotifications && changes.length === 0) {
-      status.textContent = "No changes.";
+      targetStatus.textContent = "No changes.";
       return;
     }
-    save.disabled = reset.disabled = true;
-    status.textContent = "Saving…";
+    targetSave.disabled = true;
+    if (scope === "global") reset.disabled = true;
+    targetStatus.textContent = "Saving…";
     let settingsView = saved;
     if (saveNotifications) {
       try {
-        settingsView = await request("POST", payload);
+        settingsView = await request("POST", payload, scope);
       } catch (error) {
         clearSecrets();
-        status.textContent = error.message;
-        save.disabled = !allowed;
+        targetStatus.textContent = error.message;
+        targetSave.disabled = !allowed;
         reset.disabled = !allowed || !saved.overridden;
         updateInputs();
+        updatePortPlan();
         return;
       }
     }
     if (changes.length === 0) {
-      render(settingsView);
-      status.textContent = "Settings saved.";
+      render(settingsView, scope);
+      targetStatus.textContent = "Settings saved.";
       return;
     }
+    render(settingsView, scope);
+    submittedPortNode = scope;
     try {
       const portView = await requestPortControl("POST", { changes });
-      render(settingsView);
       if (/^[0-9a-f]{32}$/.test(String(portView?.status?.id || ""))) {
         portRequestID = portView.status.id;
         try { localStorage.setItem("nodeStackPortRequest", portRequestID); } catch {}
       }
       renderPortControl(portView);
-      status.textContent = settingsSaveMessage(saveNotifications);
+      targetStatus.textContent = portStatusMessage(portControlModel(portView)) || settingsSaveMessage(saveNotifications);
     } catch (error) {
-      render(settingsView);
       applyPortDraft(draft);
       const prefix = saveNotifications ? "Settings saved, but " : "";
       if (error.definitive) {
-        status.textContent = `${prefix}LAN port changes were rejected: ${error.message}`;
+        submittedPortNode = "";
+        targetStatus.textContent = `${prefix}LAN port changes were rejected: ${error.message}`;
       } else {
         ambiguousPortDraft = { draft, changes };
         ambiguousStatusPrefix = saveNotifications ? "Settings saved. " : "";
-        status.textContent = `${ambiguousStatusPrefix}Checking whether the restart was queued…`;
+        ambiguousStatusTarget = targetStatus;
+        targetStatus.textContent = `${ambiguousStatusPrefix}Checking whether the restart was queued…`;
         loadPortControl();
       }
     }
+  };
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveScope("global", form, status, save);
   });
+  for (const [node, view] of Object.entries(nodeViews)) {
+    view.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveScope(node, view.form, view.status, view.save);
+    });
+  }
   reset.addEventListener("click", async () => {
     if (!allowed) return;
     save.disabled = reset.disabled = true;
     status.textContent = "Saving…";
     try {
-      render(await request("POST", { reset: true }));
+      render(await request("POST", { reset: true }), "global");
       status.textContent = "Using the server configuration.";
     } catch (error) {
       status.textContent = error.message;
@@ -454,4 +568,6 @@ if (typeof document !== "undefined") {
     .then((response) => response.ok ? response.json() : Promise.reject())
     .then(applyAppearance)
     .catch(() => applyAppearance({}));
+  credentialSettings.start();
+  load("nodes");
 }

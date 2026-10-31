@@ -18,6 +18,8 @@ test("view-only JSON accepts only a public spend key and private view key", () =
   assert.throws(() => tariWalletImport({ ...input, birthday: "2027-01-01" }, "2026-10-31"), /Birthday/);
   assert.throws(() => tariWalletImport({ ...input, birthday: 20240101 }, "2026-10-31"), /Birthday/);
   assert.equal(tariWalletImport({ ...input, birthday: "" }, "2026-10-31").birthday, "");
+  assert.equal(tariWalletImport({ public_spend_key: input.public_spend_key, view_key: input.view_key }, "2026-10-31").name, "Tari wallet");
+  assert.throws(() => tariWalletImport({ ...input, name: 3 }, "2026-10-31"), /name/);
 });
 
 test("pending and failed scans never display an unverified zero balance", () => {

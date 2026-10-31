@@ -51,8 +51,11 @@ test("snapshot charts preserve single-atomic-unit changes at large balances", ()
 test("view-only JSON accepts a private view key and rejects spend keys or seeds", () => {
   const value = { address: "4".repeat(95), view_key: "a".repeat(64), restore_height: 10 };
   assert.equal(walletImport(value).restore_height, 10);
+  assert.equal(walletImport(value).name, "Monero wallet");
+  assert.equal(walletImport({ ...value, name: " Cold " }).name, "Cold");
   assert.throws(() => walletImport({ ...value, spendkey: "b".repeat(64) }));
   assert.throws(() => walletImport({ ...value, seed: "words" }));
+  assert.throws(() => walletImport({ ...value, name: 3 }));
   assert.throws(() => walletImport({ ...value, restore_height: -1 }));
 });
 

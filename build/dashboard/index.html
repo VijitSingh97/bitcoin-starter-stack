@@ -380,6 +380,14 @@
           <option>AUD</option><option>JPY</option><option>RUB</option><option>CNY</option>
         </select></label>
       </fieldset>
+      <fieldset id="settings-dashboard-password">
+        <legend>Dashboard password</legend>
+        <label>Current password<input id="settings-password-old" type="password" autocomplete="current-password" maxlength="256"></label>
+        <label>New password<input id="settings-password-new" type="password" autocomplete="new-password" minlength="12" maxlength="128"></label>
+        <label>Repeat new password<input id="settings-password-repeat" type="password" autocomplete="new-password" minlength="12" maxlength="128"></label>
+        <div class="settings-actions"><button id="settings-password-save" type="button">Change password</button><button id="settings-password-reload" type="button" hidden>Reload and sign in</button></div>
+        <p id="settings-password-status" class="settings-note" role="status" aria-live="polite"></p>
+      </fieldset>
       <fieldset id="settings-telegram">
         <legend>Telegram</legend>
         <label class="settings-check"><input id="settings-telegram-enabled" type="checkbox"> Enable Telegram alerts</label>
@@ -391,18 +399,18 @@
         <label class="settings-check"><input id="settings-healthchecks-enabled" type="checkbox"> Enable Healthchecks pings</label>
         <label>HTTPS ping URL<input id="settings-healthchecks-url" type="url" autocomplete="off" maxlength="2048"></label>
       </fieldset>
-      <fieldset id="settings-node-alerts">
+      <fieldset id="settings-node-alerts" hidden>
         <legend>Node settings</legend>
         <details id="settings-bitcoin-alerts"><summary>Bitcoin</summary>
           <label class="settings-check"><input id="settings-bitcoin-new-block" type="checkbox"> Alert on each new block (about 144 per day)</label>
-          <div id="settings-port-bitcoin-rpc" class="settings-port">
+          <div id="settings-port-bitcoin-rpc" class="settings-port" data-credential-node="bitcoin">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
             <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
         </details>
         <details id="settings-monero-alerts"><summary>Monero</summary>
           <label class="settings-check"><input id="settings-monero-new-block" type="checkbox"> Alert on each new block (about 720 per day)</label>
-          <div id="settings-port-monero-rpc" class="settings-port">
+          <div id="settings-port-monero-rpc" class="settings-port" data-credential-node="monero">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
             <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
@@ -417,25 +425,32 @@
         </details>
         <details id="settings-litecoin-alerts"><summary>Litecoin</summary>
           <label class="settings-check"><input id="settings-litecoin-new-block" type="checkbox"> Alert on each new block</label>
-          <div id="settings-port-litecoin-rpc" class="settings-port"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
+          <div id="settings-port-litecoin-rpc" class="settings-port" data-credential-node="litecoin"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-dogecoin-alerts"><summary>Dogecoin</summary>
           <label class="settings-check"><input id="settings-dogecoin-new-block" type="checkbox"> Alert on each new block</label>
-          <div id="settings-port-dogecoin-rpc" class="settings-port"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
+          <div id="settings-port-dogecoin-rpc" class="settings-port" data-credential-node="dogecoin"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-bitcoincash-alerts"><summary>Bitcoin Cash</summary>
           <label class="settings-check"><input id="settings-bitcoincash-new-block" type="checkbox"> Alert on each new block</label>
-          <div id="settings-port-bitcoincash-rpc" class="settings-port"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
+          <div id="settings-port-bitcoincash-rpc" class="settings-port" data-credential-node="bitcoincash"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-zcash-alerts"><summary>Zcash</summary>
           <label class="settings-check"><input id="settings-zcash-new-block" type="checkbox"> Alert on each new block</label>
-          <div id="settings-port-zcash-rpc" class="settings-port"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose read-only RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
+          <div id="settings-port-zcash-rpc" class="settings-port" data-credential-node="zcash"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose read-only RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
       </fieldset>
-      <p id="settings-port-status" class="settings-note" role="status" aria-live="polite"></p>
-      <p id="settings-port-impact" class="settings-note" hidden>Will restart services: Tor relay, dashboard.</p>
       <div class="settings-actions"><button id="settings-save" type="submit">Save</button><button id="settings-reset" type="button">Use server config</button></div>
       <p id="settings-status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
+  <dialog id="credential-reset-dialog" class="settings-dialog" aria-labelledby="credential-reset-title">
+    <form id="credential-reset-form">
+      <div class="settings-heading"><h2 id="credential-reset-title">Reset node password?</h2></div>
+      <p id="credential-reset-description"></p>
+      <label>Type <b>reset</b> to confirm<input id="credential-reset-confirm" type="text" autocomplete="off" spellcheck="false"></label>
+      <p id="credential-reset-error" class="node-state" role="status" aria-live="polite"></p>
+      <div class="settings-actions"><button type="button" id="credential-reset-cancel">Cancel</button><button type="submit" id="credential-reset-submit" disabled>Reset password</button></div>
     </form>
   </dialog>
   <dialog id="node-power-dialog" class="settings-dialog" aria-labelledby="node-power-title">

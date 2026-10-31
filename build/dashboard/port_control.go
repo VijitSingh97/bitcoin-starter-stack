@@ -182,7 +182,7 @@ func affectedPortServices() []string {
 }
 
 func (a *app) portControlAvailable() bool {
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		return false
 	}
 	path := a.portControlPath("capability")
@@ -338,7 +338,7 @@ func validatePortControlChanges(input portControlInput, ports []portControlPort)
 
 func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if a.cfg.dashboardPassword == "" {
+	if !a.hasDashboardPassword() {
 		http.Error(w, "a dashboard password is required for port control", http.StatusForbidden)
 		return
 	}
@@ -362,9 +362,9 @@ func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a.portControlMu.Lock()
-	defer a.portControlMu.Unlock()
-	if _, pending := a.pendingPortControl(); pending {
+	a.controlMu.Lock()
+	defer a.controlMu.Unlock()
+	if a.controlRequestPending() {
 		http.Error(w, errPortControlBusy.Error(), http.StatusConflict)
 		return
 	}

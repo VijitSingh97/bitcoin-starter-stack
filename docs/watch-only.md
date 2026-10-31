@@ -15,11 +15,12 @@ your balance and derive your addresses, but it has no private keys and
 
 The dashboard has a **Watch-only balances** card with an add form:
 
-1. **Label** — any name you like (e.g. "Cold storage").
+1. **Label** (optional) — any name you like; the dashboard picks the first free
+   `Wallet N` name when omitted.
 2. **Key** — an extended public key, public output descriptor, or address (see below).
    For a bare `xpub`, choose the address type your wallet uses.
-3. **Birthday** (optional) — retained for existing Core-wallet imports. It does
-   not make the default pruned UTXO-set scan faster.
+3. **Birthday** (optional, archival nodes only) — bounds a Core rescan. The
+   default pruned UTXO-set scan does not show or use it.
 
 Click **Add**. On the default pruned node, the row stays pending while Bitcoin
 Core's `scantxoutset` checks the live UTXO set, then shows the confirmed balance
@@ -60,7 +61,8 @@ entries. Fresh Bitcoin state includes one clearly marked public example; see
 
 ## Litecoin and Bitcoin Cash addresses
 
-The Litecoin and Bitcoin Cash cards accept a label and one public address. After
+The Litecoin and Bitcoin Cash cards require one public address; the optional
+label defaults to **Litecoin wallet** or **Bitcoin Cash wallet**. After
 the node is fully synced, the dashboard validates the address with that daemon and
 runs its native `scantxoutset` call. The result is a confirmed UTXO snapshot at the
 displayed scan height, not transaction history. Extended public keys, descriptors,
@@ -87,9 +89,9 @@ persistent; restarting the dashboard does not add it back.
 A Monero address alone cannot reveal incoming outputs. Open the Monero card,
 then use **View-only wallets**:
 
-1. Enter a label, the primary mainnet address, the private view key, and an
-   optional restore height. Use `0` when unsure; it scans safely from genesis but
-   takes longer.
+1. Enter the primary mainnet address and private view key. The optional label
+   defaults to **Monero wallet**. Under **Scan options**, restore height defaults
+   to `0`, which scans safely from genesis but takes longer.
 2. Or paste JSON in this form:
 
    ```json
@@ -148,10 +150,10 @@ into an existing wallet roster.
 
 The Tari card manages one native view-only wallet alongside the pruned base node:
 
-1. Enter a name, the 64-character public spend key, and the 64-character private
-   view key.
-2. Optionally select a birthday from `2022-01-01` through today. Leave it blank
-   to scan from genesis.
+1. Enter the 64-character public spend key and 64-character private view key.
+   The optional name defaults to **Tari wallet**.
+2. Under **Scan options**, birthday is optional from `2022-01-01` through today
+   and defaults to blank, which scans from genesis.
 3. Or upload strict JSON with only these fields:
 
    ```json

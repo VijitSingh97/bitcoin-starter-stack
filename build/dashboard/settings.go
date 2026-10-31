@@ -301,10 +301,37 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 }
 
 func (m *Monitor) updateSettings(update settingsUpdate) error {
+	return m.updateSettingsScope(update, "")
+}
+
+func (m *Monitor) updateSettingsScope(update settingsUpdate, scope string) error {
 	m.settingsMu.Lock()
 	defer m.settingsMu.Unlock()
 	if m.settingsErr != nil {
 		return ErrSettingsUnavailable
+	}
+	if scope != "" {
+		if scope != "global" && scope != "nodes" || len(update.present) == 0 {
+			return ErrSettingsInvalid
+		}
+		for field := range update.present {
+			isAlert := field == "alert_new_block" || strings.HasPrefix(field, "alert_new_block_")
+			if isAlert != (scope == "nodes") || field == "reset" {
+				return ErrSettingsInvalid
+			}
+		}
+		if update.TelegramEnabled == nil {
+			update.TelegramEnabled = &m.settings.TelegramEnabled
+		}
+		if update.TelegramChatID == nil {
+			update.TelegramChatID = &m.settings.TelegramChatID
+		}
+		if update.HealthchecksEnabled == nil {
+			update.HealthchecksEnabled = &m.settings.HealthchecksEnabled
+		}
+		if update.AlertNewBlock == nil {
+			update.AlertNewBlock = &m.settings.AlertNewBlock
+		}
 	}
 	next, err := update.apply(m.settings)
 	if err != nil {
@@ -394,7 +421,7 @@ func passwordlessSettingsHostAllowed(authority string) bool {
 }
 
 func (a *app) rejectUnsafeSettingsHost(w http.ResponseWriter, r *http.Request) bool {
-	if a.cfg.dashboardPassword != "" || passwordlessSettingsHostAllowed(r.Host) {
+	if a.hasDashboardPassword() || passwordlessSettingsHostAllowed(r.Host) {
 		return false
 	}
 	http.Error(w, "passwordless notification settings require a local dashboard address", http.StatusForbidden)
@@ -419,6 +446,11 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view["port_control"] = a.portControlView()
+	if r.URL.Query().Get("scope") == "nodes" {
+		delete(view, "telegram_bot_token")
+		delete(view, "telegram_chat_id")
+		delete(view, "healthchecks_url")
+	}
 	writeJSON(w, view)
 }
 
@@ -443,7 +475,7 @@ func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
 		}
 		err = a.monitor.resetSettings()
 	} else {
-		err = a.monitor.updateSettings(update)
+		err = a.monitor.updateSettingsScope(update, r.URL.Query().Get("scope"))
 	}
 	if errors.Is(err, ErrSettingsInvalid) {
 		http.Error(w, "invalid notification settings", http.StatusBadRequest)
@@ -459,5 +491,10 @@ func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view["port_control"] = a.portControlView()
+	if r.URL.Query().Get("scope") == "nodes" {
+		delete(view, "telegram_bot_token")
+		delete(view, "telegram_chat_id")
+		delete(view, "healthchecks_url")
+	}
 	writeJSON(w, view)
 }

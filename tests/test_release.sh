@@ -23,6 +23,7 @@ git cat-file -e HEAD:scripts/node-port-control 2>/dev/null && runtime_helpers="s
 for required in stack configure.sh docker-compose.yml docker-compose.rpc.yml config.example.json VERSION \
   .dockerignore .gitignore README.md CHANGELOG.md LICENSE SECURITY.md \
   build/dashboard/Dockerfile build/dashboard/go.mod build/dashboard/main.go build/dashboard/settings.go \
+  build/dashboard/auth.go build/dashboard/credentials.go build/dashboard/static/credentials.js \
   build/dashboard/index.html build/dashboard/THIRD_PARTY_NOTICES build/dashboard/static/watch.js \
   build/dashboard/static/prices.js build/dashboard/static/settings.js build/tor/Dockerfile build/tor/entrypoint.sh build/tor/torrc \
   build/monero/Dockerfile build/monero/entrypoint.sh build/monero/healthcheck.sh \
