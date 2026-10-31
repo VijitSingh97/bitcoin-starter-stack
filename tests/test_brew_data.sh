@@ -77,6 +77,29 @@ case "${1:-}:${2:-}" in
   run:*) [ "${FAKE_RUN_FAIL:-0}" != 1 ] ;;
 esac
 EOF
+cat >"$fake_bin/brew" <<'EOF'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >>"$FAKE_BREW_LOG"
+[ "$*" = "services start bitcoin-starter-stack" ]
+EOF
+cat >"$fake_bin/systemctl" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+cat >"$fake_bin/crontab" <<'EOF'
+#!/bin/sh
+cat >/dev/null || true
+exit 1
+EOF
+cat >"$fake_bin/pgrep" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+cat >"$fake_bin/setsid" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$FAKE_HOST_LOG"
+EOF
 chmod +x "$fake_bin"/*
 
 new_case() {
@@ -109,14 +132,20 @@ EOF
   export BITCOIN_STACK_ROOT=$repo BITCOIN_STACK_STATE_DIR=$state BITCOIN_STACK_CONFIG_DIR=$config
   export BITCOIN_STACK_DATA_DIR=$data BITCOIN_STACK_PACKAGE_MANAGED=brew
   export BITCOIN_STACK_PROJECT_NAME=brew-data-test FAKE_DOCKER_LOG=$case_root/docker.log
+  export FAKE_BREW_LOG=$case_root/brew.log FAKE_HOST_LOG=$case_root/host.log
   export PATH=$fake_bin:$system_path
   export FAKE_UNAME=Linux FAKE_OWNERS_MATCH=0 FAKE_IMAGE_MISSING=0 FAKE_RUN_FAIL=0 FAKE_FIND_FAIL=0 FAKE_SLEEP_TERMINATE=0
   unset FAKE_ESCAPE_NODE FAKE_DIRECTORY_MODE
   : >"$FAKE_DOCKER_LOG"
+  : >"$FAKE_BREW_LOG"
+  : >"$FAKE_HOST_LOG"
+  [ "$(command -v brew)" = "$fake_bin/brew" ] || fail "test harness can reach the real Homebrew service manager"
+  [ "$(command -v setsid)" = "$fake_bin/setsid" ] || fail "test harness can launch a real background service"
 }
 
 new_case fresh
 ./stack up
+grep -qx 'services start bitcoin-starter-stack' "$FAKE_BREW_LOG" || fail "Homebrew startup did not register the host supervisor"
 run_line=$(grep '^docker <run>' "$FAKE_DOCKER_LOG")
 for flag in '<--network> <none>' '<--read-only>' '<--security-opt> <no-new-privileges>' \
   '<--cap-drop> <ALL>' '<--cap-add> <CHOWN>' '<--cap-add> <DAC_READ_SEARCH>' '<--cap-add> <FOWNER>' \

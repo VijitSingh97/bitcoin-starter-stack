@@ -61,10 +61,10 @@ approve_current_config() {
   else
     printf '{}\n' >"$target"
   fi
-  cp "$env_file" "$env_target" && chmod 600 "$target" "$env_target" || {
+  if ! cp "$env_file" "$env_target" || ! chmod 600 "$target" "$env_target"; then
     rm -f "$target" "$env_target"
     return 1
-  }
+  fi
   config_backup=$(mktemp "$state_dir/.approved-config.backup.XXXXXX") || {
     rm -f "$target" "$env_target"
     return 1

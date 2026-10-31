@@ -67,7 +67,7 @@ for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
 done
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
-[ "$(grep -c 'restart: \${STACK_RESTART_POLICY:-on-failure:5}' docker-compose.yml)" = 11 ] || fail "not every application container uses the launch policy"
+[ "$(grep -Fc "restart: \${STACK_RESTART_POLICY:-on-failure:5}" docker-compose.yml)" = 11 ] || fail "not every application container uses the launch policy"
 [ "$(echo "$rendered" | grep -c 'restart: on-failure:5')" = 3 ] || fail "active containers do not use bounded crash recovery"
 [ "$(echo "$restart_rendered" | grep -c 'restart: unless-stopped')" = 3 ] || fail "launch-at-boot policy did not reach active containers"
 grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"

@@ -156,7 +156,9 @@ jq -e '.install_supported and (.boot_supported|not) and (.boot_enabled|not) and 
 request '{"action":"install","id":"66666666666666666666666666666666","node":"litecoin","requested_at":1000}'
 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ "$(jq -r '.litecoin.enabled and .litecoin.active and (.litecoin.rpc_expose|not) and .litecoin.steady_cpus==0.75 and .litecoin.steady_mem_limit_mb==3072 and .litecoin.data_dir=="/preset/litecoin"' "$config/config.json")" = true ] || fail "safe Litecoin defaults did not preserve preset settings"
-[ "$(status .action)" = install ] && [ "$(status .state)" = applied ] || fail "install status was not applied"
+if [ "$(status .action)" != install ] || [ "$(status .state)" != applied ]; then
+  fail "install status was not applied"
+fi
 grep -qx pull "$tmp/stack.log" || fail "install did not use the normal image pull"
 request '{"action":"install","id":"66666666666666666666666666666666","node":"litecoin","requested_at":1000}'
 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
@@ -187,8 +189,12 @@ printf '%s\n' '{"action":"install","id":"69696969696969696969696969696969","node
 FAKE_DASHBOARD_MISSING=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ -d "$state/node-control/install-transaction" ] || fail "headless applied recovery discarded its completion record"
 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
-[ "$(status .id)" = 69696969696969696969696969696969 ] && [ "$(status .state)" = applied ] || fail "applied install recovery did not finalize the original request"
-[ ! -e "$state/node-control/install-transaction" ] && [ ! -e "$dashboard_state/node-control.processing" ] || fail "applied install recovery was not finalized"
+if [ "$(status .id)" != 69696969696969696969696969696969 ] || [ "$(status .state)" != applied ]; then
+  fail "applied install recovery did not finalize the original request"
+fi
+if [ -e "$state/node-control/install-transaction" ] || [ -e "$dashboard_state/node-control.processing" ]; then
+  fail "applied install recovery was not finalized"
+fi
 
 request '{"action":"launch_at_boot","enabled":true,"id":"76767676767676767676767676767676","requested_at":1000}'
 FAKE_DOCKER_UPDATE_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
