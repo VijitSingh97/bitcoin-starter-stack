@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
-# Boots the real stack through the DOCUMENTED setup path: piped answers to
-# ./stack init write config.json, a jq edit customizes it (the documented
-# edit-then-apply loop), configure.sh renders .env with auto-generated RPC
-# credentials, and docker compose boots from that .env. Then asserts the
-# wiring end to end: bitcoind accepts the rpcauth-hashed credentials over
-# RPC, the plaintext password never enters the bitcoin container, the
-# inbound onion service comes up, and the dashboard enforces its auth.
-# With E2E_SYNC=1 it additionally proves sync STARTS (onion-only peers
-# found, headers advancing — not the whole sync) for BOTH setup paths:
-# the wizard config it booted with, and a second zero-config boot (bare
-# ./stack up). Real Tor traffic, takes minutes, so it's opt-in (off in
-# CI; run it on real hardware). Post-sync behavior on an already-synced
-# node is tests/test_postsync.sh.
+# Boots a preseeded stack and verifies node auth, Tor-only wiring, onion ingress, and dashboard auth end to end.
+# E2E_SYNC=1 also verifies preseeded and zero-config sync starts over real Tor; it is slow and opt-in.
+# Post-sync behavior on an already-synced node is covered by tests/test_postsync.sh.
 # This is the test that catches config-plumbing bugs the static contract
 # test can't.
 #
@@ -27,8 +17,8 @@ if [ -z "${CI:-}" ] && [ -z "${RUN_E2E:-}" ]; then
 fi
 
 # Never clobber a real deployment: a production checkout has these files.
-if [ -f config.json ] || [ -f .env ]; then
-  echo "FAIL: config.json/.env already exist — run the e2e from a clean checkout"
+if [ -f config.json ] || [ -f .env ] || [ -f .approved-config.json ] || [ -f .approved.env ]; then
+  echo "FAIL: runtime configuration already exists — run the e2e from a clean checkout"
   exit 1
 fi
 
@@ -54,16 +44,10 @@ cleanup() {
   rmdir "$BITCOIN_DATA_DIR" 2>/dev/null || true
   rmdir "$MONERO_DATA_DIR" 2>/dev/null || true
   rmdir "$WALLET_DATA_DIR" 2>/dev/null || true
-  rm -f config.json .env # created by this test (guarded above)
+  rm -f config.json .env .approved-config.json .approved.env # created by this test (guarded above)
 }
 trap cleanup EXIT
 
-# Setup exactly as a user does it: both nodes, default Bitcoin storage,
-# upgrade button n, LAN relays n, prune Bitcoin to 1 GB, and don't start yet.
-printf 'e2eDashboardSharedPassword123\nboth\n\nn\n\nn\n1\n%s\nn\nn\nn\n' "$MONERO_DATA_DIR" | ./stack init >/dev/null
-# The documented customize loop: edit config.json, re-render. Point the
-# datadir at the temp dir, bind the dashboard to this host's LAN address, and
-# shrink dbcache for CI-sized runners.
 host_ip=$(python3 - <<'PY'
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -77,14 +61,44 @@ if [ "$(uname -s)" = Darwin ] && [ ! -S /var/run/com.docker.vmnetd.sock ]; then
   host_ip=127.0.0.1
   test_lan_rpc=false
 fi
-jq --arg d "$BITCOIN_DATA_DIR" --arg ip "$host_ip" --argjson lan_rpc "$test_lan_rpc" \
-  '.bitcoin.data_dir = $d | .bitcoin.dbcache_mb = 300 | .bitcoin.inbound_onion = true | .dashboard.onion = true | .dashboard.bind_ip = $ip |
+jq -n --arg bitcoin_data "$BITCOIN_DATA_DIR" --arg monero_data "$MONERO_DATA_DIR" \
+  --arg ip "$host_ip" --argjson lan_rpc "$test_lan_rpc" \
+  '{
+    bitcoin: {
+      enabled: true,
+      node_username: "admin",
+      node_password: "e2eBitcoinRpcPassword123456789",
+      data_dir: $bitcoin_data,
+      dbcache_mb: 300,
+      prune_mb: 1000,
+      inbound_onion: true
+    },
+    monero: {
+      enabled: true,
+      node_username: "admin",
+      node_password: "e2eMoneroRpcPassword123456789",
+      data_dir: $monero_data
+    },
+    dashboard: {
+      password: "e2eDashboardSharedPassword123",
+      onion: true,
+      bind_ip: $ip,
+      launch_at_boot: false
+    }
+  } |
    if $lan_rpc then
      .bitcoin.rpc_expose = true | .bitcoin.rpc_bind_ip = $ip | .bitcoin.rpc_port = 18332 |
      .monero.rpc_expose = true | .monero.rpc_bind_ip = $ip | .monero.rpc_port = 28081
-   else . end' \
-  config.json >config.json.tmp && mv config.json.tmp config.json
+   else . end' >config.json
+chmod 600 config.json
 ./configure.sh >/dev/null
+test_stack_version=$(sed -n 's/^STACK_VERSION=//p' .env)
+[ -n "$test_stack_version" ] || fail "configure.sh did not render STACK_VERSION"
+STACK_VERSION="$test_stack_version" docker compose build tor monero monero-wallet dashboard >/dev/null ||
+  fail "local E2E images did not build"
+STACK_VERSION="$test_stack_version" docker compose pull bitcoin >/dev/null ||
+  fail "pinned Bitcoin image did not download"
+./stack init >/dev/null || fail "preseeded first-run initialization failed"
 dashboard_url="http://$host_ip:80"
 
 # The credentials the setup generated — every later assertion uses these.
@@ -105,7 +119,7 @@ wallet_rpc() {
     --data-binary @- http://127.0.0.1:18082/json_rpc
 }
 
-docker compose up -d --build --wait --wait-timeout 300 ||
+docker compose up -d --pull never --no-build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"
 # --wait passing also proves the cookie-based bitcoin healthcheck works
 docker exec dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*_test.go" -o -name tests -o -name parity)"' ||
@@ -457,26 +471,24 @@ sync_starts() { # $1: label for messages
 }
 
 if [ -n "${E2E_SYNC:-}" ]; then
-  sync_starts "wizard setup"
+  sync_starts "preseeded setup"
 
   # Second setup variant: the headline ZERO-CONFIG path — no config.json at
-  # all, exactly what a bare ./stack up renders. Tear the wizard stack down
+  # all, exactly what a bare ./stack up renders. Tear the preseeded stack down
   # (cleanup between phases), boot from configure.sh defaults, and prove
   # sync starts there too. Images are already built; only the datadir is
   # redirected at the temp dir so cleanup stays single-path.
   docker compose down -v --remove-orphans >/dev/null 2>&1
-  rm -f config.json .env
+  rm -f config.json .env .approved-config.json .approved.env
   docker run --rm -v "$BITCOIN_DATA_DIR":/cleanup alpine:3.24 sh -c 'rm -rf /cleanup/* /cleanup/.[!.]*' >/dev/null 2>&1 || true
   ./configure.sh >/dev/null # zero-config: defaults + auto-generated creds
   sed -i.bak "s|^BITCOIN_DATA_DIR=.*|BITCOIN_DATA_DIR=$BITCOIN_DATA_DIR|" .env && rm -f .env.bak
-  docker compose up -d --wait --wait-timeout 300 ||
+  ./stack up >/dev/null || fail "zero-config: startup failed"
+  docker compose up -d --pull never --no-build --wait --wait-timeout 300 ||
     fail "zero-config: stack did not reach healthy"
-  dashboard_url=http://127.0.0.1:80
+  dashboard_url="http://$(sed -n 's/^DASHBOARD_BIND_IP=//p' .env):80"
   code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
-  [ "$code" = "401" ] || fail "zero-config: dashboard did not require its generated password (HTTP $code)"
-  zero_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' .env)
-  curl --noproxy '*' -sf -u "admin:$zero_password" "$dashboard_url" >/dev/null ||
-    fail "zero-config: generated shared password did not open the dashboard"
+  [ "$code" = "200" ] || fail "zero-config: passwordless dashboard was not reachable (HTTP $code)"
   sync_starts "zero-config setup"
 else
   echo "  (sync-start checks skipped — set E2E_SYNC=1 to include them)"
