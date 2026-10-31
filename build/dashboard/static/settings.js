@@ -332,6 +332,7 @@ if (typeof document !== "undefined") {
     clearTimeout(portPoll);
     if (shouldPollPort(dialog.open || !!document.body.dataset.node, view.state)) portPoll = setTimeout(loadPortControl, 2000);
     updatePortPlan();
+    if (requestMatches && view.state === "applied" && document.body.dataset.node) credentialSettings.openNode();
     if (view.state && view.state !== "pending") submittedPortNode = "";
     return view;
   };
