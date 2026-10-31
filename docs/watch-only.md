@@ -152,9 +152,36 @@ Dogecoin's current pruned daemon cannot discover arbitrary address UTXOs, and
 Zakura's default checkpoint-pruned mode omits the address index. The dashboard
 does not query an external explorer to fill those gaps.
 
+**Dogecoin:** an address watched before initial sync or before its first payment
+can be tracked going forward. Adding an old address to an already-pruned node
+cannot establish its full balance: `importaddress` refuses a historical rescan,
+and skipping the rescan can miss older unspent funds. Upstream's proposed
+[UTXO scanner](https://github.com/dogecoin/dogecoin/pull/3665) remains unmerged
+as of October 31, 2026. Its current RPC requires a private spending key, so it
+also fails this dashboard's public-key-only requirement. A full archival rescan or a separately built address
+index would be needed with the current released daemon.
+
+**Zcash / Zakura:** this is a limitation of our current storage profile, not a
+claim that every pruned Zcash implementation lacks wallet support. Zakura 1.7.0
+can retain transparent address indexes while pruning transaction bodies, but
+requires a fresh database with checkpoint sync disabled. Upstream describes
+that mode as slower and less secure against some chain attacks; it also retains
+extra indexes with no published sizing estimate. We keep the default profile.
+See the [release notes](https://github.com/zakura-core/zakura/releases/tag/v1.7.0)
+and [checkpoint configuration](https://github.com/zakura-core/zakura/blob/v1.7.0/crates/zakura-consensus/src/config.rs).
+Shielded addresses additionally need a viewing key and wallet scanner; a public
+address alone is insufficient. Zallet and lightwalletd are separate wallet/index
+services, not a small switch that enables balances in our existing database.
+
 Tari has no bundled public example. Its view-only flow requires a separate wallet
 service plus a public spend key, private view key, and birthday; the current stack
-only runs the Tari node.
+only runs the Tari node. Pruning itself does not prevent a current balance:
+Tari retains live unspent outputs and supports scanning them through its
+[UTXO synchronization service](https://github.com/tari-project/tari/blob/v6.1.0/base_layer/core/src/base_node/sync/rpc/sync_utxos_task.rs).
+Adding a view-only wallet service is therefore feasible without an archival node,
+but cannot recover complete history for spent outputs that were already pruned.
+The [view-only initializer](https://github.com/tari-project/tari/blob/v6.1.0/applications/minotari_console_wallet/src/init/mod.rs)
+stores no private spend key.
 
 ## Bitcoin: the Genesis address is a special case
 

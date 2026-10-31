@@ -409,22 +409,26 @@ if (typeof document !== "undefined") {
         if (scene.node) {
           const startHighlight = previewHighlight[scene.node];
           const startTw = baseTw * (1 + 0.12 * startHighlight);
-          if (amount < 0.99) for (const other of drawOrder.filter((node) => node !== scene.node)) {
-            drawTower(other, overviewX(other), overviewY(other), baseTw, overviewDepth(other), fill, pulse, 0,
-              (activeNode(other) ? 1 : 0.62) * (1 - amount));
-          }
           const anchorY = overviewY(scene.node) + (focusedY - overviewY(scene.node)) * amount;
           const tw = startTw + (focusedTw - startTw) * amount;
-          drawTower(
-            scene.node,
-            overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount,
-            anchorY,
-            tw,
-            sceneDepth(H, anchorY, tw, overviewY(scene.node), baseTw),
-            fill,
-            pulse,
-            startHighlight + (1 - startHighlight) * amount,
-          );
+          for (const node of drawOrder) {
+            if (node === scene.node) {
+              drawTower(
+                node,
+                overviewX(node) + (focusedX - overviewX(node)) * amount,
+                anchorY,
+                tw,
+                sceneDepth(H, anchorY, tw, overviewY(node), baseTw),
+                fill,
+                pulse,
+                startHighlight + (1 - startHighlight) * amount,
+                activeNode(node) ? 1 : 0.62 + 0.38 * amount,
+              );
+            } else {
+              drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
+                (activeNode(node) ? 1 : 0.62) * (1 - amount));
+            }
+          }
         } else {
           for (const node of drawOrder) drawTower(node, overviewX(node), overviewY(node), baseTw, overviewDepth(node), fill, pulse, 0,
             activeNode(node) ? 1 : 0.62);
