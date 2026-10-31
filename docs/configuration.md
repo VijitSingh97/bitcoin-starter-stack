@@ -397,7 +397,8 @@ The Appearance section includes **Label towers**, off by default. It saves the
 appearance preference in the same private dashboard override file, so it
 survives restarts. With labels enabled, each tower shows its coin price and
 the next block number above it. Installed towers arrange themselves to fit the
-screen and build upward in cube layers with each node's sync progress. Their
+screen and build upward in cube layers with each node's sync progress.
+Shorter syncing towers take foreground positions to keep each node visible. The
 bases continue below the screen; a temporary connection failure keeps the last
 known height. Deactivated nodes remain visible in grey.
 **Default currency** starts at USD and applies to those prices and to a panel

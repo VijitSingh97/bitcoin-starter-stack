@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, retainedBlockFill, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, assignOverviewSlots, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
 
-test("a layer is 12x12 = 144 blocks (~one day)", () => {
+test("a layer is 12x12 = 144 blocks", () => {
   assert.equal(GRID, 12);
   assert.equal(PER_LAYER, 144);
 });
@@ -14,10 +14,10 @@ test("gridCell fills row by row, back to front", () => {
   assert.deepEqual(gridCell(143), { gx: 11, gy: 11 });
 });
 
-test("isRollover fires only on a big drop (new day / restart), not a wobble", () => {
-  assert.equal(isRollover(0, 140), true); // midnight: 140 -> 0
-  assert.equal(isRollover(5, 140), true); // restart mid-day
-  assert.equal(isRollover(139, 140), false); // a reorg of a block or two
+test("isRollover fires only when the block layer wraps, not on a wobble", () => {
+  assert.equal(isRollover(0, 140), true);
+  assert.equal(isRollover(5, 140), true);
+  assert.equal(isRollover(139, 140), false);
   assert.equal(isRollover(141, 140), false); // still climbing
 });
 
@@ -27,30 +27,29 @@ test("nextDisplayed snaps down on a dip and never overshoots up", () => {
   assert.equal(nextDisplayed(100, 101, 100000), 101);
 });
 
-test("nextDisplayed catches up a big gap (fresh page mid-day)", () => {
-  const after = nextDisplayed(0, 100, 1000); // gap 100 > 24 -> 0.06/ms
+test("nextDisplayed catches up a large block gap", () => {
+  const after = nextDisplayed(0, 100, 1000);
   assert.equal(after, 60);
 });
 
-test("nextDisplayed drifts a single new block in over ~0.8s", () => {
+test("nextDisplayed drifts a new block in over ~0.8s", () => {
   assert.ok(Math.abs(nextDisplayed(50, 51, 800) - 51) < 1e-9);
   assert.ok(nextDisplayed(50, 51, 400) < 51);
 });
 
-test("expectedFill: one cube per 10 UTC minutes, capped at a full day", () => {
-  assert.equal(expectedFill(0), 0);       // 00:00
-  assert.equal(expectedFill(600), 60);    // 10:00 -> 60
-  assert.equal(expectedFill(720), 72);    // 12:00 -> half a day
-  assert.equal(expectedFill(695), 69.5);  // fills continuously, not in steps
-  assert.equal(expectedFill(1440), 144);  // 24:00 -> full layer
-  assert.equal(expectedFill(2000), 144);  // never exceeds a layer
-  assert.equal(expectedFill(-5), 0);      // never negative
+test("confirmed height chooses the next cube and wraps each 144-block layer", () => {
+  assert.equal(retainedBlockFill("1"), 0);
+  assert.equal(retainedBlockFill("144"), 143);
+  assert.equal(retainedBlockFill("145"), 0);
+  assert.equal(retainedBlockFill("290"), 1);
+  assert.equal(retainedBlockFill("900719925474099312345"), Number((900719925474099312344n) % 144n));
 });
 
-test("utcMinutes: minutes past UTC midnight, with seconds", () => {
-  assert.equal(utcMinutes(new Date("2026-07-11T00:00:00Z")), 0);
-  assert.equal(utcMinutes(new Date("2026-07-11T11:33:00Z")), 693);
-  assert.equal(utcMinutes(new Date("2026-07-11T23:38:30Z")), 23 * 60 + 38 + 0.5);
+test("block fill keeps the last confirmed height through missing updates", () => {
+  assert.equal(retainedBlockFill(undefined, 37), 37);
+  assert.equal(retainedBlockFill("", 37), 37);
+  assert.equal(retainedBlockFill("unknown", 37), 37);
+  assert.equal(retainedBlockFill("0", 37), 37);
 });
 
 test("project: height moves the point up; the diamond is symmetric", () => {
@@ -401,20 +400,19 @@ test("seven-tower mobile bouquet stays compact, contained, and selectable", () =
   }
 });
 
-test("intermediate overview block labels clear neighboring name cards", () => {
+test("a foreground Tari block label clears the neighboring Monero name card", () => {
   const width = 872;
   const layout = overviewLayout(width, 7, 888);
-  const nodes = ["bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
-  const centers = Object.fromEntries(nodes
-    .map((node, index) => [node, overviewLabelPosition(width, layout.positions[index], layout.anchors[index], layout.tw).left]));
+  const progress = { bitcoin: 100, monero: 62, tari: 33, litecoin: 82, dogecoin: 48, bitcoincash: 94, zcash: 100 };
+  const slots = assignOverviewSlots(NODE_IDS, progress, layout);
+  const centers = Object.fromEntries(NODE_IDS.map((node) => {
+    const slot = slots[node];
+    return [node, overviewLabelPosition(slot.x, slot.y, slot.tw).left];
+  }));
   const labelWidth = 168;
   const nameCardWidth = 112;
-  const clear = (labelNode, cardNode) => Math.abs(centers[labelNode] - layout.positions[nodes.indexOf(cardNode)]) >= (labelWidth + nameCardWidth) / 2;
-  assert.ok(clear("monero", "litecoin"));
-  assert.ok(clear("tari", "dogecoin"));
+  assert.ok(Math.abs(centers.tari - slots.monero.x) >= (labelWidth + nameCardWidth) / 2);
   assert.ok(Object.values(centers).every((center) => center - labelWidth / 2 >= 0 && center + labelWidth / 2 <= width));
-  const towerHalfWidth = GRID * layout.tw * 1.12 / 2;
-  assert.ok(nodes.every((node, index) => Math.abs(centers[node] - layout.positions[index]) <= towerHalfWidth));
 });
 
 test("preview tower reaches the viewport bottom", () => {

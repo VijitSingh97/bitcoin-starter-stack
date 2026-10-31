@@ -1,22 +1,14 @@
-// A live tower of the blockchain, read as a day-clock. A 12x12 layer is one
-// UTC day: it fills to where the day "should" be at Bitcoin's ~10-minute
-// spacing (one cube per 10 UTC minutes — block timestamps are Unix/UTC time),
-// so the fill tracks the time of day. At the next midnight the layer completes,
-// the tower is pushed down, and a fresh day starts on top. The header reads
-// "loading block N" — the next block the network is working on.
-//
-// No history or node lookups: the fill comes straight from the clock, and the
-// block height is read from #live's data-next-block. Pure helpers are exported
-// for tower.test.mjs; the canvas wiring is guarded on `document`.
+// A live tower of the blockchain. Each confirmed block adds one cube to the
+// top 12x12 layer; the next block pulses while the network works on it.
 export const GRID = 12;
-export const PER_LAYER = GRID * GRID; // 144 blocks ≈ one day
+export const PER_LAYER = GRID * GRID;
 export const SCENE_MS = 700;
 // Side-by-side card + tower (and balances floating above the tower) only above
 // this width; below it everything stacks. Kept in sync with the CSS media
 // queries. Set high enough that the ~460px balances block clears the card and
 // the viewport edge (a squeeze in the 900–1024 range looked broken).
 export const WIDE_MIN = 1024;
-const ROLLOVER_DROP = 12; // a fall this far below the shown fill = midnight rolled over
+const ROLLOVER_DROP = 12;
 export const NODE_IDS = ["bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
 export const NODE_COLORS = {
   bitcoin: "#f2a900",
@@ -33,30 +25,26 @@ export function gridCell(index, cols = GRID) {
   return { gx: index % cols, gy: Math.floor(index / cols) };
 }
 
-// A big drop in the fill target means UTC midnight rolled over — the layer
-// completes and a fresh one begins.
+// A large drop means the confirmed height crossed a 144-block layer boundary.
 export function isRollover(target, displayed) {
   return target < displayed - ROLLOVER_DROP;
 }
 
-// How full the day should be `utcMinutes` past UTC midnight, at ~10 min per
-// block — one cube per 10 minutes, capped at a full layer. This is the fill.
-export function expectedFill(utcMinutes) {
-  return Math.max(0, Math.min(PER_LAYER, utcMinutes / 10));
-}
-
-// Ease the shown fill toward the target: snap a dip (midnight), rip up a big
-// jump (a fresh page mid-day), drift smoothly otherwise.
+// Ease the shown fill toward the target: snap a dip, catch up a large initial
+// gap, and drift smoothly as new blocks arrive.
 export function nextDisplayed(current, target, dtMs) {
   if (target <= current) return target;
   const gap = target - current;
-  const perMs = gap > 24 ? 0.06 : 0.0015; // catch up vs. a smooth minute-by-minute crawl
+  const perMs = gap > 24 ? 0.06 : 0.0015;
   return Math.min(target, current + perMs * dtMs);
 }
 
-// Minutes (with seconds) past UTC midnight for a Date — the fill clock.
-export function utcMinutes(date) {
-  return date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+export function retainedBlockFill(nextBlock, previous = null) {
+  const value = String(nextBlock ?? "").trim();
+  if (!/^\d+$/.test(value)) return previous;
+  const next = BigInt(value);
+  if (next < 1n) return previous;
+  return Number((next - 1n) % BigInt(PER_LAYER));
 }
 
 export function project(gx, gy, z, tw, bh, ox, oy) {
@@ -177,12 +165,8 @@ export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap
   return { top, height, shoulder: 0, labelTop };
 }
 
-export function overviewLabelPosition(width, ox, anchorY, tw) {
-  const diamondWidth = GRID * tw * 1.12;
-  const offset = width > 700 && width < WIDE_MIN && ox !== width / 2
-    ? Math.sign(ox - width / 2) * (diamondWidth / 2 - 8)
-    : 0;
-  return { left: ox + offset, top: Math.max(8, anchorY - GRID * (tw / 4) - 32) };
+export function overviewLabelPosition(ox, anchorY, tw) {
+  return { left: ox, top: Math.max(8, anchorY - GRID * (tw / 4) - 32) };
 }
 
 export function towerLayout(W, cols = GRID) {
@@ -234,6 +218,27 @@ export function overviewLayout(width, count = NODE_IDS.length, height = 900) {
     anchors=[6,4,3,1,0,2,5].map((rank)=>155+rank*step);
   }
   return {contentWidth,tw:towerSpread*0.205/GRID,positions:points.map(([x])=>contentWidth/2+(x-0.5)*spread),anchors};
+}
+
+function overviewSlots(layout) {
+  const center = layout.contentWidth / 2;
+  return layout.positions.map((x, index) => ({ x, y: layout.anchors[index], tw: layout.tw }))
+    .sort((a, b) => b.y - a.y || Math.abs(a.x - center) - Math.abs(b.x - center));
+}
+
+export function placeOverviewNodes(ids, layout) {
+  const slots = overviewSlots(layout);
+  return Object.fromEntries(ids.map((node, index) => [node, slots[index]]));
+}
+
+export function assignOverviewSlots(ids, progress, layout) {
+  const nodeRank = (node) => {
+    const index = NODE_IDS.indexOf(node);
+    return index < 0 ? NODE_IDS.length : index;
+  };
+  const nodes = [...ids].sort((a, b) =>
+    (progress[a] ?? 0) - (progress[b] ?? 0) || nodeRank(a) - nodeRank(b));
+  return placeOverviewNodes(nodes, layout);
 }
 
 if (typeof document !== "undefined") {
@@ -303,7 +308,7 @@ if (typeof document !== "undefined") {
       const number = element.querySelector("b");
       number.textContent = text.slice("loading block ".length);
       number.style.color = activeNode(node) ? NODE_COLORS[node] : NODE_COLORS.zcash;
-      const position = overviewLabelPosition(W, ox, anchorY, tw);
+      const position = overviewLabelPosition(ox, anchorY, tw);
       element.style.left = `${position.left}px`;
       element.style.top = `${position.top}px`;
       element.style.opacity = String(opacity);
@@ -369,13 +374,14 @@ if (typeof document !== "undefined") {
       ctx.restore();
     }
 
-    function drawTower(node, ox, anchorY, tw, depthCount, fill, pulse, highlight, opacity = 1, push = 0, layerFill = null) {
+    function drawTower(node, ox, anchorY, tw, depthCount, pulse, highlight, opacity = 1, push = 0, layerFill = null) {
       const pal = palette(node, activeNode(node));
       const bh = tw * 0.5;
       const p = (gx, gy, layer) => project(gx, gy, 0, tw, bh, ox, anchorY - push - layer * bh - GRID * (tw / 4));
+      const background = effectiveLight() ? "#f4f4f5" : "#0f0f0f";
       ctx.globalAlpha=opacity;
-      poly([p(0,0,0),p(GRID,0,0),p(GRID,0,-depthCount-1),p(GRID,GRID,-depthCount-1),p(0,GRID,-depthCount-1),p(0,GRID,0)],effectiveLight()?"#f4f4f5":"#0f0f0f",null,0);
-      for (let depth = depthCount; depth >= 1; depth--) {
+      poly([p(0,0,0),p(GRID,0,0),p(GRID,0,-depthCount-1),p(GRID,GRID,-depthCount-1),p(0,GRID,-depthCount-1),p(0,GRID,0)],background,null,0);
+      for (let depth = depthCount; depth >= 0; depth--) {
         const fade = Math.max(0.18, 1 - depth / (depthCount * 1.2));
         ctx.globalAlpha = opacity * pal.alpha * fade;
         poly([p(0, GRID, -depth), p(GRID, GRID, -depth), p(GRID, GRID, -depth - 1), p(0, GRID, -depth - 1)], pal.side, pal.edge, 0);
@@ -384,37 +390,27 @@ if (typeof document !== "undefined") {
       ctx.globalAlpha = opacity * pal.alpha * 0.55;
       for (let i = 1; i < GRID; i++) line(p(i, GRID, 0), p(i, GRID, -depthCount - 1), pal.edge);
       for (let j = 1; j < GRID; j++) line(p(GRID, j, 0), p(GRID, j, -depthCount - 1), pal.edge);
-      const topFill = layerFill === null ? fill : PER_LAYER;
-      const done = Math.floor(topFill);
       for (let idx = 0; idx < PER_LAYER; idx++) {
         const { gx, gy } = gridCell(idx);
         const face = [p(gx, gy, 0), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)];
-        if (idx < done) {
-          ctx.globalAlpha = opacity * pal.alpha;
-          poly(face, pal.top, pal.edge, 0);
-        } else if (idx === done) {
-          const loading = loadingHighlight(opacity, pulse, pal.glow);
-          ctx.globalAlpha = pal.alpha * loading.opacity;
-          poly(face, pal.top, pal.edge, loading.glow);
-        } else {
-          ctx.globalAlpha = opacity * pal.alpha * 0.35;
-          poly(face, null, pal.grid, 0);
-        }
+        ctx.globalAlpha = opacity * pal.alpha;
+        poly(face, pal.top, pal.edge, 0);
       }
       if (layerFill !== null) {
-        const building = Math.floor(layerFill);
-        for (let idx = 0; idx <= building && idx < PER_LAYER; idx++) {
+        const confirmed = Math.max(0, Math.min(PER_LAYER - 1, Math.floor(layerFill)));
+        for (let idx = 0; idx <= confirmed; idx++) {
           const { gx, gy } = gridCell(idx);
           const top = [p(gx, gy, 1), p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx, gy + 1, 1)];
-          if (idx < building) {
-            ctx.globalAlpha = opacity * pal.alpha;
-            poly([p(gx, gy + 1, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)], pal.side, pal.edge, 0);
-            poly([p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx + 1, gy, 0)], pal.dark, pal.edge, 0);
-            poly(top, pal.top, pal.edge, 0);
-          } else {
+          ctx.globalAlpha = opacity;
+          poly([p(gx, gy, 1), p(gx + 1, gy, 1), p(gx + 1, gy, 0), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0), p(gx, gy + 1, 1)], background, null, 0);
+          ctx.globalAlpha = opacity * pal.alpha;
+          poly([p(gx, gy + 1, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx, gy + 1, 0)], pal.side, pal.edge, 0);
+          poly([p(gx + 1, gy, 1), p(gx + 1, gy + 1, 1), p(gx + 1, gy + 1, 0), p(gx + 1, gy, 0)], pal.dark, pal.edge, 0);
+          poly(top, pal.top, pal.edge, 0);
+          if (idx === confirmed) {
             const loading = loadingHighlight(opacity, pulse, pal.glow);
             ctx.globalAlpha = pal.alpha * loading.opacity;
-            poly(top, pal.top, pal.edge, loading.glow);
+            poly(top, null, pal.edge, loading.glow);
           }
         }
       }
@@ -422,12 +418,14 @@ if (typeof document !== "undefined") {
       ctx.globalAlpha = 1;
     }
 
-    let displayed = null;   // eased fill of today's layer
-    let pushStart = -1e9;   // time the last midnight push began
     const previewHighlight = Object.fromEntries(NODE_IDS.map((node) => [node, 0]));
     const knownProgress = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
     const buildProgress = Object.fromEntries(NODE_IDS.map((node) => [node, 0]));
+    const knownBlockFill = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
+    const displayedBlockFill = Object.fromEntries(NODE_IDS.map((node) => [node, null]));
+    const pushStart = Object.fromEntries(NODE_IDS.map((node) => [node, -1e9]));
     const previewGeometry = {};
+    let overviewOrder = [];
     let scene = { node: "", progress: 0 };
     let prev = performance.now();
 
@@ -435,16 +433,6 @@ if (typeof document !== "undefined") {
       const dt = Math.min(100, now - prev);
       prev = now;
 
-      // the fill is the time of day: one cube per 10 UTC minutes
-      const target = expectedFill(utcMinutes(new Date()));
-      if (displayed === null) displayed = target;
-      if (isRollover(target, displayed)) {
-        pushStart = now;        // midnight: animate the finished day sliding down
-        displayed = target;     // begin the new day
-      } else {
-        displayed = nextDisplayed(displayed, target, dt);
-      }
-      const fill = Math.max(0, Math.min(PER_LAYER, displayed));
       const pulse = reduce ? 0.65 : 0.5 + 0.5 * Math.sin(now / 300);
 
       ctx.clearRect(0, 0, W, H);
@@ -456,12 +444,32 @@ if (typeof document !== "undefined") {
       const layout = overviewLayout(W,ids.length,H);
       const scrollLeft = overview?.scrollLeft || 0;
       for (const node of ids) {
-        const index = ids.indexOf(node);
-        previewGeometry[node] = nextLayoutPoint(previewGeometry[node], {
-          x: layout.positions[index], y: layout.anchors[index], tw: layout.tw,
-        }, dt, reduce);
         knownProgress[node] = retainedSyncProgress(liveElement(node)?.dataset?.syncPercent, knownProgress[node]);
+      }
+      const sameNodes = overviewOrder.length === ids.length && overviewOrder.every((node) => ids.includes(node));
+      if (overviewOrder.length === 0 || (!selected && scene.progress === 0)) {
+        const assignment = assignOverviewSlots(ids, knownProgress, layout);
+        overviewOrder = Object.keys(assignment);
+      } else if (!sameNodes) {
+        overviewOrder = overviewOrder.filter((node) => ids.includes(node));
+        overviewOrder.push(...ids.filter((node) => !overviewOrder.includes(node)));
+      }
+      const assignment = placeOverviewNodes(overviewOrder, layout);
+      for (const node of ids) {
+        const target = assignment[node];
+        if (!target) continue;
+        previewGeometry[node] = nextLayoutPoint(previewGeometry[node], {
+          x: target.x, y: target.y, tw: target.tw,
+        }, dt, reduce);
         buildProgress[node] = nextBuildProgress(buildProgress[node], (knownProgress[node] ?? 0) / 100, dt, reduce);
+        const targetFill = retainedBlockFill(liveElement(node)?.dataset?.nextBlock, knownBlockFill[node]);
+        knownBlockFill[node] = targetFill;
+        if (targetFill === null) continue;
+        if (displayedBlockFill[node] === null) displayedBlockFill[node] = targetFill;
+        else if (isRollover(targetFill, displayedBlockFill[node])) {
+          pushStart[node] = now;
+          displayedBlockFill[node] = targetFill;
+        } else displayedBlockFill[node] = nextDisplayed(displayedBlockFill[node], targetFill, dt);
       }
       const baseTw = layout.tw;
       const overviewY = (node) => previewGeometry[node]?.y ?? H*0.3;
@@ -471,10 +479,14 @@ if (typeof document !== "undefined") {
       const overviewX = (node) => (previewGeometry[node]?.x ?? W/2) - scrollLeft;
       const overviewBuild = (node, tw = overviewTw(node), anchorY = overviewY(node), depth = overviewDepth(node)) =>
         constructionGeometry(anchorY, depth, tw, buildProgress[node]);
-      const constructionTop = (construction, tw) =>
-        construction.anchorY - (construction.layerFill === null ? 0 : tw * 0.5);
-      const overviewTop = (node) => constructionTop(overviewBuild(node), overviewTw(node));
-      const drawOrder=[...ids].sort((a,b)=>overviewTop(a)-overviewTop(b));
+      const layerFill = (node, construction) => construction.layerFill ?? displayedBlockFill[node];
+      const constructionTop = (node, construction, tw) =>
+        construction.anchorY - (layerFill(node, construction) === null ? 0 : tw * 0.5);
+      const towerPush = (node, construction, tw) => construction.layerFill === null
+        ? (1 - smooth((now - pushStart[node]) / PUSH_MS)) * tw * 0.5
+        : 0;
+      const overviewTop = (node) => constructionTop(node, overviewBuild(node), overviewTw(node));
+      const drawOrder=[...ids].sort((a,b)=>overviewY(a)-overviewY(b));
       const sortedAnchors = layout.anchors.slice().sort((a,b)=>a-b);
       const minAnchorGap = Math.min(...sortedAnchors.slice(1).map((anchor,index)=>anchor-sortedAnchors[index]));
       if (overview) {
@@ -491,13 +503,13 @@ if (typeof document !== "undefined") {
           const construction = overviewBuild(node, tw);
           const diamondWidth=GRID*tw*1.12;
           const hitWidth=overviewHitWidth(tw);
-          const actualTop = constructionTop(construction, tw);
+          const actualTop = constructionTop(node, construction, tw) - towerPush(node, construction, tw);
           const controlAnchor = W <= 700 ? Math.min(actualTop, overviewY(node)) : actualTop;
           const geometry=overviewChoiceGeometry(W,controlAnchor,diamondWidth,minAnchorGap,H);
           choice.style.width=`${hitWidth}px`;
           choice.style.top=`${geometry.top}px`;
           choice.style.height=`${geometry.height ?? H-geometry.top}px`;
-          choice.style.zIndex=String(Math.round(overviewTop(node)));
+          choice.style.zIndex=String(Math.round(overviewY(node)));
           choice.style.paddingTop="0";
           choice.style.setProperty("--tower-shoulder",`${geometry.shoulder}px`);
           choice.style.setProperty("--label-top",`${geometry.labelTop}px`);
@@ -512,13 +524,15 @@ if (typeof document !== "undefined") {
           const fullDepth = sceneDepth(H, overviewY(node), tw, overviewY(node), overviewTw(node));
           const construction = overviewBuild(node, tw, overviewY(node), fullDepth);
           drawTower(node, overviewX(node), construction.anchorY, tw,
-            construction.depth, fill, pulse, previewHighlight[node], activeNode(node) ? 1 : 0.62, 0, construction.layerFill);
+            construction.depth, pulse, previewHighlight[node], activeNode(node) ? 1 : 0.62,
+            towerPush(node, construction, tw), layerFill(node, construction));
         }
         const blockLabels = overviewBlockLabels(nextBlocks(), document.body.dataset.towerLabels === "1", true);
         for (const node of ids) {
           const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
           const construction = overviewBuild(node, tw);
-          showOverviewLabel(node, blockLabels[node], overviewX(node), constructionTop(construction, tw), tw);
+          showOverviewLabel(node, blockLabels[node], overviewX(node),
+            constructionTop(node, construction, tw) - towerPush(node, construction, tw), tw);
         }
         showFocusedLabel("", 0, 0, 0, 0);
         return;
@@ -542,27 +556,30 @@ if (typeof document !== "undefined") {
                 anchorY,
                 tw,
                 source.depth,
-                fill,
                 pulse,
                 startHighlight + (1 - startHighlight) * amount,
                 activeNode(node) ? 1 : 0.62 + 0.38 * amount,
-                0,
-                source.layerFill,
+                towerPush(node, source, tw),
+                layerFill(node, source),
               );
               const focusedConstruction = { ...source, anchorY };
+              const push = towerPush(node, source, tw);
               showFocusedLabel(scene.node, amount,
-                overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount, constructionTop(focusedConstruction, tw), tw);
+                overviewX(scene.node) + (focusedX - overviewX(scene.node)) * amount,
+                constructionTop(scene.node, focusedConstruction, tw), tw, push);
             } else if (overviewState.opacity > 0.001) {
               const construction = overviewBuild(node);
-              drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, fill, pulse, 0,
-                (activeNode(node) ? 1 : 0.62) * overviewState.opacity, 0, construction.layerFill);
+              drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, pulse, 0,
+                (activeNode(node) ? 1 : 0.62) * overviewState.opacity,
+                towerPush(node, construction, overviewTw(node)), layerFill(node, construction));
             }
           }
         } else {
           for (const node of drawOrder) {
             const construction = overviewBuild(node);
-            drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, fill, pulse, 0,
-              activeNode(node) ? 1 : 0.62, 0, construction.layerFill);
+            drawTower(node, overviewX(node), construction.anchorY, overviewTw(node), construction.depth, pulse, 0,
+              activeNode(node) ? 1 : 0.62,
+              towerPush(node, construction, overviewTw(node)), layerFill(node, construction));
           }
           showFocusedLabel("", 0, 0, 0, 0);
         }
@@ -570,22 +587,23 @@ if (typeof document !== "undefined") {
         for (const node of ids) {
           const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
           const construction = overviewBuild(node, tw);
-          showOverviewLabel(node, blockLabels[node], overviewX(node), constructionTop(construction, tw),
+          showOverviewLabel(node, blockLabels[node], overviewX(node),
+            constructionTop(node, construction, tw) - towerPush(node, construction, tw),
             tw, overviewState.opacity);
         }
         return;
       }
       const { ox, tw } = towerLayout(W);
-      const bh = tw * 0.5;
       const anchorY = H * 0.6;
-      const push = (1 - smooth((now - pushStart) / PUSH_MS)) * bh; // eases bh -> 0 after a rollover
       const sourceTw = overviewTw(selected) * (1 + 0.12 * previewHighlight[selected]);
       const source = overviewBuild(selected, sourceTw);
       const destination = overviewBuild(selected, tw, anchorY, previewDepth(H, anchorY, tw));
       const construction = { ...source, anchorY: destination.anchorY };
-      drawTower(selected, ox, construction.anchorY, tw, construction.depth, fill, pulse, 1, 1, push, construction.layerFill);
+      const push = towerPush(selected, construction, tw);
+      drawTower(selected, ox, construction.anchorY, tw, construction.depth, pulse, 1, 1,
+        push, layerFill(selected, construction));
 
-      showFocusedLabel(selected, 1, ox, constructionTop(construction, tw), tw, push);
+      showFocusedLabel(selected, 1, ox, constructionTop(selected, construction, tw), tw, push);
     }
 
     render(performance.now()); // one static frame (also covers a hidden tab)

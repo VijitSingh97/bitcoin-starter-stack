@@ -336,6 +336,7 @@ interface; if it is public, a VPN, or unsupported, setup falls back to localhost
 Set an explicit private `dashboard.bind_ip` in configuration when needed.
 The landing page arranges a colored tower for each installed node. Towers build
 upward in cube layers as their nodes sync, reaching their full height at 100%.
+Shorter syncing towers take foreground positions so their tops remain visible.
 Click one to zoom in and open its card; close it with **×**, Escape, or a click outside
 the panel. Towers continue below the screen, grow on hover or keyboard
 focus, and show a pulsing loading block on top. Names are hidden by default;
@@ -377,11 +378,10 @@ The following extra features belong to the Bitcoin card:
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.
 - **Live block tower** — tower height follows the node's sync progress. Once synced,
-  the top is a day-clock: a 12×12 layer is one UTC day. It fills to the current
-  time of day at Bitcoin's ~10-minute spacing (one cube per 10 UTC minutes); the loading
-  slot **pulses**, and a **loading block N** header shows the next block. At midnight the
-  day is pushed down and a fresh one starts. The top animation uses the clock,
-  rather than historical block counts. Theme-aware and respects `prefers-reduced-motion`.
+  every confirmed block adds one cube to the solid 12×12 top layer. The next cube
+  **pulses**, and a **loading block N** header shows the block the node is waiting for.
+  After 144 blocks the completed layer joins the tower and a fresh layer begins.
+  Theme-aware and respects `prefers-reduced-motion`.
 
 The Monero card has the same price, fee-history, status, disk, uptime, and wallet
 sections. Its fees are native XMR-per-kB estimates. Monero wallet rows remain
