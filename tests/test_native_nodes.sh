@@ -154,10 +154,12 @@ sed "s/172\\.29\\.0/$subnet_prefix/g" build/tor/entrypoint.sh >"$work/tor-entryp
 chmod 0755 "$work/tor-entrypoint.sh"
 cp build/tari/entrypoint.sh "$work/assets/tari/entrypoint.sh"
 sed "s/172\\.29\\.0/$subnet_prefix/g" build/tari/config.toml >"$work/assets/tari/config.toml"
-chmod 0755 "$work/assets/tari/entrypoint.sh"
+chmod 0755 "$work/assets/tari" "$work/assets/tari/entrypoint.sh"
+chmod 0644 "$work/assets/tari/config.toml"
 sed "s/172\\.29\\.0/$subnet_prefix/g" build/zcash/zakurad.toml >"$work/assets/zcash/zakurad.toml"
 cp build/zcash/healthcheck.sh "$work/assets/zcash/healthcheck.sh"
 chmod 0755 "$work/assets/zcash/healthcheck.sh"
+chmod 0644 "$work/assets/zcash/zakurad.toml"
 
 entrypoint_override=
 case "$chain" in
@@ -261,27 +263,65 @@ internal_network="$project-internal"
   fail "$chain network is not internal"
 
 case "$chain" in
+  litecoin) config_probe='test -r /tmp/litecoin.conf' ;;
+  dogecoin) config_probe='test -r /tmp/dogecoin.conf' ;;
+  bitcoincash) config_probe='test -r /tmp/bitcoin.conf' ;;
+  monero) config_probe='test -r /tmp/monerod.conf' ;;
+  tari) config_probe='test -r /var/tari/node/runtime-config.toml' ;;
+  zcash) config_probe='test -r /etc/zakura/zakurad.toml' ;;
+esac
+config_wait=60
+if [ "$smoke_timeout" -lt "$config_wait" ]; then config_wait=$smoke_timeout; fi
+config_deadline=$((SECONDS + config_wait))
+config_ready=0
+while [ "$SECONDS" -lt "$config_deadline" ]; do
+  if [ "$(docker inspect "$node_container" --format '{{.State.Status}}' 2>/dev/null || true)" = running ] &&
+    docker exec "$node_container" sh -c "$config_probe" >/dev/null 2>&1; then
+    config_ready=1
+    break
+  fi
+  sleep 2
+done
+runtime_state() {
+  docker inspect "$node_container" --format 'status={{.State.Status}} restarting={{.State.Restarting}} exit={{.State.ExitCode}}' 2>/dev/null || printf unavailable
+}
+[ "$config_ready" = 1 ] || fail "$chain runtime config was not readable within ${config_wait}s ($(runtime_state))"
+
+assert_runtime_config() {
+  unsafe_message=$1
+  shift
+  if "$@"; then return; fi
+  state=$(runtime_state)
+  case "$state" in
+    status=running*) fail "$unsafe_message" ;;
+    *) fail "$chain runtime config probe became unavailable ($state)" ;;
+  esac
+}
+
+case "$chain" in
   litecoin | dogecoin | bitcoincash)
-    docker exec "$node_container" sh -c 'grep -qx "onlynet=onion" /tmp/*.conf && grep -qx "dnsseed=0" /tmp/*.conf && grep -qx "discover=0" /tmp/*.conf' ||
-      fail "$chain runtime config allows non-onion discovery"
+    assert_runtime_config "$chain runtime config allows non-onion discovery" \
+      docker exec "$node_container" sh -c 'grep -qx "onlynet=onion" /tmp/*.conf && grep -qx "dnsseed=0" /tmp/*.conf && grep -qx "discover=0" /tmp/*.conf'
     ;;
   monero)
-    docker exec "$node_container" sh -c 'grep -qx "proxy=socks5://$TOR_PROXY" /tmp/monerod.conf && grep -qx "tx-proxy=tor,$TOR_PROXY,disable_noise" /tmp/monerod.conf && grep -qx "disable-dns-checkpoints=1" /tmp/monerod.conf' ||
-      fail "Monero runtime config allows an external bypass"
+    # shellcheck disable=SC2016
+    assert_runtime_config "Monero runtime config allows an external bypass" \
+      docker exec "$node_container" sh -c 'grep -qx "proxy=socks5://$TOR_PROXY" /tmp/monerod.conf && grep -qx "tx-proxy=tor,$TOR_PROXY,disable_noise" /tmp/monerod.conf && grep -qx "disable-dns-checkpoints=1" /tmp/monerod.conf'
     ;;
   tari)
-    docker exec "$node_container" sh -c 'grep -qx "proxy_bypass_for_outbound_tcp = false" /var/tari/node/runtime-config.toml && grep -qx "proxy_bypass_addresses = \[\]" /var/tari/node/runtime-config.toml && grep -qx "pruning_horizon = 10000" /var/tari/node/runtime-config.toml' ||
-      fail "Tari runtime config allows a proxy bypass"
+    assert_runtime_config "Tari runtime config allows a proxy bypass" \
+      docker exec "$node_container" sh -c 'grep -qx "proxy_bypass_for_outbound_tcp = false" /var/tari/node/runtime-config.toml && grep -qx "proxy_bypass_addresses = \[\]" /var/tari/node/runtime-config.toml && grep -qx "pruning_horizon = 10000" /var/tari/node/runtime-config.toml'
     ;;
   zcash)
-    docker exec -e SMOKE_TOR_IP="$subnet_prefix.25" "$node_container" sh -c '
-      peers=$(sed -n "/^initial_mainnet_peers = \[/,/^\]/p" /etc/zakura/zakurad.toml)
-      [ "$(printf "%s\n" "$peers" | grep -c "^[[:space:]]*\"")" = 4 ] || exit 1
-      for port in 18233 18234 18235 18236; do
-        printf "%s\n" "$peers" | grep -Fq "\"$SMOKE_TOR_IP:$port\"" || exit 1
-      done
-    ' ||
-      fail "Zcash runtime config contains a direct external peer"
+    # shellcheck disable=SC2016
+    assert_runtime_config "Zcash runtime config contains a direct external peer" \
+      docker exec -e SMOKE_TOR_IP="$subnet_prefix.25" "$node_container" sh -c '
+        peers=$(sed -n "/^initial_mainnet_peers = \[/,/^\]/p" /etc/zakura/zakurad.toml)
+        [ "$(printf "%s\n" "$peers" | grep -c "^[[:space:]]*\"")" = 4 ] || exit 1
+        for port in 18233 18234 18235 18236; do
+          printf "%s\n" "$peers" | grep -Fq "\"$SMOKE_TOR_IP:$port\"" || exit 1
+        done
+      '
     ;;
 esac
 
