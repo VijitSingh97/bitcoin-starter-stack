@@ -246,4 +246,35 @@ FAKE_STACK_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$r
 [ ! -e "$config/config.json" ] || fail "failed deleted-config apply recreated the pending file"
 cp "$state/.approved-config.json" "$config/config.json"
 
+install_case=0
+for interface_case in \
+  'bitcoin|.bitcoin.rpc_expose == false' \
+  'monero|(.monero.rpc_expose == false and .monero.zmq_expose == false)' \
+  'tari|.tari.grpc_expose == false' \
+  'litecoin|.litecoin.rpc_expose == false' \
+  'dogecoin|.dogecoin.rpc_expose == false' \
+  'bitcoincash|.bitcoincash.rpc_expose == false' \
+  'zcash|.zcash.rpc_expose == false'; do
+  install_case=$((install_case + 1))
+  node=${interface_case%%|*}
+  closed=${interface_case#*|}
+  jq -n '{
+    bitcoin:{enabled:false,rpc_expose:true},
+    monero:{enabled:false,rpc_expose:true,zmq_expose:true},
+    tari:{enabled:false,grpc_expose:true},
+    litecoin:{enabled:false,rpc_expose:true},
+    dogecoin:{enabled:false,rpc_expose:true},
+    bitcoincash:{enabled:false,rpc_expose:true},
+    zcash:{enabled:false,rpc_expose:true}
+  }' >"$config/config.json"
+  jq -S . "$config/config.json" >"$state/.approved-config.json"
+  cp "$state/.env" "$state/.approved.env"
+  install_id=$(printf '%032x' "$((0xa0 + install_case))")
+  request "{\"action\":\"install\",\"id\":\"$install_id\",\"node\":\"$node\",\"requested_at\":1000}"
+  BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+  jq -e --arg node "$node" ".[\$node].enabled == true and .[\$node].active == true and ($closed)" "$config/config.json" >/dev/null ||
+    fail "$node install did not close every optional LAN interface"
+  [ "$(status .state)" = applied ] || fail "$node install status was not applied"
+done
+
 echo "PASS: test_node_control.sh"

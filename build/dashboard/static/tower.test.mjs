@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, retainedBlockFill, retainedConfirmedBlocks, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, assignOverviewSlots, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, retainedBlockFill, retainedConfirmedBlocks, smooth, nextHighlight, retainedSyncProgress, nextBuildProgress, constructionGeometry, overviewConstructionGeometry, overviewPartialBottomLimit, nextLayoutPoint, loadingHighlight, nextScene, scenePhase, overviewTransition, focusedLabelTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, assignOverviewSlots, previewDepth, sceneDepth, overviewBlockLabels, NODE_IDS, GRID, PER_LAYER, SCENE_MS } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks", () => {
   assert.equal(GRID, 12);
@@ -129,6 +129,48 @@ test("the first confirmed blocks are literal cubes before a full layer exists", 
   assert.deepEqual({ depth: first.depth, fill: first.layerFill }, { depth: 0, fill: 1 });
   assert.deepEqual({ depth: partial.depth, fill: partial.layerFill }, { depth: 0, fill: 17 });
   assert.deepEqual({ depth: layer.depth, fill: layer.layerFill }, { depth: 1, fill: 0 });
+});
+
+test("partial first layers stay above their cards and hover upward", () => {
+  for (const [width, height] of [[1920, 720], [872, 888], [375, 667]]) {
+    for (const count of [1, 3, 7]) {
+      const layout = overviewLayout(width, count, height);
+      const sortedAnchors = layout.anchors.slice().sort((a, b) => a - b);
+      const minGap = count > 1
+        ? Math.min(...sortedAnchors.slice(1).map((anchor, index) => anchor - sortedAnchors[index]))
+        : Infinity;
+      for (const targetAnchor of layout.anchors) {
+        const baseTw = layout.tw;
+        const hoverTw = baseTw * 1.12;
+        const depth = previewDepth(height, targetAnchor, baseTw);
+        for (const blocks of [1, 3, 143]) {
+          const limit = overviewPartialBottomLimit(width, height, targetAnchor, baseTw, minGap);
+          const occupiedBottom = (anchor, tw) => Math.max(...Array.from({ length: blocks }, (_, index) => {
+            const { gx, gy } = gridCell(index);
+            return project(gx + 1, gy + 1, 0, tw, tw * 0.5, 0, anchor - GRID * tw / 4).y;
+          }));
+          const resting = overviewConstructionGeometry(
+            targetAnchor, depth, baseTw, baseTw, 1, blocks, limit);
+          const hovered = overviewConstructionGeometry(
+            targetAnchor, depth, baseTw, hoverTw, 1, blocks, limit);
+          const restingBottom = occupiedBottom(resting.anchorY, baseTw);
+          const hoveredBottom = occupiedBottom(hovered.anchorY, hoverTw);
+          assert.ok(restingBottom <= limit + 1e-6, `${width}x${height}, count=${count}, blocks=${blocks}`);
+          assert.ok(hoveredBottom <= restingBottom + 1e-6,
+            `${width}x${height}, count=${count}, blocks=${blocks} hover moved down`);
+
+          const actualTop = hovered.anchorY - hoverTw * 0.5;
+          const diamondWidth = GRID * hoverTw * 1.12;
+          const controlAnchor = width <= 700 ? Math.min(actualTop, targetAnchor) : actualTop;
+          const geometry = overviewChoiceGeometry(width, controlAnchor, diamondWidth, minGap, height);
+          const cardTop = geometry.top + geometry.labelTop;
+          const cubeTop = hovered.anchorY - hoverTw * 0.5 - GRID * hoverTw / 4;
+          assert.ok(hoveredBottom <= cardTop || cardTop + 44 <= cubeTop,
+            `${width}x${height}, count=${count}, blocks=${blocks} cube overlaps its card`);
+        }
+      }
+    }
+  }
 });
 
 test("installed-node layouts reflow smoothly and handle an empty set", () => {

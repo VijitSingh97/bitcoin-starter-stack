@@ -104,6 +104,28 @@ export function constructionGeometry(targetAnchor, fullDepth, tw, progress, conf
   };
 }
 
+export function occupiedLayerBottom(anchorY, tw, cubes) {
+  const count = Math.max(0, Math.min(PER_LAYER, Math.floor(Number(cubes) || 0)));
+  if (count === 0) return null;
+  let furthest = 0;
+  for (let index = 0; index < count; index++) {
+    const { gx, gy } = gridCell(index);
+    furthest = Math.max(furthest, gx + gy + 2);
+  }
+  return anchorY + (furthest - GRID) * tw / 4;
+}
+
+export function overviewConstructionGeometry(targetAnchor, fullDepth, baseTw, tw, progress,
+  confirmedBlocks = null, maxPartialBottom = Infinity) {
+  const construction = constructionGeometry(targetAnchor, fullDepth, tw, progress, confirmedBlocks);
+  construction.anchorY += fullDepth * (baseTw - tw) * 0.5;
+  if (construction.depth === 0 && construction.layerFill > 0 && Number.isFinite(maxPartialBottom)) {
+    const bottom = occupiedLayerBottom(construction.anchorY, tw, construction.layerFill);
+    construction.anchorY -= Math.max(0, bottom - maxPartialBottom);
+  }
+  return construction;
+}
+
 export function nextLayoutPoint(current, target, dtMs, reduce = false) {
   if (!current || reduce) return { ...target };
   const amount = 1 - Math.exp(-Math.max(0, dtMs) / 180);
@@ -177,6 +199,13 @@ export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap
   const desiredTop = towerTop + towerLabelTop - labelTop;
   const top = Number.isFinite(viewportHeight) ? Math.max(0, Math.min(desiredTop, viewportHeight - height - 4)) : desiredTop;
   return { top, height, shoulder: 0, labelTop };
+}
+
+export function overviewPartialBottomLimit(width, height, targetAnchor, tw, minAnchorGap = Infinity) {
+  const viewportLimit = height - 64;
+  if (width > 700) return viewportLimit;
+  const geometry = overviewChoiceGeometry(width, targetAnchor, GRID * tw * 1.12, minAnchorGap, height);
+  return Math.min(viewportLimit, geometry.top + geometry.labelTop - 4);
 }
 
 export function overviewLabelPosition(ox, anchorY, tw) {
@@ -496,7 +525,13 @@ if (typeof document !== "undefined") {
       const hovered = document.body.dataset.hoverNode;
       const overviewDepth = (node) => previewDepth(H, overviewY(node), overviewTw(node));
       const overviewX = (node) => (previewGeometry[node]?.x ?? W/2) - scrollLeft;
+      const sortedAnchors = layout.anchors.slice().sort((a,b)=>a-b);
+      const minAnchorGap = Math.min(...sortedAnchors.slice(1).map((anchor,index)=>anchor-sortedAnchors[index]));
       const overviewBuild = (node, tw = overviewTw(node), anchorY = overviewY(node), depth = overviewDepth(node)) =>
+        overviewConstructionGeometry(anchorY, depth, overviewTw(node), tw,
+          buildProgress[node], knownConfirmedBlocks[node],
+          overviewPartialBottomLimit(W, H, anchorY, overviewTw(node), minAnchorGap));
+      const focusedBuild = (node, tw, anchorY, depth) =>
         constructionGeometry(anchorY, depth, tw, buildProgress[node], knownConfirmedBlocks[node]);
       const layerFill = (node, construction) => construction.layerFill ?? displayedBlockFill[node];
       const constructionTop = (node, construction, tw) =>
@@ -506,8 +541,13 @@ if (typeof document !== "undefined") {
         : 0;
       const overviewTop = (node) => constructionTop(node, overviewBuild(node), overviewTw(node));
       const drawOrder=[...ids].sort((a,b)=>overviewY(a)-overviewY(b));
-      const sortedAnchors = layout.anchors.slice().sort((a,b)=>a-b);
-      const minAnchorGap = Math.min(...sortedAnchors.slice(1).map((anchor,index)=>anchor-sortedAnchors[index]));
+      if (!selected && scene.progress === 0) {
+        for (const node of drawOrder) {
+          previewHighlight[node] = reduce
+            ? (hovered === node ? 1 : 0)
+            : nextHighlight(previewHighlight[node], hovered === node, dt);
+        }
+      }
       if (overview) {
         overview.hidden = overviewState.hidden;
         overview.style.opacity = String(overviewState.opacity);
@@ -518,7 +558,7 @@ if (typeof document !== "undefined") {
           if(index<0) return;
           const node = choice.dataset.selectNode;
           choice.style.left = `${previewGeometry[node].x}px`;
-          const tw = overviewTw(node);
+          const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
           const construction = overviewBuild(node, tw);
           choice.dataset.nodeEmpty = construction.depth === 0 && layerFill(node, construction) === 0 ? "1" : "0";
           const diamondWidth=GRID*tw*1.12;
@@ -537,9 +577,6 @@ if (typeof document !== "undefined") {
       }
       if (!selected && scene.progress === 0) {
         for (const node of drawOrder) {
-          previewHighlight[node] = reduce
-            ? (hovered === node ? 1 : 0)
-            : nextHighlight(previewHighlight[node], hovered === node, dt);
           const tw = overviewTw(node) * (1 + 0.12 * previewHighlight[node]);
           const fullDepth = sceneDepth(H, overviewY(node), tw, overviewY(node), overviewTw(node));
           const construction = overviewBuild(node, tw, overviewY(node), fullDepth);
@@ -568,7 +605,7 @@ if (typeof document !== "undefined") {
           for (const node of drawOrder) {
             if (node === scene.node) {
               const source = overviewBuild(node, startTw);
-              const destination = overviewBuild(node, focusedTw, focusedY, previewDepth(H, focusedY, focusedTw));
+              const destination = focusedBuild(node, focusedTw, focusedY, previewDepth(H, focusedY, focusedTw));
               const anchorY = source.anchorY + (destination.anchorY - source.anchorY) * amount;
               drawTower(
                 node,
@@ -617,7 +654,7 @@ if (typeof document !== "undefined") {
       const anchorY = H * 0.6;
       const sourceTw = overviewTw(selected) * (1 + 0.12 * previewHighlight[selected]);
       const source = overviewBuild(selected, sourceTw);
-      const destination = overviewBuild(selected, tw, anchorY, previewDepth(H, anchorY, tw));
+      const destination = focusedBuild(selected, tw, anchorY, previewDepth(H, anchorY, tw));
       const construction = { ...source, anchorY: destination.anchorY };
       const push = towerPush(selected, construction, tw);
       drawTower(selected, ox, construction.anchorY, tw, construction.depth, pulse, 1, 1,
