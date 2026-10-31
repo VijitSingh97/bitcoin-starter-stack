@@ -46,3 +46,7 @@ test('the bouquet fits its canvas and staggers node heights instead of lining th
     for(const y of layout.anchors) assert.ok(previewDepth(900,y,layout.tw)*layout.tw*0.5+y>=900);
   }
 });
+
+test('Bitcoin Cash fee does not promise confirmation targets', () => {
+  assert.deepEqual(chainFeesView('bitcoincash', {fees_available:true,fee_estimates:['1'],fee_unit:'sat/B'}), {label:'Fee sat/B:',value:'1'});
+});

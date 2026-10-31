@@ -380,17 +380,32 @@ func (a *app) writeBitcoinFamilyStatus(w http.ResponseWriter, r *http.Request, n
 			status.LatestBlockAgeSeconds = max(0, time.Now().Unix()-header.Time)
 		}
 	}
-	for _, blocks := range []int{1, 3, 6} {
-		var estimate feeEstimate
-		if rpc.call(ctx, "estimatesmartfee", []any{blocks}, &estimate) != nil || estimate.FeeRate == nil {
-			status.FeeEstimates = nil
-			break
+	if node.ID == nodeBitcoinCash {
+		var rate float64
+		if rpc.call(ctx, "estimatefee", nil, &rate) == nil && rate >= 0 {
+			status.FeeEstimates = []string{formatFeeRate(rate)}
+			status.FeeUnit, status.FeesAvailable = "sat/B", true
 		}
-		status.FeeEstimates = append(status.FeeEstimates, formatFeeRate(*estimate.FeeRate))
-	}
-	status.FeesAvailable = len(status.FeeEstimates) == 3
-	if status.FeesAvailable {
-		status.FeeUnit = "sat/vB"
+	} else {
+		for _, blocks := range []int{1, 3, 6} {
+			var estimate feeEstimate
+			if rpc.call(ctx, "estimatesmartfee", []any{blocks}, &estimate) != nil || estimate.FeeRate == nil || *estimate.FeeRate < 0 {
+				status.FeeEstimates = nil
+				break
+			}
+			value := formatFeeRate(*estimate.FeeRate)
+			if node.ID == nodeDogecoin {
+				value = strings.TrimRight(strings.TrimRight(strconv.FormatFloat(*estimate.FeeRate, 'f', 8, 64), "0"), ".")
+			}
+			status.FeeEstimates = append(status.FeeEstimates, value)
+		}
+		status.FeesAvailable = len(status.FeeEstimates) == 3
+		if status.FeesAvailable {
+			status.FeeUnit = "litoshi/vB"
+			if node.ID == nodeDogecoin {
+				status.FeeUnit = "DOGE/kB"
+			}
+		}
 	}
 	if disk := diskUsage(node.DataDir); disk.Total > 0 {
 		status.DiskTotalBytes, status.DiskFreeBytes, status.DiskAvailable = disk.Total, disk.Free, true

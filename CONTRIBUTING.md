@@ -26,6 +26,20 @@ Anything the machine can't run is skipped with a `SKIP:` line. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same suite
 plus a full image build on every push and PR.
 
+Native daemon checks run separately for Monero, Tari, Litecoin, Dogecoin,
+Bitcoin Cash, and Zcash in CI. To test one locally:
+
+```bash
+RUN_NATIVE_NODE_SMOKE=1 NATIVE_NODE_CHAIN=litecoin tests/test_native_nodes.sh
+```
+
+This builds and starts an isolated Tor, dashboard, and native daemon with fresh
+temporary data. It checks the real status API, native fee responses, Tor routing,
+and the published RPC or gRPC endpoint. It does not download a complete chain or
+qualify steady-state resource limits. Run one chain at a time on a small host.
+Successful runs remove their containers, images, and data; failed runs preserve
+private diagnostics at the printed local path. Do not upload that directory.
+
 The Tari client uses a minimal upstream protocol subset in
 `build/dashboard/node-stack-tari.proto`. With protoc 7.36.2,
 protoc-gen-go 1.36.10, and protoc-gen-go-grpc 1.5.1 installed, regenerate it with:

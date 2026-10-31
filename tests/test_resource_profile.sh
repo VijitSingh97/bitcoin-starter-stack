@@ -31,8 +31,8 @@ if [ "$1" = compose ]; then
         bitcoin) [ "${FAKE_BITCOIN_RUNNING:-1}" = 1 ] && printf '%s\n' "${FAKE_BITCOIN_ID:-btc-id}" ;;
         monero) [ "${FAKE_MONERO_RUNNING:-1}" = 1 ] && printf '%s\n' "${FAKE_MONERO_ID:-xmr-id}" ;;
         litecoin) printf '%s\n' "${FAKE_LITECOIN_ID:-ltc-id}" ;;
-        dogecoin) printf '%s\n' doge-id ;;
-        bitcoincash) printf '%s\n' bch-id ;;
+        dogecoin) printf '%s\n' "${FAKE_DOGECOIN_ID:-doge-id}" ;;
+        bitcoincash) printf '%s\n' "${FAKE_BITCOINCASH_ID:-bch-id}" ;;
         tari) printf '%s\n' tari-id ;;
         zcash) printf '%s\n' zcash-id ;;
         dashboard) printf '%s\n' dashboard-id ;;
@@ -65,7 +65,11 @@ if [ "$1" = compose ]; then
           fi
           ;;
         litecoin | dogecoin | bitcoincash)
-          printf '%s\n' "{\"initialblockdownload\":false,\"blocks\":100,\"headers\":100,\"mediantime\":${RESOURCE_NOW_EPOCH},\"warnings\":[] }"
+          service=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+          eval "rpc_fail=\${FAKE_${service}_RPC_FAIL:-0}"
+          eval "tip=\${FAKE_${service}_TIP:-$RESOURCE_NOW_EPOCH}"
+          [ "$rpc_fail" != 1 ] || exit 1
+          printf '%s\n' "{\"initialblockdownload\":false,\"blocks\":100,\"headers\":100,\"mediantime\":${tip},\"warnings\":[] }"
           ;;
         zcash)
           if printf '%s' "$*" | grep -q getblockheader; then
@@ -170,6 +174,7 @@ EOF
   export BITCOIN_STACK_STATE_DIR=$case_root/state
   export DOCKER_BIN=$fake FAKE_DOCKER_LOG=$log FAKE_CAPS=$caps
   export FAKE_BITCOIN_ID=btc-id FAKE_MONERO_ID=xmr-id
+  export FAKE_DOGECOIN_ID=doge-id FAKE_BITCOINCASH_ID=bch-id
   export FAKE_BITCOIN_RUNNING=1 FAKE_MONERO_RUNNING=1
   export FAKE_BITCOIN_SYNCED=0 FAKE_MONERO_SYNCED=0
   export FAKE_TARI_SYNCED=0
@@ -179,6 +184,8 @@ EOF
   export FAKE_BITCOIN_RPC_FAIL=0 FAKE_MONERO_RPC_FAIL=0 FAKE_UPDATE_FAIL=0
   export FAKE_BITCOIN_LIMITS='' FAKE_MONERO_LIMITS='' FAKE_EXIT_CODE=0
   unset FAKE_BITCOIN_TIP FAKE_BITCOIN_WARNINGS FAKE_MONERO_TIP
+  unset FAKE_LITECOIN_TIP FAKE_DOGECOIN_TIP FAKE_BITCOINCASH_TIP
+  unset FAKE_LITECOIN_RPC_FAIL FAKE_DOGECOIN_RPC_FAIL FAKE_BITCOINCASH_RPC_FAIL
   export RESOURCE_NOW_EPOCH=100000
 }
 
@@ -223,6 +230,19 @@ perl -pi -e 's/LITECOIN_RESOURCE_PROFILE=off/LITECOIN_RESOURCE_PROFILE=compact/'
 tick_profile; tick_profile; tick_profile
 grep -q '^update --cpus 1 --memory 4096m --memory-swap 4096m ltc-id$' "$log" || fail "Litecoin compact cap is wrong"
 grep -q 'litecoin-cli -datadir=/data -conf=/tmp/litecoin.conf getblockchaininfo' "$log" || fail "Litecoin sync check missed its private config"
+
+new_case dogecoin-bitcoincash
+perl -pi -e 's/DOGECOIN_RESOURCE_PROFILE=off/DOGECOIN_RESOURCE_PROFILE=compact/; s/DOGECOIN_STEADY_CPUS=1/DOGECOIN_STEADY_CPUS=0.75/; s/DOGECOIN_STEADY_MEM_LIMIT_MB=4096/DOGECOIN_STEADY_MEM_LIMIT_MB=3072/; s/BITCOINCASH_RESOURCE_PROFILE=off/BITCOINCASH_RESOURCE_PROFILE=compact/; s/BITCOINCASH_STEADY_CPUS=1/BITCOINCASH_STEADY_CPUS=1.25/; s/BITCOINCASH_STEADY_MEM_LIMIT_MB=4096/BITCOINCASH_STEADY_MEM_LIMIT_MB=3584/' "$case_root/state/.env"
+export FAKE_DOGECOIN_ID=doge-custom FAKE_BITCOINCASH_ID=bch-custom
+export FAKE_DOGECOIN_TIP=1 FAKE_BITCOINCASH_TIP=1
+tick_profile; tick_profile; tick_profile
+! grep -q '^update ' "$log" || fail "additional node with a stale tip was capped"
+export FAKE_DOGECOIN_TIP=$RESOURCE_NOW_EPOCH FAKE_BITCOINCASH_TIP=$RESOURCE_NOW_EPOCH
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 0.75 --memory 3072m --memory-swap 3072m doge-custom$' "$log" || fail "Dogecoin custom cap targeted the wrong container or limits"
+grep -q '^update --cpus 1.25 --memory 3584m --memory-swap 3584m bch-custom$' "$log" || fail "Bitcoin Cash custom cap targeted the wrong container or limits"
+grep -q 'dogecoin-cli -datadir=/data -conf=/tmp/dogecoin.conf getblockchaininfo' "$log" || fail "Dogecoin sync check missed its private config"
+grep -q 'bitcoin-cli -datadir=/data -conf=/tmp/bitcoin.conf getblockchaininfo' "$log" || fail "Bitcoin Cash sync check missed its private config"
 
 new_case tari
 perl -pi -e 's/TARI_RESOURCE_PROFILE=off/TARI_RESOURCE_PROFILE=compact/' "$case_root/state/.env"

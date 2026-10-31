@@ -72,6 +72,22 @@ jobs:
       - name: Stack tests
         run: tests/run.sh
 
+  native-nodes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [monero, tari, litecoin, dogecoin, bitcoincash, zcash]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test native daemon and dashboard
+        env:
+          RUN_NATIVE_NODE_SMOKE: "1"
+          NATIVE_NODE_CHAIN: ${{ matrix.chain }}
+        run: tests/test_native_nodes.sh
+
   macos-host:
     runs-on: macos-latest
     timeout-minutes: 15

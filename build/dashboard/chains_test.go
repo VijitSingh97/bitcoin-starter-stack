@@ -105,53 +105,116 @@ func TestExistingNodeRPCsRejectDirectPublicEgress(t *testing.T) {
 }
 
 func TestBitcoinFamilyStatusUsesOnlyPublicNodeRPC(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, password, ok := r.BasicAuth()
-		if !ok || user != "rpc-user" || password != "rpc-password" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		var request struct {
-			Method string `json:"method"`
-		}
-		if json.NewDecoder(r.Body).Decode(&request) != nil {
-			t.Fatal("invalid request")
-		}
-		result := any(map[string]any{})
-		switch request.Method {
-		case "getblockchaininfo":
-			result = map[string]any{"blocks": 100, "headers": 120, "bestblockhash": "tip", "verificationprogress": .5, "initialblockdownload": true, "pruned": true, "size_on_disk": 1234}
-		case "getnetworkinfo":
-			result = map[string]any{"subversion": "/LitecoinCore:1.0/", "connections": 2}
-		case "getpeerinfo":
-			result = []map[string]any{{"inbound": true}, {"inbound": false}}
-		case "uptime":
-			result = 90
-		case "getmempoolinfo":
-			result = map[string]any{"size": 3, "bytes": 456}
-		case "getblockheader":
-			result = map[string]any{"time": 1_800_000_000}
-		case "estimatesmartfee":
-			result = map[string]any{"feerate": .00001}
-		default:
-			t.Fatalf("unexpected RPC method %q", request.Method)
-		}
-		writeJSON(w, map[string]any{"result": result, "error": nil})
-	}))
-	defer server.Close()
-	dir := t.TempDir()
-	node := nodeConfig{ID: nodeLitecoin, Name: "Litecoin", Enabled: true, Supported: true, Protocol: "bitcoin-json-rpc", RPCURL: server.URL, RPCUser: "rpc-user", RPCPassword: "rpc-password", DataDir: dir, SteadyCPUs: 1, SteadyMemLimitMB: 4096, ResourceProfile: "compact"}
-	a := &app{cfg: config{stateDir: dir, nodes: map[string]nodeConfig{nodeLitecoin: node}}}
-	request := httptest.NewRequest(http.MethodGet, "/api/litecoin", nil)
-	request.SetPathValue("node", nodeLitecoin)
-	response := httptest.NewRecorder()
-	a.apiAdditionalNode(response, request)
-	var status genericNodeStatus
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil {
-		t.Fatalf("status response = %d %s", response.Code, response.Body.String())
+	for _, tc := range []struct{ id, name, version, unit, fee string }{
+		{nodeLitecoin, "Litecoin", "/LitecoinCore:0.21.4/", "litoshi/vB", "1"},
+		{nodeDogecoin, "Dogecoin", "/Shibetoshi:1.14.9/", "DOGE/kB", "0.00001"},
+		{nodeBitcoinCash, "Bitcoin Cash", "/Bitcoin Cash Node:29.2.0/", "sat/B", "1"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				user, password, ok := r.BasicAuth()
+				if !ok || user != tc.id+"-user" || password != tc.id+"-password" {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				var request struct {
+					Method string `json:"method"`
+					Params []any  `json:"params"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Error("invalid request")
+					return
+				}
+				var result any
+				switch request.Method {
+				case "getblockchaininfo":
+					result = map[string]any{"blocks": 100, "headers": 120, "bestblockhash": "tip", "verificationprogress": .5, "initialblockdownload": true, "pruned": true, "size_on_disk": 1234}
+				case "getnetworkinfo":
+					result = map[string]any{"subversion": tc.version, "connections": 2}
+				case "getpeerinfo":
+					result = []map[string]any{{"inbound": true}, {"inbound": false}}
+				case "uptime":
+					result = 90
+				case "getmempoolinfo":
+					result = map[string]any{"size": 3, "bytes": 456}
+				case "getblockheader":
+					result = map[string]any{"time": time.Now().Add(-time.Minute).Unix()}
+				case "estimatefee":
+					if tc.id != nodeBitcoinCash || len(request.Params) != 0 {
+						t.Errorf("unexpected estimatefee request: %#v", request)
+						return
+					}
+					result = .00001
+				case "estimatesmartfee":
+					if tc.id == nodeBitcoinCash || len(request.Params) != 1 {
+						t.Errorf("unexpected estimatesmartfee request: %#v", request)
+						return
+					}
+					result = map[string]any{"feerate": .00001}
+				default:
+					t.Errorf("unexpected public RPC method %q", request.Method)
+					return
+				}
+				writeJSON(w, map[string]any{"result": result, "error": nil})
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			node := nodeConfig{ID: tc.id, Name: tc.name, Enabled: true, Supported: true, Protocol: "bitcoin-json-rpc", RPCURL: server.URL, RPCUser: tc.id + "-user", RPCPassword: tc.id + "-password", DataDir: dir, SteadyCPUs: 1, SteadyMemLimitMB: 4096, ResourceProfile: "compact"}
+			a := &app{cfg: config{stateDir: dir, nodes: map[string]nodeConfig{tc.id: node}}}
+			request := httptest.NewRequest(http.MethodGet, "/api/"+tc.id, nil)
+			request.SetPathValue("node", tc.id)
+			response := httptest.NewRecorder()
+			a.apiAdditionalNode(response, request)
+			var status genericNodeStatus
+			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil {
+				t.Fatalf("status response = %d %s", response.Code, response.Body.String())
+			}
+			if !status.Available || status.Synced || status.Height != 100 || status.TargetHeight != 120 || status.SyncPercent != 50 || !status.Pruned || !status.PrunedAvailable || status.Version != tc.version || !status.ConnectionsAvailable || status.IncomingConnections != 1 || status.OutgoingConnections != 1 || !status.MempoolBytesAvailable || !status.FeesAvailable || status.FeeUnit != tc.unit || status.FeeEstimates[0] != tc.fee || status.WalletViewSupported || status.SteadyCPUs != 1 || status.SteadyMemLimitMB != 4096 || status.ResourceProfile != "compact" {
+				t.Fatalf("status = %#v", status)
+			}
+		})
 	}
-	if !status.Available || status.Synced || status.Height != 100 || status.TargetHeight != 120 || status.SyncPercent != 50 || !status.Pruned || !status.PrunedAvailable || status.Version != "/LitecoinCore:1.0/" || !status.ConnectionsAvailable || status.IncomingConnections != 1 || status.OutgoingConnections != 1 || !status.MempoolBytesAvailable || !status.FeesAvailable || status.FeeUnit != "sat/vB" || status.WalletViewSupported || status.SteadyCPUs != 1 || status.SteadyMemLimitMB != 4096 || status.ResourceProfile != "compact" {
-		t.Fatalf("status = %#v", status)
+}
+
+func TestFamilyUnavailableFeeDoesNotBecomeANegativePrice(t *testing.T) {
+	for _, id := range []string{nodeLitecoin, nodeDogecoin, nodeBitcoinCash} {
+		t.Run(id, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Error("invalid request")
+					return
+				}
+				var result any = map[string]any{}
+				switch request.Method {
+				case "getblockchaininfo":
+					result = map[string]any{"blocks": 0, "headers": 0, "initialblockdownload": true, "pruned": true}
+				case "getpeerinfo":
+					result = []any{}
+				case "uptime":
+					result = 0
+				case "estimatefee":
+					result = -1
+				case "estimatesmartfee":
+					result = map[string]any{"feerate": -1}
+				}
+				writeJSON(w, map[string]any{"result": result, "error": nil})
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			node := nodeConfig{ID: id, Name: id, Enabled: true, Supported: true, Protocol: "bitcoin-json-rpc", RPCURL: server.URL, DataDir: dir}
+			a := &app{cfg: config{stateDir: dir, nodes: map[string]nodeConfig{id: node}}}
+			request := httptest.NewRequest(http.MethodGet, "/api/"+id, nil)
+			request.SetPathValue("node", id)
+			response := httptest.NewRecorder()
+			a.apiAdditionalNode(response, request)
+			var status genericNodeStatus
+			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil || !status.Available || status.FeesAvailable || len(status.FeeEstimates) != 0 || status.FeeUnit != "" {
+				t.Fatalf("unavailable fee response = %d %#v", response.Code, status)
+			}
+		})
 	}
 }
 

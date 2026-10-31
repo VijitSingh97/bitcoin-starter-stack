@@ -25,6 +25,12 @@ temporary compaction space, or future growth.
 | Bitcoin Cash Node | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Signed upstream binary and runtime startup proven; full sync not qualified |
 | Zcash / Zakura | Pruned state with 10,000 retained blocks | Upstream's published snapshot was roughly 11 GB when checked; plan 30–60 GB on an expandable volume until a full sync is measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Pruning, Tor bootstrap, and RPC proven; full sync not qualified |
 
+All six non-Bitcoin adapters have passed native-daemon startup and dashboard
+checks on an Apple Silicon Mac using Docker Desktop. These checks cover Tor
+routing and published endpoint access; they do not establish full-sync disk
+usage or sustained operation within the compact budgets. Linux runs the same
+checks separately for every chain in CI.
+
 The Litecoin, Dogecoin, Bitcoin Cash, and Zcash figures are planning allowances,
 not measured usage. Tari has no defensible total-size estimate yet, so do not put
 it on a fixed small volume. The dashboard shows live chain and free-disk values;
@@ -43,6 +49,23 @@ memory and CPU for Tor, the Go dashboard, Docker, filesystem cache, the operatin
 system, and Monero's optional wallet service. Sync one chain at a time on a small
 host. A container cap on a larger test machine does not qualify a real VPS with
 the same total RAM.
+
+## Dashboard data
+
+Panels share sync progress, block height, peers, disk space, resource profile,
+endpoint status, and price fields. A value the native daemon cannot supply is
+shown as unavailable rather than estimated or copied from another chain. Tari
+does not report an uptime or fee estimate through its status API; a zero pruned
+height leaves its pruning status unknown until pruning has occurred.
+
+Fee estimates retain their native units: Litecoin uses litoshi/vB, Dogecoin uses
+DOGE/kB, and Bitcoin Cash uses sat/B. Bitcoin Cash reports one general estimate;
+Litecoin and Dogecoin report 1-, 3-, and 6-block targets when enough observations
+are available. An insufficient-history response is shown as unavailable.
+Zcash displays its standard ZIP-317 fee separately from an estimate.
+
+Bitcoin watch-only wallets and Monero view-only wallets are supported. The other
+chains currently provide node monitoring without a wallet view.
 
 ## Setup wizard
 

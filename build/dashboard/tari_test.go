@@ -20,6 +20,18 @@ type tariFixture struct {
 
 type tariNoNetworkFixture struct{ tariFixture }
 
+type tariSyncingFixture struct{ tariFixture }
+
+type tariUnprunedFixture struct{ tariFixture }
+
+func (tariSyncingFixture) GetSyncProgress(context.Context, *emptypb.Empty) (*SyncProgressResponse, error) {
+	return &SyncProgressResponse{TipHeight: 200, LocalHeight: 123, State: SyncState_BLOCK}, nil
+}
+
+func (f tariUnprunedFixture) GetTipInfo(context.Context, *emptypb.Empty) (*TipInfoResponse, error) {
+	return &TipInfoResponse{Metadata: &MetaData{BestBlockHeight: 123, Timestamp: f.timestamp}, InitialSyncAchieved: true, BaseNodeState: BaseNodeState_LISTENING}, nil
+}
+
 func (tariNoNetworkFixture) GetNetworkState(context.Context, *GetNetworkStateRequest) (*GetNetworkStateResponse, error) {
 	return nil, errors.New("unavailable")
 }
@@ -114,5 +126,65 @@ func TestTariDoesNotInventConnectionsWhenNetworkRPCFails(t *testing.T) {
 	status, err := a.fetchTariStatus(t.Context(), node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
 	if err != nil || status.Connections != 0 || status.ConnectionsAvailable {
 		t.Fatalf("Tari connections = %#v, %v", status, err)
+	}
+}
+
+func TestTariDoesNotInferArchiveModeFromZeroPrunedHeight(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	RegisterBaseNodeServer(server, tariUnprunedFixture{tariFixture{timestamp: uint64(time.Now().Unix())}})
+	go server.Serve(listener)
+	defer server.Stop()
+	dir := t.TempDir()
+	node := nodeConfig{ID: nodeTari, Enabled: true, Supported: true, RPCURL: "http://" + listener.Addr().String(), DataDir: dir}
+	a := &app{cfg: config{stateDir: dir}}
+	status, err := a.fetchTariStatus(t.Context(), node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
+	if err != nil || status.Pruned || status.PrunedAvailable {
+		t.Fatalf("zero-pruned-height Tari status = %#v, %v", status, err)
+	}
+}
+
+func TestTariSyncProgressPreventsFalseSyncedStatus(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	RegisterBaseNodeServer(server, tariSyncingFixture{tariFixture{timestamp: uint64(time.Now().Unix())}})
+	go server.Serve(listener)
+	defer server.Stop()
+	dir := t.TempDir()
+	node := nodeConfig{ID: nodeTari, Enabled: true, Supported: true, RPCURL: "http://" + listener.Addr().String(), DataDir: dir}
+	a := &app{cfg: config{stateDir: dir}}
+	status, err := a.fetchTariStatus(t.Context(), node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
+	if err != nil || status.Synced || status.Height != 123 || status.TargetHeight != 200 || status.SyncPercent != 61.5 {
+		t.Fatalf("syncing Tari status = %#v, %v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tari.synced")); !os.IsNotExist(err) {
+		t.Fatalf("syncing Tari retained sync marker: %v", err)
+	}
+}
+
+func TestTariFutureTipDoesNotCreateSyncMarker(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	RegisterBaseNodeServer(server, tariFixture{timestamp: uint64(time.Now().Add(time.Hour).Unix())})
+	go server.Serve(listener)
+	defer server.Stop()
+	dir := t.TempDir()
+	node := nodeConfig{ID: nodeTari, Enabled: true, Supported: true, RPCURL: "http://" + listener.Addr().String(), DataDir: dir}
+	a := &app{cfg: config{stateDir: dir}}
+	status, err := a.fetchTariStatus(t.Context(), node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
+	if err != nil || !status.Synced || status.LatestBlockAvailable || status.LatestBlockTimestamp != 0 || status.LatestBlockAgeSeconds != 0 {
+		t.Fatalf("future-tip Tari status = %#v, %v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tari.synced")); !os.IsNotExist(err) {
+		t.Fatalf("future Tari tip created sync marker: %v", err)
 	}
 }

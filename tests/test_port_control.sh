@@ -82,6 +82,10 @@ fake_lsof=$tmp/lsof
 cat >"$fake_lsof" <<'EOF'
 #!/bin/sh
 set -eu
+[ "${FAKE_LSOF_HANG:-0}" != 1 ] || {
+  printf '%s\n' "$$" >"$FAKE_LSOF_PID_FILE"
+  exec sleep 30
+}
 [ "${FAKE_LSOF_FAIL:-0}" != 1 ] || exit 1
 printf '%s' "${FAKE_LSOF_LISTENERS:-}"
 EOF
@@ -118,7 +122,7 @@ MONERO_RPC_EXPOSE=1
 MONERO_ZMQ_EXPOSE=1
 EOF
   cat >"$case_root/config/config.json" <<'EOF'
-{"bitcoin":{"enabled":true,"node_password":"bitcoinpassword1234567890123456","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":8332,"steady_cpus":0.5},"monero":{"enabled":true,"node_password":"moneropassword12345678901234567","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":18081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.10","zmq_port":18083},"dashboard":{"password":"testpassword"},"other":{"keep":"yes"}}
+{"bitcoin":{"enabled":true,"node_password":"bitcoinpassword1234567890123456","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":8332,"steady_cpus":0.5},"monero":{"enabled":true,"node_password":"moneropassword12345678901234567","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":18081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.10","zmq_port":18083},"tari":{"enabled":true,"grpc_expose":false},"litecoin":{"enabled":true,"node_password":"litecoinpassword123456789012345","rpc_expose":false},"dogecoin":{"enabled":true,"node_password":"dogecoinpassword123456789012345","rpc_expose":false},"bitcoincash":{"enabled":true,"node_password":"bitcoincashpassword1234567890123","rpc_expose":false},"zcash":{"enabled":true,"node_password":"zcashpassword123456789012345678","rpc_expose":false},"dashboard":{"password":"testpassword"},"other":{"keep":"yes"}}
 EOF
   export BITCOIN_STACK_ROOT=$case_root/root
   export BITCOIN_STACK_STATE_DIR=$case_root/state
@@ -137,7 +141,8 @@ EOF
   export PORT_CONTROL_NOW_EPOCH=1000 FAKE_APPLY_FAIL=0 FAKE_APPLY_FAIL_ONCE=0 FAKE_APPLY_FAIL_MARKER=$case_root/apply-failed
   export FAKE_TOR_PORTS='{"8332/tcp":[{"HostIp":"192.168.1.10","HostPort":"8332"}],"18081/tcp":[{"HostIp":"192.168.1.10","HostPort":"18081"}],"18083/tcp":[{"HostIp":"192.168.1.10","HostPort":"18083"}]}'
   unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL
-  unset FAKE_IP_FAIL FAKE_LSOF_FAIL FAKE_IFCONFIG_FAIL FAKE_LSOF_LISTENERS FAKE_IFCONFIG_ADDRESSES
+  unset FAKE_IP_FAIL FAKE_LSOF_FAIL FAKE_LSOF_HANG FAKE_LSOF_PID_FILE FAKE_IFCONFIG_FAIL
+  unset FAKE_LSOF_LISTENERS FAKE_IFCONFIG_ADDRESSES
   : >"$FAKE_DOCKER_LOG"
   : >"$FAKE_STACK_LOG"
 }
@@ -148,6 +153,39 @@ request() {
 
 status() {
   jq -r "$1" "$FAKE_DASH_STATE/port-control.status"
+}
+
+bounded_lsof() {
+  probe_output=$tmp/lsof-probe
+  probe_status=$tmp/lsof-probe.status
+  rm -f "$probe_status"
+  (
+    child_pid=
+    trap 'kill -KILL "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 124' HUP INT TERM
+    "$LSOF_BIN" -b "$@" >"$probe_output" 2>/dev/null &
+    child_pid=$!
+    if wait "$child_pid"; then
+      child_status=0
+    else
+      child_status=$?
+    fi
+    printf '%s\n' "$child_status" >"$probe_status"
+    exit "$child_status"
+  ) &
+  probe_pid=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    if [ -f "$probe_status" ]; then
+      if wait "$probe_pid"; then
+        cat "$probe_output"
+        return 0
+      fi
+      return 1
+    fi
+    sleep 0.1
+  done
+  kill -TERM "$probe_pid" 2>/dev/null || true
+  wait "$probe_pid" 2>/dev/null || true
+  return 1
 }
 
 new_case close
@@ -209,6 +247,50 @@ scripts/node-port-control
 [ "$(jq -r '.bitcoin.rpc_bind_ip' "$case_root/config/config.json")" = 172.16.1.20 ] || fail "open listener bind edit was not saved"
 [ "$(jq -r '.bitcoin.rpc_port' "$case_root/config/config.json")" = 38332 ] || fail "open listener port edit was not saved"
 [ "$(status .state)" = applied ] || fail "open listener edit was not applied"
+
+new_case additional-node-ports
+port_specs='tari_grpc:tari:grpc:18142
+litecoin_rpc:litecoin:rpc:19332
+dogecoin_rpc:dogecoin:rpc:22555
+bitcoincash_rpc:bitcoincash:rpc:18332
+zcash_rpc:zcash:rpc:18232'
+request '{"id":"40404040404040404040404040404040","changes":[{"port":"tari_grpc","enabled":true,"bind_ip":"192.168.1.20","host_port":18142},{"port":"litecoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":19332},{"port":"dogecoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":22555},{"port":"bitcoincash_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":18332},{"port":"zcash_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":18232}],"requested_at":1000}'
+scripts/node-port-control
+printf '%s\n' "$port_specs" | while IFS=: read -r setting node kind host_port; do
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_expose"]' "$case_root/config/config.json")" = true ] ||
+    fail "$setting was not opened"
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_bind_ip"]' "$case_root/config/config.json")" = 192.168.1.20 ] ||
+    fail "$setting bind was not saved"
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_port"]' "$case_root/config/config.json")" = "$host_port" ] ||
+    fail "$setting port was not saved"
+  [ "$(status '.affected_services | join(",")')" = tor,dashboard ] || fail "$setting named the wrong affected services"
+done
+request '{"id":"50505050505050505050505050505050","changes":[{"port":"tari_grpc","enabled":true,"bind_ip":"192.168.1.25","host_port":19142},{"port":"litecoin_rpc","enabled":true,"bind_ip":"192.168.1.25","host_port":20332},{"port":"dogecoin_rpc","enabled":true,"bind_ip":"192.168.1.25","host_port":23555},{"port":"bitcoincash_rpc","enabled":true,"bind_ip":"192.168.1.25","host_port":19332},{"port":"zcash_rpc","enabled":true,"bind_ip":"192.168.1.25","host_port":19232}],"requested_at":1000}'
+scripts/node-port-control
+printf '%s\n' "$port_specs" | while IFS=: read -r setting node kind host_port; do
+  changed_port=$((host_port + 1000))
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_expose"]' "$case_root/config/config.json")" = true ] ||
+    fail "$setting edit closed the listener"
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_bind_ip"]' "$case_root/config/config.json")" = 192.168.1.25 ] ||
+    fail "$setting edited bind was not saved"
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_port"]' "$case_root/config/config.json")" = "$changed_port" ] ||
+    fail "$setting edited port was not saved"
+done
+request '{"id":"60606060606060606060606060606060","changes":[{"port":"tari_grpc","enabled":false},{"port":"litecoin_rpc","enabled":false},{"port":"dogecoin_rpc","enabled":false},{"port":"bitcoincash_rpc","enabled":false},{"port":"zcash_rpc","enabled":false}],"requested_at":1000}'
+scripts/node-port-control
+printf '%s\n' "$port_specs" | while IFS=: read -r setting node kind _host_port; do
+  [ "$(jq -r --arg node "$node" --arg kind "$kind" '.[$node][$kind + "_expose"]' "$case_root/config/config.json")" = false ] ||
+    fail "$setting was not closed"
+done
+[ "$(grep -c '^apply-port-settings$' "$FAKE_STACK_LOG")" = 3 ] || fail "additional node port changes did not each apply once"
+
+new_case additional-node-conflict
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"70707070707070707070707070707070","changes":[{"port":"litecoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":29332},{"port":"dogecoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":29332}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = rejected ] || fail "additional node port conflict was accepted"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "additional node conflict changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "additional node conflict invoked apply"
 
 new_case invalid-open
 original_config=$(cat "$case_root/config/config.json")
@@ -291,11 +373,22 @@ if [ "$(uname -s)" = Darwin ] && command -v lsof >/dev/null 2>&1 && command -v i
     LSOF_BIN=$(command -v lsof)
     IFCONFIG_BIN=$(command -v ifconfig)
     export PORT_CONTROL_OS LSOF_BIN IFCONFIG_BIN
-    openssl s_server -accept 0.0.0.0:49556 -nocert -quiet -ign_eof </dev/null >"$case_root/listener.log" 2>&1 &
-    listener_pid=$!
+    listener_pid=
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      macos_port=$((49152 + RANDOM % 10000))
+      openssl s_server -accept "0.0.0.0:$macos_port" -nocert -quiet -ign_eof </dev/null >"$case_root/listener.log" 2>&1 &
+      listener_pid=$!
+      sleep 0.1
+      if kill -0 "$listener_pid" 2>/dev/null; then
+        break
+      fi
+      wait "$listener_pid" 2>/dev/null || true
+      listener_pid=
+    done
+    [ -n "$listener_pid" ] || fail "real macOS TCP listener could not bind a high port"
     listener_ready=0
     for _ in 1 2 3 4 5 6 7 8 9 10; do
-      if "$LSOF_BIN" -nP -iTCP:49556 -sTCP:LISTEN -F n | grep -Eq '^n(\*|0\.0\.0\.0):49556$'; then
+      if bounded_lsof -nP -iTCP:"$macos_port" -sTCP:LISTEN -F n | grep -Eq "^n(\\*|0\\.0\\.0\\.0):$macos_port$"; then
         listener_ready=1
         break
       fi
@@ -303,7 +396,7 @@ if [ "$(uname -s)" = Darwin ] && command -v lsof >/dev/null 2>&1 && command -v i
     done
     [ "$listener_ready" = 1 ] || fail "real macOS TCP listener did not start"
     original_config=$(cat "$case_root/config/config.json")
-    request "{\"id\":\"30303030303030303030303030303041\",\"changes\":[{\"port\":\"monero_rpc\",\"enabled\":true,\"bind_ip\":\"$lan_ip\",\"host_port\":49556}],\"requested_at\":1000}"
+    request "{\"id\":\"30303030303030303030303030303041\",\"changes\":[{\"port\":\"monero_rpc\",\"enabled\":true,\"bind_ip\":\"$lan_ip\",\"host_port\":$macos_port}],\"requested_at\":1000}"
     scripts/node-port-control
     [ "$(status .error_code)" = port_in_use ] || fail "real macOS host listener lacked typed conflict status"
     [ "$(status .port)" = monero_rpc ] || fail "real macOS host listener named the wrong setting"
@@ -433,6 +526,23 @@ scripts/node-port-control
 [ "$(status .error_code)" = port_check_failed ] || fail "macOS listener inspection failure lacked typed status"
 [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "macOS inspection failure changed config"
 [ ! -s "$FAKE_STACK_LOG" ] || fail "macOS inspection failure invoked apply"
+
+new_case macos-listener-inspection-timeout
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export PORT_CONTROL_OS=Darwin FAKE_LSOF_HANG=1 FAKE_LSOF_PID_FILE=$case_root/lsof.pid
+export FAKE_IFCONFIG_ADDRESSES='	inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255'
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303044","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = failed ] || fail "hung macOS listener inspection did not fail safely"
+[ "$(status .error_code)" = port_check_failed ] || fail "hung macOS listener inspection lacked typed status"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "hung macOS inspection changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "hung macOS inspection invoked apply"
+hung_lsof_pid=$(cat "$FAKE_LSOF_PID_FILE")
+if kill -0 "$hung_lsof_pid" 2>/dev/null; then
+  fail "hung macOS listener inspection left its child running"
+fi
 
 new_case wrong-tor
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"

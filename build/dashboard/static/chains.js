@@ -25,9 +25,10 @@ export function powerRequest(node, confirmation = "") {
 
 export function chainFeesView(id, data) {
   const standard = id === "zcash";
+  const targeted = id !== "bitcoincash" && !standard;
   const values = data.fees_available && Array.isArray(data.fee_estimates) ? data.fee_estimates : [];
   return {
-    label: standard ? "Standard fee (zats/action):" : data.fee_unit ? `Fee ${data.fee_unit} (1/3/6 blocks):` : "Fee estimates:",
+    label: standard ? "Standard fee (zats/action):" : data.fee_unit ? `Fee ${data.fee_unit}${targeted ? " (1/3/6 blocks)" : ""}:` : "Fee estimates:",
     value: values.length ? (standard ? String(values[0]) : values.join(" / ")) : "Unavailable",
   };
 }

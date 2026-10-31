@@ -56,15 +56,20 @@ func (a *app) fetchTariStatus(ctx context.Context, node nodeConfig, status gener
 		}
 	}
 	status.Synced = tip.InitialSyncAchieved && tip.BaseNodeState == BaseNodeState_LISTENING
+	if progressErr == nil {
+		status.Synced = status.Synced && progress.State == SyncState_DONE && progress.LocalHeight >= progress.TipHeight
+	}
 	if status.Synced {
 		status.SyncPercent = 100
 	} else if status.TargetHeight > 0 {
 		status.SyncPercent = min(100, float64(status.Height)/float64(status.TargetHeight)*100)
 	}
-	status.Pruned, status.PrunedAvailable = tip.Metadata.PrunedHeight > 0, true
-	if tip.Metadata.Timestamp > 0 {
+	status.Pruned = tip.Metadata.PrunedHeight > 0
+	status.PrunedAvailable = status.Pruned
+	now := time.Now().Unix()
+	if tip.Metadata.Timestamp > 0 && tip.Metadata.Timestamp <= uint64(now) {
 		status.LatestBlockTimestamp, status.LatestBlockAvailable = int64(tip.Metadata.Timestamp), true
-		status.LatestBlockAgeSeconds = max(0, time.Now().Unix()-int64(tip.Metadata.Timestamp))
+		status.LatestBlockAgeSeconds = now - int64(tip.Metadata.Timestamp)
 	}
 	if version, versionErr := client.GetVersion(ctx, &emptypb.Empty{}); versionErr == nil {
 		status.Version = version.Version

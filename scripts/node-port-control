@@ -163,7 +163,39 @@ host_tcp_listeners() {
       '
       ;;
     Darwin)
-      output=$($lsof_bin -nP -iTCP -sTCP:LISTEN -F n 2>/dev/null) || return 1
+      output_file=$(mktemp "$control_state/.lsof.XXXXXX") || return 1
+      status_file=$output_file.status
+      (
+        child_pid=
+        trap 'kill -KILL "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 124' HUP INT TERM
+        "$lsof_bin" -b -nP -iTCP -sTCP:LISTEN -F n >"$output_file" 2>/dev/null &
+        child_pid=$!
+        if wait "$child_pid"; then
+          child_status=0
+        else
+          child_status=$?
+        fi
+        printf '%s\n' "$child_status" >"$status_file"
+        exit "$child_status"
+      ) &
+      lsof_wait=0
+      lsof_pid=$!
+      while [ ! -f "$status_file" ] && [ "$lsof_wait" -lt 50 ]; do
+        sleep 0.1
+        lsof_wait=$((lsof_wait + 1))
+      done
+      if [ ! -f "$status_file" ]; then
+        kill -TERM "$lsof_pid" 2>/dev/null || true
+        wait "$lsof_pid" 2>/dev/null || true
+        rm -f "$output_file" "$status_file"
+        return 1
+      fi
+      if ! wait "$lsof_pid"; then
+        rm -f "$output_file" "$status_file"
+        return 1
+      fi
+      output=$(cat "$output_file")
+      rm -f "$output_file" "$status_file"
       printf '%s\n' "$output" | awk '
         substr($0, 1, 1) != "n" { next }
         {
