@@ -69,7 +69,8 @@ export function formatUpdated(unixSeconds, DateTimeFormat = Intl.DateTimeFormat)
 export function moneroView(data) {
   if (!data || data.enabled === false) return { state: "Not configured", badge: "Disabled", details: false };
   if (data.available !== true) return { state: "Connecting...", badge: "Connecting", details: false };
-  const height = Math.max(0, Math.floor(Number(data.height) || 0));
+  const heightAvailable = typeof data.height === "number" && Number.isFinite(data.height) && data.height >= 0;
+  const height = heightAvailable ? Math.floor(data.height) : 0;
   const target = Math.max(height, Math.floor(Number(data.target_height) || 0));
   const progress = Math.max(0, Math.min(100, Number(data.sync_percent) || 0));
   const diskTotal = Number(data.disk_total_bytes);
@@ -96,7 +97,7 @@ export function moneroView(data) {
     fees: data.fees_available ? formatMoneroFees(data.fee_estimates_atomic_per_byte) : "—",
     rpcExposure: data.rpc_exposure_enabled ? `${String(data.rpc_endpoint || "—")} · LAN` : "Disabled",
     zmqExposure: data.zmq_exposure_enabled ? `${String(data.zmq_endpoint || "—")} · LAN` : "Disabled",
-    nextBlock: height ? height + 1 : "",
+    nextBlock: heightAvailable ? height + 1 : "",
     updated: formatUpdated(data.updated_at),
   };
 }
@@ -104,7 +105,8 @@ export function moneroView(data) {
 export function genericNodeView(data, label = "Node") {
   if (!data || data.enabled === false) return { state: "Not configured", badge: "Disabled", details: false };
   if (data.available !== true) return { state: `Connecting to ${label}...`, badge: "Connecting", details: false };
-  const height = Math.max(0, Math.floor(Number(data.height) || 0));
+  const heightAvailable = typeof data.height === "number" && Number.isFinite(data.height) && data.height >= 0;
+  const height = heightAvailable ? Math.floor(data.height) : 0;
   const target = Math.max(height, Math.floor(Number(data.target_height) || 0));
   const progress = Math.max(0, Math.min(100, Number(data.sync_percent) || 0));
   const diskTotal = Number(data.disk_total_bytes);
@@ -130,7 +132,7 @@ export function genericNodeView(data, label = "Node") {
     mempool: data.mempool_txs_available ? `${Math.max(0, Math.floor(Number(data.mempool_txs) || 0))} tx${data.mempool_bytes_available ? ` · ${formatCompactBytes(data.mempool_bytes)}` : ""}` : "—",
     lastBlock: data.latest_block_available ? `${Number(data.latest_block_age_seconds) < 60 ? "<1m" : formatUptime(data.latest_block_age_seconds)} ago` : "—",
     rpcExposure: data.rpc_exposure_enabled ? `${String(data.rpc_endpoint || "—")} · LAN` : "Disabled",
-    nextBlock: height ? height + 1 : "",
+    nextBlock: heightAvailable ? height + 1 : "",
     updated: formatUpdated(data.updated_at),
   };
 }

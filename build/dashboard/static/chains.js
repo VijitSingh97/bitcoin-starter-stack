@@ -119,6 +119,10 @@ export function controlView(payload) {
   return {available:payload?.control_available===true,pending:payload?.control_pending===true || valid && status.state==="pending",status:valid?status:null};
 }
 
+export function nodeBecameActive(previous, current) {
+  return current?.active === true && previous?.active !== true;
+}
+
 if (typeof document !== "undefined") {
   const state=new Map();
   const dialog=byId("node-power-dialog"), form=byId("node-power-form"), input=byId("node-power-confirm");
@@ -162,7 +166,7 @@ if (typeof document !== "undefined") {
         const previous=state.get(id);
         state.set(id,node);
         setNodeActive(id,node);
-        if(previous && !previous.active && node.active) window.dispatchEvent(new CustomEvent("node-power-updated",{detail:{id,active:true}}));
+        if(nodeBecameActive(previous,node)) window.dispatchEvent(new CustomEvent("node-power-updated",{detail:{id,active:true}}));
         refreshNode(id);
       }
       const configured=[...state.values()].some(node=>node.configured);
@@ -227,5 +231,6 @@ if (typeof document !== "undefined") {
     } catch(error) {setText("node-power-error",error.message || "The node state could not be confirmed. Refresh the status before trying again.");}
     finally {busy=false;updateSubmit();updateButtons();await loadNodes();}
   });
+  window.addEventListener("node-catalog-updated", loadNodes);
   loadNodes();
 }

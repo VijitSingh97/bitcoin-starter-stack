@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel, hostControlModel, hostActionPayload, bootControlLabel } from "./settings.js";
+import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel, hostControlModel, hostActionPayload, bootControlLabel, newlyInstalledNodes, shouldPollHost } from "./settings.js";
 
 const alertDefaults = {
   alert_monitor_online: true,
@@ -39,6 +39,28 @@ test("host controls expose installed nodes, platform startup wording, and revisi
   assert.deepEqual(hostActionPayload("apply_config", revision), { action: "apply_config", config_revision: revision });
   assert.equal(hostActionPayload("install", "unknown"), undefined);
   assert.equal(hostActionPayload("apply_config", "bad"), undefined);
+});
+
+test("completed installs reveal each new node without treating pending work as installed", () => {
+  const empty = hostControlModel({ nodes: [] });
+  const pending = hostControlModel({
+    nodes: [], status: { action: "install", state: "pending", message: "Installing Bitcoin…" },
+  });
+  const bitcoin = hostControlModel({
+    nodes: [{ id: "bitcoin", installed: true }],
+    status: { action: "install", state: "applied", message: "Bitcoin installed." },
+  });
+  const bitcoinAndMonero = hostControlModel({
+    nodes: [{ id: "bitcoin", installed: true }, { id: "monero", installed: true }],
+    status: { action: "install", state: "applied", message: "Monero installed." },
+  });
+
+  assert.deepEqual(newlyInstalledNodes(undefined, empty), []);
+  assert.deepEqual(newlyInstalledNodes(empty, pending), []);
+  assert.equal(shouldPollHost(pending), true);
+  assert.deepEqual(newlyInstalledNodes(pending, bitcoin), ["bitcoin"]);
+  assert.equal(shouldPollHost(bitcoin), false);
+  assert.deepEqual(newlyInstalledNodes(bitcoin, bitcoinAndMonero), ["monero"]);
 });
 
 test("global alert preferences default on and accept only bounded thresholds", () => {

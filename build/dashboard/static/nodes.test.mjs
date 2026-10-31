@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyHover, formatBytes, formatCompactBytes, formatHashrate, formatMoneroFees, formatUpdated, formatUptime, moneroView, selectionController, updateTowerProgress } from "./nodes.js";
+import { applyHover, formatBytes, formatCompactBytes, formatHashrate, formatMoneroFees, formatUpdated, formatUptime, genericNodeView, moneroView, selectionController, updateTowerProgress } from "./nodes.js";
 
 test("tower progress follows fresh node status and survives temporary outages or deactivation", () => {
   const live = { dataset: {} };
@@ -104,6 +104,18 @@ test("tower hover only records supported nodes", () => {
 test("Monero status does not invent metrics while disabled or unreachable", () => {
   assert.deepEqual(moneroView({ enabled: false }), { state: "Not configured", badge: "Disabled", details: false });
   assert.deepEqual(moneroView({ enabled: true, available: false, height: 99 }), { state: "Connecting...", badge: "Connecting", details: false });
+});
+
+test("zero-height nodes load block one without inventing a height when it is missing", () => {
+  for (const view of [
+    moneroView({ enabled: true, available: true, height: 0, sync_percent: 0 }),
+    genericNodeView({ enabled: true, available: true, height: 0, sync_percent: 0 }, "Litecoin"),
+  ]) {
+    assert.equal(view.progress, 0);
+    assert.equal(view.nextBlock, 1);
+  }
+  assert.equal(moneroView({ enabled: true, available: true, sync_percent: 0 }).nextBlock, "");
+  assert.equal(genericNodeView({ enabled: true, available: true, height: null, sync_percent: 0 }, "Litecoin").nextBlock, "");
 });
 
 test("available Monero metrics are clamped and formatted for the status card", () => {

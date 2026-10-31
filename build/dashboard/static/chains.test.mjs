@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {powerView,powerRequest,controlView,chainFeesView} from './chains.js';
+import {powerView,powerRequest,controlView,chainFeesView,nodeBecameActive} from './chains.js';
 import {genericNodeView,normalizeNode} from './nodes.js';
 import {overviewLayout,previewDepth,GRID} from './tower.js';
 
@@ -25,6 +25,12 @@ test('a queued state change remains pending until the host confirms its outcome'
   assert.equal(controlView({control_available:true,status:{...status,state:'applied'}}).pending,false);
   assert.equal(controlView({control_pending:true,status:{...status,id:'bad'}}).pending,true);
   assert.equal(controlView({status:{...status,state:'invented'}}).status,null);
+});
+test('the first active catalog result refreshes node status',()=>{
+  assert.equal(nodeBecameActive(undefined,{active:true}),true);
+  assert.equal(nodeBecameActive({active:false},{active:true}),true);
+  assert.equal(nodeBecameActive({active:true},{active:true}),false);
+  assert.equal(nodeBecameActive(undefined,{active:false}),false);
 });
 test('new chain panels distinguish unavailable data from real zero values',()=>{
   for(const id of ['tari','litecoin','dogecoin','bitcoincash','zcash']) assert.equal(normalizeNode(id),id);

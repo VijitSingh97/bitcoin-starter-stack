@@ -82,6 +82,15 @@ export function hostControlModel(data = {}) {
   };
 }
 
+export function newlyInstalledNodes(previous, current) {
+  if (!previous) return [];
+  return allNodes.filter((id) => previous.nodes[id]?.installed !== true && current.nodes[id]?.installed === true);
+}
+
+export function shouldPollHost(view) {
+  return view?.status?.state === "pending";
+}
+
 export function hostActionPayload(action, value) {
   if (action === "install" && allNodes.includes(value)) return { action, node: value };
   if (action === "launch_at_boot" && typeof value === "boolean") return { action, enabled: value };
@@ -328,6 +337,7 @@ if (typeof document !== "undefined") {
   let stagedPortDraft;
   let hostPoll;
   let hostView = hostControlModel();
+  let hostLoaded = false;
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
   const portRows = {
@@ -439,7 +449,10 @@ if (typeof document !== "undefined") {
   };
 
   const renderHost = (data) => {
-    hostView = hostControlModel(data);
+    const nextHostView = hostControlModel(data);
+    const installed = hostLoaded ? newlyInstalledNodes(hostView, nextHostView) : [];
+    hostView = nextHostView;
+    hostLoaded = true;
     hostNodes.replaceChildren();
     const busy = hostView.status.state === "pending";
     for (const node of Object.values(hostView.nodes)) {
@@ -463,12 +476,17 @@ if (typeof document !== "undefined") {
     applyConfig.disabled = !hostView.available || busy;
     hostStatus.textContent = hostView.status.message || (!hostView.available ? "Host controls require the installed helper." : "");
     clearTimeout(hostPoll);
-    if (busy && dialog.open) hostPoll = setTimeout(loadHost, 2000);
+    if (shouldPollHost(hostView)) hostPoll = setTimeout(loadHost, 2000);
+    if (installed.length) window.dispatchEvent(new CustomEvent("node-catalog-updated", { detail: { installed } }));
   };
 
   async function loadHost() {
     try { renderHost(await requestHost()); }
-    catch (error) { hostStatus.textContent = error.message; }
+    catch (error) {
+      hostStatus.textContent = error.message;
+      clearTimeout(hostPoll);
+      if (shouldPollHost(hostView)) hostPoll = setTimeout(loadHost, 2000);
+    }
   }
 
   async function submitHost(payload) {
@@ -599,7 +617,7 @@ if (typeof document !== "undefined") {
   }
   byId("open").addEventListener("click", () => { dialog.showModal(); credentialSettings.openPassword(); load(); loadHost(); });
   byId("close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { clearTimeout(hostPoll); clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
+  dialog.addEventListener("close", () => { clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
   window.addEventListener("node-selected", (event) => {
     credentialSettings.closeNode();
     if (event.detail?.node) {
