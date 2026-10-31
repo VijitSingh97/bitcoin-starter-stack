@@ -32,6 +32,7 @@ zcash_service="$(awk '
   inside { print }
 ' "$compose")"
 printf '%s\n' "$zcash_service" | grep -q '172.29.0.36'
+printf '%s\n' "$zcash_service" | grep -q 'DAC_READ_SEARCH'
 if printf '%s\n' "$zcash_service" | grep -Eq '^    (ports|user):'; then
   echo "Zcash must not publish its native RPC or bypass the image privilege drop" >&2
   exit 1
@@ -53,6 +54,8 @@ ZCASH_COOKIE_FILE="$cookie_dir/.cookie" ZCASH_COOKIE_OWNER_UID="$(id -u)" \
   PATH="$fake_path:/usr/bin:/bin" "$healthcheck"
 cookie_mode="$(stat -c '%a' "$cookie_dir/.cookie" 2>/dev/null || stat -f '%Lp' "$cookie_dir/.cookie")"
 [ "$cookie_mode" = 640 ]
+directory_mode="$(stat -c '%a' "$cookie_dir" 2>/dev/null || stat -f '%Lp' "$cookie_dir")"
+[ "$directory_mode" = 750 ]
 
 if ZCASH_COOKIE_FILE="$cookie_dir/missing" ZCASH_COOKIE_OWNER_UID="$(id -u)" \
   ZCASH_DASHBOARD_GID="$(id -g)" PATH="$fake_path:/usr/bin:/bin" "$healthcheck"; then

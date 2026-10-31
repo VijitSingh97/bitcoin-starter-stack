@@ -8,6 +8,10 @@ fail() {
   exit 1
 }
 
+[ -x scripts/node-control ] || fail "source node-control helper is not executable"
+grep -Fq 'scripts/node-control" || echo "upgrade-agent: node control check failed' stack ||
+  fail "upgrade-agent does not run node-control"
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cp stack configure.sh config.example.json "$tmp/"
@@ -161,6 +165,7 @@ case " $* " in
   *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
   *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
   *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ]; exit ;;
+  *' inspect --format {{.State.Running}} dashboard '*) printf 'true\n' ;;
 esac
 exit 0
 EOS
@@ -224,6 +229,8 @@ echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
   fail "apply did not hold the config lock through Compose"
+grep -q 'docker exec -i -u 1000 dashboard sh -c .*node-runtime.json' "$FAKE_LOG" ||
+  fail "apply did not synchronize dashboard node runtime state"
 grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
 # the agent start is backgrounded — give the stub a moment to log the call

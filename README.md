@@ -19,6 +19,8 @@ names for upgrade compatibility while the broader Node Manager takes shape.
 
 <img src="./images/nodes.png" width="100%" alt="Node Manager's clustered chain towers; click a tower to open its status panel" />
 
+<sub>Preview with sample data. Your dashboard reads the nodes you configure.</sub>
+
 </div>
 
 ---

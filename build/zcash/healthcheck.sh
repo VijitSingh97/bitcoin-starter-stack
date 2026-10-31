@@ -1,14 +1,16 @@
 #!/bin/sh
 set -eu
 cookie_file="${ZCASH_COOKIE_FILE:-/data/.cookie}"
+cookie_dir="$(dirname "$cookie_file")"
 cookie_owner_uid="${ZCASH_COOKIE_OWNER_UID:-10001}"
 dashboard_gid="${ZCASH_DASHBOARD_GID:-1000}"
 [ -f "$cookie_file" ] && [ ! -L "$cookie_file" ] || exit 1
 if [ "$(id -u)" = 0 ] && [ "${1:-}" != cookie-owner ]; then
-  chown "$cookie_owner_uid:$dashboard_gid" "$cookie_file"
+  chown "$cookie_owner_uid:$dashboard_gid" "$cookie_dir" "$cookie_file"
   exec setpriv --reuid="$cookie_owner_uid" --regid="$dashboard_gid" --clear-groups "$0" cookie-owner
 fi
 [ "$(id -u)" = "$cookie_owner_uid" ] || exit 1
+chmod 0750 "$cookie_dir"
 cookie="$(cat "$cookie_file")"
 case "$cookie" in
   __cookie__:*:*) exit 1 ;;

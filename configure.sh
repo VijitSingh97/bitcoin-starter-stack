@@ -736,9 +736,15 @@ if [ "$package_managed" = "1" ] && [ "$data_dir" = "${BITCOIN_STACK_DATA_DIR%/}/
   chmod 700 "$data_dir"
 fi
 if [ "$package_managed" = "1" ]; then
-  for node_dir in "$tari_data_dir" "$litecoin_data_dir" "$dogecoin_data_dir" "$bitcoincash_data_dir" "$zcash_data_dir"; do
+  for node_dir in "$tari_data_dir" "$litecoin_data_dir" "$dogecoin_data_dir" "$bitcoincash_data_dir"; do
     case "$node_dir" in "${BITCOIN_STACK_DATA_DIR%/}"/*) chown 1000:1000 "$node_dir"; chmod 700 "$node_dir" ;; esac
   done
+  case "$zcash_data_dir" in
+    "${BITCOIN_STACK_DATA_DIR%/}"/*)
+      chown 10001:1000 "$zcash_data_dir"
+      chmod 750 "$zcash_data_dir"
+      ;;
+  esac
 fi
 if [ "$package_managed" = "1" ] && [ "$monero_data_dir" = "${BITCOIN_STACK_DATA_DIR%/}/monero" ]; then
   chown 1000:1000 "$monero_data_dir"

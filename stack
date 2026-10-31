@@ -390,6 +390,27 @@ ensure_node_control_timer() {
     echo "WARN  could not enable node controls; run: sudo systemctl enable --now bitcoin-starter-stack-node-control.timer"
 }
 
+sync_node_runtime() {
+  [ "$(docker inspect --format '{{.State.Running}}' dashboard 2>/dev/null || true)" = true ] || return 0
+  local runtime='{}' node prefix enabled active
+  for node in bitcoin monero tari litecoin dogecoin bitcoincash zcash; do
+    prefix=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    enabled=$(env_get "${prefix}_ENABLED")
+    [ "$enabled" = 1 ] || continue
+    active=$(env_get "${prefix}_ACTIVE")
+    [ "$active" != 0 ] && active=true || active=false
+    runtime=$(jq -c --arg node "$node" --argjson active "$active" '. + {($node):$active}' <<<"$runtime")
+  done
+  for _ in 1 2 3 4 5; do
+    if printf '%s\n' "$runtime" | docker exec -i -u 1000 dashboard sh -c \
+      'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
 offline_up() {
   guard_package_containers
   for arg in "$@"; do
@@ -400,6 +421,10 @@ offline_up() {
   done
   compose up -d --pull never --no-build "$@" || {
     echo "Start failed. Missing images? Run $stack_command pull, then retry."
+    return 1
+  }
+  sync_node_runtime || {
+    echo "Start succeeded, but the dashboard node state could not be synchronized."
     return 1
   }
 }
@@ -689,6 +714,8 @@ upgrade_agent() {
   echo "upgrade-agent: watching for dashboard host-control requests (Ctrl-C to stop)."
   echo "  Port closes require a dashboard password; upgrades also require dashboard.control=true."
   while true; do
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+      "$stack_root/scripts/node-control" || echo "upgrade-agent: node control check failed; still watching"
     BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
       "$stack_root/scripts/node-port-control" || echo "upgrade-agent: LAN port control check failed; still watching"
     if docker exec dashboard test -f /state/upgrade.request 2>/dev/null; then
