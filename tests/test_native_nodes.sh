@@ -187,6 +187,7 @@ env \
   DASHBOARD_PASSWORD="$dashboard_secret" MONERO_RPC_USER=unused MONERO_RPC_PASSWORD=unused \
   TARI_GRPC_URL="http://$subnet_prefix.25:18142" \
   MONERO_WALLET_RPC_USER=unused MONERO_WALLET_RPC_PASSWORD=unused MONERO_WALLET_PASSWORD=unused \
+  TARI_WALLET_RPC_USER=unused TARI_WALLET_RPC_PASSWORD=unused TARI_WALLET_PASSWORD=unused \
   LITECOIN_RPC_USER=unused LITECOIN_RPC_PASSWORD=unused DOGECOIN_RPC_USER=unused DOGECOIN_RPC_PASSWORD=unused \
   BITCOINCASH_RPC_USER=unused BITCOINCASH_RPC_PASSWORD=unused ZCASH_RPC_USER=unused ZCASH_RPC_PASSWORD=unused \
   "${prefix}_ENABLED=1" "${prefix}_RPC_USER=smoke" "${prefix}_RPC_PASSWORD=$secret" \
@@ -198,7 +199,7 @@ jq --arg project "$project" --arg subnet "$subnet" --arg net "$subnet_prefix" \
   --arg work "$work" --arg chain "$chain" --arg entrypoint "$entrypoint_override" '
     walk(if type == "string" then gsub("172\\.29\\.0"; $net) else . end)
     | .name = $project
-    | del(.services["monero-wallet"])
+    | del(.services["monero-wallet"], .services["tari-wallet"])
     | .services |= with_entries(
         .value.container_name = ($project + "-" + .key)
         | if .value.build then .value.image = ($project + "-" + .key + ":smoke") else . end

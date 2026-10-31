@@ -7,8 +7,8 @@ if [ "${RUN_TARI_WALLET_NATIVE_SMOKE:-0}" != 1 ]; then
   exit 0
 fi
 
-for tool in docker go jq python3; do
-  command -v "$tool" >/dev/null || { echo "SKIP: $tool is required"; exit 0; }
+for tool in docker go jq python3 openssl; do
+  command -v "$tool" >/dev/null || { echo "FAIL: $tool is required for the requested native proof"; exit 1; }
 done
 
 run_id=$(openssl rand -hex 6)
