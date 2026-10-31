@@ -1,0 +1,310 @@
+#!/bin/sh
+set -eu
+
+stack_root=${BITCOIN_STACK_ROOT:-/usr/lib/bitcoin-starter-stack}
+state_root=${BITCOIN_STACK_STATE_DIR:-/var/lib/bitcoin-starter-stack}
+env_file=${BITCOIN_STACK_ENV_FILE:-$state_root/.env}
+docker_bin=${DOCKER_BIN:-docker}
+profile_state=$state_root/resource-profile
+stable_checks=${RESOURCE_STABLE_CHECKS:-3}
+memory_headroom_mb=${RESOURCE_MEMORY_HEADROOM_MB:-256}
+minimum_check_interval=${RESOURCE_MIN_CHECK_INTERVAL_SECONDS:-45}
+
+for value in "$stable_checks" "$memory_headroom_mb" "$minimum_check_interval"; do
+  case "$value" in '' | 0 | *[!0-9]*)
+    echo "resource-profile: invalid numeric settings" >&2
+    exit 1
+    ;;
+  esac
+done
+[ -r "$env_file" ] || exit 0
+mkdir -p "$profile_state"
+chmod 700 "$profile_state"
+exec 9>"$profile_state/.lock"
+if ! flock -n 9; then
+  exit 0
+fi
+
+env_get() {
+  sed -n "s/^$1=//p" "$env_file" | tail -n 1
+}
+
+compose() {
+  "$docker_bin" compose \
+    --project-directory "$state_root" \
+    --project-name "${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-apt}" \
+    --env-file "$env_file" \
+    -f "$stack_root/docker-compose.yml" "$@"
+}
+
+container_id() {
+  compose ps -q "$1" 2>/dev/null | head -n 1
+}
+
+container_healthy() {
+  [ "$("$docker_bin" inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null)" = healthy ]
+}
+
+memory_usage_mb() {
+  usage=$("$docker_bin" stats --no-stream --format '{{.MemUsage}}' "$1" 2>/dev/null | awk 'NR == 1 {print $1}')
+  value=$(printf '%s' "$usage" | sed 's/[^0-9.].*$//')
+  unit=$(printf '%s' "$usage" | sed 's/^[0-9.]*//')
+  [ -n "$value" ] || return 1
+  awk -v value="$value" -v unit="$unit" 'BEGIN {
+    if (unit == "B") factor = 1 / (1024 * 1024)
+    else if (unit == "kB" || unit == "KB" || unit == "KiB") factor = 1 / 1024
+    else if (unit == "MB" || unit == "MiB") factor = 1
+    else if (unit == "GB" || unit == "GiB") factor = 1024
+    else exit 1
+    printf "%.0f\n", value * factor
+  }'
+}
+
+bitcoin_synced() {
+  info=$(compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -e --argjson now "$current_time" '
+    .initialblockdownload == false and
+    (.blocks | type == "number") and
+    (.headers | type == "number") and
+    (.blocks + 1 >= .headers) and
+    (.time | type == "number") and
+    (.time >= $now - 21600) and
+    ((.warnings // []) == [] or (.warnings // "") == "")
+  ' >/dev/null
+}
+
+monero_synced() {
+  # shellcheck disable=SC2016
+  info=$(compose exec -T monero sh -c '
+    rpc() {
+      printf '\''user = "%s:%s"\ndigest\nheader = "Content-Type: application/json"\ndata = "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":\\"resource-profile\\",\\"method\\":\\"%s\\"}"\n'\'' "$MONERO_RPC_USER" "$MONERO_RPC_PASSWORD" "$1" |
+        curl --silent --show-error --fail --config - --max-time 10 http://127.0.0.1:18081/json_rpc
+      printf "\\n"
+    }
+    rpc get_info
+    rpc get_last_block_header
+  ' 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -se --argjson now "$current_time" '
+    length == 2 and
+    .[0].result.status == "OK" and
+    .[0].result.synchronized == true and
+    .[0].result.busy_syncing != true and
+    (.[0].result.height | type == "number") and
+    (.[0].result.target_height | type == "number") and
+    (.[0].result.target_height == 0 or .[0].result.height + 1 >= .[0].result.target_height) and
+    .[1].result.status == "OK" and
+    (.[1].result.block_header.timestamp | type == "number") and
+    .[1].result.block_header.timestamp >= $now - 21600
+  ' >/dev/null
+}
+
+utxo_synced() {
+  service=$1 cli=$2 config=$3
+  info=$(compose exec -T "$service" "$cli" -datadir=/data -conf="$config" getblockchaininfo 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -e --argjson now "$current_time" '
+    .initialblockdownload == false and (.blocks | type == "number") and
+    (.headers | type == "number") and .blocks + 1 >= .headers and
+    ((.mediantime // .time) | type == "number") and ((.mediantime // .time) >= $now - 21600) and
+    ((.warnings // "") == "" or (.warnings // []) == [])
+  ' >/dev/null
+}
+litecoin_synced() { utxo_synced litecoin litecoin-cli /tmp/litecoin.conf; }
+dogecoin_synced() { utxo_synced dogecoin dogecoin-cli /tmp/dogecoin.conf; }
+bitcoincash_synced() { utxo_synced bitcoincash bitcoin-cli /tmp/bitcoin.conf; }
+tari_synced() {
+  dashboard_container_id=$(container_id dashboard)
+  [ -n "$dashboard_container_id" ] || return 1
+  # shellcheck disable=SC2016
+  "$docker_bin" exec -u 1000 "$dashboard_container_id" sh -c '
+    now=$1
+    marker=/state/tari.synced
+    [ -f "$marker" ] && [ "$(cat "$marker")" = ready ] && [ "$(stat -c %u "$marker")" = 1000 ] || exit 1
+    modified=$(stat -c %Y "$marker") || exit 1
+    age=$((now - modified))
+    [ "$age" -ge -30 ] && [ "$age" -le 120 ]
+  ' sh "$current_time" >/dev/null 2>&1
+}
+zcash_synced() {
+  # shellcheck disable=SC2016
+  info=$(compose exec -T -u 10001:1000 zcash sh -c '
+    cookie=$(cat /data/.cookie) || exit 1
+    case "$cookie" in
+      __cookie__:*:*) exit 1 ;;
+      __cookie__:*) [ "${#cookie}" -eq 55 ] || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    curl -fsS --max-time 10 -H "content-type: application/json" \
+      --user "$cookie" \
+      --data '\''{"jsonrpc":"2.0","id":"resource-profile","method":"getblockchaininfo","params":[]}'\'' \
+      http://127.0.0.1:8232/
+  ' 2>/dev/null) || return 1
+  best_hash=$(printf '%s' "$info" | jq -er '.result.bestblockhash | select(type=="string" and test("^[0-9a-f]{64}$"))') || return 1
+  # shellcheck disable=SC2016
+  header=$(compose exec -T -u 10001:1000 zcash sh -c '
+    cookie=$(cat /data/.cookie) || exit 1
+    case "$cookie" in
+      __cookie__:*:*) exit 1 ;;
+      __cookie__:*) [ "${#cookie}" -eq 55 ] || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    payload=$(printf '\''{"jsonrpc":"2.0","id":"resource-profile","method":"getblockheader","params":["%s"]}'\'' "$1")
+    curl -fsS --max-time 10 --user "$cookie" -H "content-type: application/json" --data "$payload" http://127.0.0.1:8232/
+  ' sh "$best_hash" 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$info" "$header" | jq -se --argjson now "$current_time" '
+    length == 2 and .[0].error == null and (.[0].result | type == "object") and
+    (.[0].result.blocks | type == "number") and .[0].result.blocks > 0 and
+    (.[0].result.estimatedheight | type == "number") and
+    .[0].result.blocks + 1 >= .[0].result.estimatedheight and
+    (.[0].result.verificationprogress | type == "number") and
+    .[0].result.verificationprogress >= 0.999999 and
+    .[1].error == null and (.[1].result.time | type == "number") and
+    .[1].result.time >= $now - 21600
+  ' >/dev/null
+}
+
+profile_enabled() {
+  [ "$(env_get "$1")" = compact ]
+}
+
+already_capped() {
+  [ "$(current_limits "$1")" = "$2 $3 $3" ]
+}
+
+current_limits() {
+  "$docker_bin" inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$1" 2>/dev/null
+}
+
+save_state() {
+  printf '%s|%s|%s|%s\n' "$2" "$3" "$4" "$5" >"$profile_state/$1"
+  chmod 600 "$profile_state/$1"
+}
+
+clean_restart() {
+  service=$1
+  id=$2
+  compose stop "$service" >/dev/null || return 1
+  exit_code=$("$docker_bin" inspect --format '{{.State.ExitCode}}' "$id" 2>/dev/null) || exit_code=unknown
+  compose start "$service" >/dev/null || return 1
+  [ "$exit_code" = 0 ]
+}
+
+apply_profile() {
+  service=$1
+  profile_var=$2
+  sync_check=$3
+  cpu_var=$4
+  memory_var=$5
+  profile_file=$profile_state/$service
+
+  if ! profile_enabled "$profile_var"; then
+    return 0
+  fi
+  id=$(container_id "$service")
+  [ -n "$id" ] || return 0
+  container_healthy "$id" || return 0
+
+  steady_cpus=$(env_get "$cpu_var")
+  memory_limit_mb=$(env_get "$memory_var")
+  [ -n "$steady_cpus" ] || steady_cpus=1
+  [ -n "$memory_limit_mb" ] || memory_limit_mb=2048
+  if ! awk -v value="$steady_cpus" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9][0-9]?)?$/ && value >= 0.01 && value <= 256) }'; then
+    echo "resource-profile: invalid $service CPU limit" >&2
+    return 1
+  fi
+  case "$memory_limit_mb" in '' | *[!0-9]*)
+    echo "resource-profile: invalid $service memory limit" >&2
+    return 1
+    ;;
+  esac
+  if [ "$memory_limit_mb" -le "$memory_headroom_mb" ] || [ "$memory_limit_mb" -gt 1048576 ]; then
+    echo "resource-profile: invalid $service memory limit" >&2
+    return 1
+  fi
+  cpu_nanos=$(awk -v value="$steady_cpus" 'BEGIN { printf "%.0f\n", value * 1000000000 }')
+  memory_bytes=$((memory_limit_mb * 1024 * 1024))
+
+  old_id=
+  checks=0
+  phase=pending
+  last_check=0
+  if [ -r "$profile_file" ]; then
+    IFS='|' read -r old_id checks phase last_check <"$profile_file" || true
+  fi
+  case "$checks" in '' | *[!0-9]*) checks=0 ;; esac
+  case "$last_check" in '' | *[!0-9]*) last_check=0 ;; esac
+  case "$phase" in pending | restarted | blocked | capped) ;; *) phase=pending ;; esac
+  if [ "$old_id" != "$id" ]; then
+    checks=0
+    phase=pending
+  fi
+  if already_capped "$id" "$cpu_nanos" "$memory_bytes"; then
+    save_state "$service" "$id" "$stable_checks" capped "$current_time"
+    return 0
+  fi
+  limits=$(current_limits "$id") || return 0
+  if [ "$limits" != "0 0 0" ]; then
+    echo "resource-profile: $service already has operator-set limits; leaving them unchanged" >&2
+    save_state "$service" "$id" 0 blocked "$current_time"
+    return 0
+  fi
+  if ! "$sync_check"; then
+    save_state "$service" "$id" 0 "$phase" 0
+    return 0
+  fi
+  if [ "$last_check" -gt 0 ] && [ $((current_time - last_check)) -lt "$minimum_check_interval" ]; then
+    return 0
+  fi
+  checks=$((checks + 1))
+  if [ "$checks" -lt "$stable_checks" ]; then
+    save_state "$service" "$id" "$checks" "$phase" "$current_time"
+    return 0
+  fi
+
+  if [ "$service" = bitcoin ]; then
+    dbcache=$(env_get BITCOIN_DBCACHE)
+    case "$dbcache" in '' | *[!0-9]*) dbcache=0 ;; esac
+    if [ "$dbcache" -gt $((memory_limit_mb - memory_headroom_mb)) ]; then
+      echo "resource-profile: bitcoin dbcache ${dbcache} MiB leaves less than ${memory_headroom_mb} MiB below its memory limit" >&2
+      save_state "$service" "$id" "$stable_checks" blocked "$current_time"
+      return 0
+    fi
+  fi
+
+  usage_mb=$(memory_usage_mb "$id") || {
+    echo "resource-profile: could not measure $service memory; leaving it unlimited" >&2
+    return 0
+  }
+  safe_usage_mb=$((memory_limit_mb - memory_headroom_mb))
+  if [ "$usage_mb" -gt "$safe_usage_mb" ]; then
+    if [ "$phase" = pending ]; then
+      echo "resource-profile: restarting synced $service once to release sync memory before applying its cap"
+      if ! clean_restart "$service" "$id"; then
+        echo "resource-profile: $service did not stop cleanly; leaving it unlimited" >&2
+        save_state "$service" "$id" 0 blocked "$current_time"
+        return 0
+      fi
+      save_state "$service" "$id" 0 restarted "$current_time"
+    else
+      echo "resource-profile: $service still uses ${usage_mb} MiB after restart; leaving it unlimited" >&2
+      save_state "$service" "$id" "$stable_checks" blocked "$current_time"
+    fi
+    return 0
+  fi
+
+  "$docker_bin" update --cpus "$steady_cpus" --memory "${memory_limit_mb}m" --memory-swap "${memory_limit_mb}m" "$id" >/dev/null
+  if ! already_capped "$id" "$cpu_nanos" "$memory_bytes"; then
+    echo "resource-profile: Docker did not apply the $service limits" >&2
+    return 1
+  fi
+  save_state "$service" "$id" "$stable_checks" capped "$current_time"
+  echo "resource-profile: capped synced $service at ${steady_cpus} CPU and ${memory_limit_mb} MiB memory"
+}
+
+current_time=${RESOURCE_NOW_EPOCH:-$(date +%s)}
+apply_profile bitcoin BITCOIN_RESOURCE_PROFILE bitcoin_synced BITCOIN_STEADY_CPUS BITCOIN_STEADY_MEM_LIMIT_MB
+apply_profile monero MONERO_RESOURCE_PROFILE monero_synced MONERO_STEADY_CPUS MONERO_STEADY_MEM_LIMIT_MB
+apply_profile tari TARI_RESOURCE_PROFILE tari_synced TARI_STEADY_CPUS TARI_STEADY_MEM_LIMIT_MB
+apply_profile litecoin LITECOIN_RESOURCE_PROFILE litecoin_synced LITECOIN_STEADY_CPUS LITECOIN_STEADY_MEM_LIMIT_MB
+apply_profile dogecoin DOGECOIN_RESOURCE_PROFILE dogecoin_synced DOGECOIN_STEADY_CPUS DOGECOIN_STEADY_MEM_LIMIT_MB
+apply_profile bitcoincash BITCOINCASH_RESOURCE_PROFILE bitcoincash_synced BITCOINCASH_STEADY_CPUS BITCOINCASH_STEADY_MEM_LIMIT_MB
+apply_profile zcash ZCASH_RESOURCE_PROFILE zcash_synced ZCASH_STEADY_CPUS ZCASH_STEADY_MEM_LIMIT_MB

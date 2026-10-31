@@ -20,6 +20,15 @@ services:
     environment:
       DASHBOARD_ONION: ${DASHBOARD_ONION:-0}
       BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
+      MONERO_RPC_EXPOSE: ${MONERO_RPC_EXPOSE:-0}
+      MONERO_ZMQ_EXPOSE: ${MONERO_ZMQ_EXPOSE:-0}
+      TARI_GRPC_EXPOSE: ${TARI_GRPC_EXPOSE:-0}
+      LITECOIN_RPC_EXPOSE: ${LITECOIN_RPC_EXPOSE:-0}
+      DOGECOIN_RPC_EXPOSE: ${DOGECOIN_RPC_EXPOSE:-0}
+      BITCOINCASH_RPC_EXPOSE: ${BITCOINCASH_RPC_EXPOSE:-0}
+      ZCASH_RPC_EXPOSE: ${ZCASH_RPC_EXPOSE:-0}
+      ZCASH_ENABLED: ${ZCASH_ENABLED:-0}
+      ZCASH_ACTIVE: ${ZCASH_ACTIVE:-1}
     volumes:
       - tor_data:/var/lib/tor
     restart: unless-stopped
@@ -37,11 +46,16 @@ services:
       tor_egress:
         gw_priority: 1
     ports:
-      - "${DASHBOARD_BIND_IP:-127.0.0.1}:80:8000"
+      - "${DASHBOARD_BIND_IP:-127.0.0.1}:${DASHBOARD_PORT:-80}:8000"
 
   bitcoin:
     image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
     container_name: bitcoin
+    profiles: ["bitcoin"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${BITCOIN_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${BITCOIN_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${BITCOIN_STEADY_MEM_LIMIT_MB:-2048}"
     user: "1000:1000"
     security_opt:
       - no-new-privileges:true
@@ -64,7 +78,7 @@ services:
       BLOCKFILTERINDEX: ${BITCOIN_BLOCKFILTERINDEX:-0}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data
-      - ${STACK_ROOT:-.}/build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
+      - ${STACK_ASSET_ROOT:-.}/build/bitcoin/bitcoin.conf:/data/bitcoin.conf:ro
       - tor_data:/var/lib/tor:ro
     # Clear stale lock files from an unclean shutdown, then start bitcoind.
     # Auth uses rpcauth (salted hash) — the plaintext RPC password never
@@ -103,6 +117,253 @@ services:
     dns:
       - 127.0.0.1
 
+  monero:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    build:
+      context: ${STACK_ROOT:-.}/build/monero
+    container_name: monero
+    profiles: ["monero"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${MONERO_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${MONERO_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${MONERO_STEADY_MEM_LIMIT_MB:-2048}"
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 0
+    cpus: 0
+    environment:
+      MONERO_RPC_USER: ${MONERO_RPC_USER:?run ./configure.sh first}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:?run ./configure.sh first}
+      TOR_PROXY: 172.29.0.25:9050
+    volumes:
+      - ${MONERO_DATA_DIR:-./data/monero}:/data
+    stop_signal: SIGTERM
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/monero-healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.30
+    dns:
+      - 127.0.0.1
+
+  monero-wallet:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    build:
+      context: ${STACK_ROOT:-.}/build/monero
+    container_name: monero-wallet
+    profiles: ["monero"]
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      MONERO_RPC_USER: ${MONERO_RPC_USER:?run ./configure.sh first}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:?run ./configure.sh first}
+      MONERO_WALLET_RPC_USER: ${MONERO_WALLET_RPC_USER:?run ./configure.sh first}
+      MONERO_WALLET_RPC_PASSWORD: ${MONERO_WALLET_RPC_PASSWORD:?run ./configure.sh first}
+    volumes:
+      - monero_wallets:/wallets
+    tmpfs:
+      - /run/monero-wallet:mode=0700,uid=1000,gid=1000
+      - /tmp:mode=0700,uid=1000,gid=1000
+    entrypoint: ["/usr/local/bin/monero-wallet-entrypoint"]
+    depends_on:
+      monero:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/monero-wallet-healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 5m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.31
+    dns:
+      - 127.0.0.1
+
+  tari:
+    image: ghcr.io/tari-project/minotari_node:v6.1.0-mainnet@sha256:ae106cfe2aa117d0015bf61ce1b1bb029df8ef0a02313fda2c8daf68c9f52c63
+    container_name: tari
+    profiles: ["tari"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${TARI_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${TARI_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${TARI_STEADY_MEM_LIMIT_MB:-4096}"
+    user: "1000:1000"
+    init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    environment:
+      WAIT_FOR_TOR: "1"
+      TARI_PRUNING_HORIZON: ${TARI_PRUNING_HORIZON:-10000}
+    volumes:
+      - ${TARI_DATA_DIR:-./data/tari}:/var/tari/node
+      - ${STACK_ASSET_ROOT:-.}/build/tari:/var/tari/config:ro
+    tmpfs: ["/tmp:size=64m,mode=0700,uid=1000,gid=1000"]
+    entrypoint: ["/var/tari/config/entrypoint.sh"]
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep '[m]inotari_node' >/dev/null"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.32
+    dns: ["127.0.0.1"]
+
+  litecoin:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-litecoin:${STACK_VERSION:-latest}
+    build: ${STACK_ROOT:-.}/build/litecoin
+    container_name: litecoin
+    profiles: ["litecoin"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${LITECOIN_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${LITECOIN_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${LITECOIN_STEADY_MEM_LIMIT_MB:-4096}"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    environment:
+      LITECOIN_RPC_USER: ${LITECOIN_RPC_USER:?run ./configure.sh first}
+      LITECOIN_RPC_PASSWORD: ${LITECOIN_RPC_PASSWORD:?run ./configure.sh first}
+      LITECOIN_PRUNE: ${LITECOIN_PRUNE:-10000}
+      TOR_PROXY: 172.29.0.25:9050
+    volumes: ["${LITECOIN_DATA_DIR:-./data/litecoin}:/data"]
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.33
+    dns: ["127.0.0.1"]
+
+  dogecoin:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dogecoin:${STACK_VERSION:-latest}
+    build: ${STACK_ROOT:-.}/build/dogecoin
+    container_name: dogecoin
+    profiles: ["dogecoin"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${DOGECOIN_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${DOGECOIN_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${DOGECOIN_STEADY_MEM_LIMIT_MB:-4096}"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    environment:
+      DOGECOIN_RPC_USER: ${DOGECOIN_RPC_USER:?run ./configure.sh first}
+      DOGECOIN_RPC_PASSWORD: ${DOGECOIN_RPC_PASSWORD:?run ./configure.sh first}
+      DOGECOIN_PRUNE: ${DOGECOIN_PRUNE:-10000}
+      TOR_PROXY: 172.29.0.25:9050
+    volumes: ["${DOGECOIN_DATA_DIR:-./data/dogecoin}:/data"]
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.34
+    dns: ["127.0.0.1"]
+
+  bitcoincash:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-bitcoincash:${STACK_VERSION:-latest}
+    build: ${STACK_ROOT:-.}/build/bitcoincash
+    container_name: bitcoincash
+    profiles: ["bitcoincash"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${BITCOINCASH_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${BITCOINCASH_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${BITCOINCASH_STEADY_MEM_LIMIT_MB:-4096}"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    volumes: ["${BITCOINCASH_DATA_DIR:-./data/bitcoincash}:/data"]
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    environment:
+      BITCOINCASH_RPC_USER: ${BITCOINCASH_RPC_USER:?run ./configure.sh first}
+      BITCOINCASH_RPC_PASSWORD: ${BITCOINCASH_RPC_PASSWORD:?run ./configure.sh first}
+      BITCOINCASH_PRUNE: ${BITCOINCASH_PRUNE:-10000}
+      TOR_PROXY: 172.29.0.25:9050
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.35
+    dns: ["127.0.0.1"]
+
+  zcash:
+    image: zakuracore/zakura:1.7.0@sha256:cf3b2d09a0ab3cd3a5e17cbbb676b7abe719607391402ea07d6402e9af897b6b
+    container_name: zcash
+    profiles: ["zcash"]
+    labels:
+      - "io.node-starter-stack.resource-profile=${ZCASH_RESOURCE_PROFILE:-off}"
+      - "io.node-starter-stack.steady-cpus=${ZCASH_STEADY_CPUS:-1}"
+      - "io.node-starter-stack.steady-memory-mb=${ZCASH_STEADY_MEM_LIMIT_MB:-4096}"
+    init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    # Zakura's root entrypoint needs to traverse a pre-existing private data directory before dropping privileges.
+    cap_add: ["CHOWN", "DAC_READ_SEARCH", "SETGID", "SETUID"]
+    environment:
+      CONFIG_FILE_PATH: /etc/zakura/zakurad.toml
+      ZAKURA_STATE__CACHE_DIR: /data
+      ZAKURA_RPC__COOKIE_DIR: /data
+    volumes:
+      - ${ZCASH_DATA_DIR:-./data/zcash}:/data
+      - ${STACK_ASSET_ROOT:-.}/build/zcash/zakurad.toml:/etc/zakura/zakurad.toml:ro
+      - ${STACK_ASSET_ROOT:-.}/build/zcash/healthcheck.sh:/usr/local/bin/node-stack-healthcheck:ro
+    tmpfs: ["/tmp:size=16m"]
+    stop_grace_period: 5m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/node-stack-healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30m
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.36
+    dns: ["127.0.0.1"]
+
   dashboard:
     # Prebuilt release image, with an explicit build target for development.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
@@ -118,20 +379,113 @@ services:
     cap_drop:
       - ALL
     environment:
+      BITCOIN_ENABLED: ${BITCOIN_ENABLED:-1}
+      BITCOIN_ACTIVE: ${BITCOIN_ACTIVE:-1}
       RPC_USER: ${BITCOIN_RPC_USER:?run ./configure.sh first}
       RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run ./configure.sh first}
+      BITCOIN_RPC_EXPOSE: ${BITCOIN_RPC_EXPOSE:-0}
+      BITCOIN_RPC_BIND_IP: ${BITCOIN_RPC_BIND_IP:-127.0.0.1}
+      BITCOIN_RPC_PORT: ${BITCOIN_RPC_PORT:-8332}
+      MONERO_ENABLED: ${MONERO_ENABLED:-0}
+      MONERO_ACTIVE: ${MONERO_ACTIVE:-1}
+      MONERO_RPC_URL: ${MONERO_RPC_URL:-http://172.29.0.30:18085}
+      MONERO_RPC_USER: ${MONERO_RPC_USER:-}
+      MONERO_RPC_PASSWORD: ${MONERO_RPC_PASSWORD:-}
+      MONERO_WALLET_RPC_URL: ${MONERO_WALLET_RPC_URL:-http://172.29.0.31:18082}
+      MONERO_WALLET_RPC_USER: ${MONERO_WALLET_RPC_USER:-}
+      MONERO_WALLET_RPC_PASSWORD: ${MONERO_WALLET_RPC_PASSWORD:-}
+      MONERO_WALLET_PASSWORD: ${MONERO_WALLET_PASSWORD:-}
+      MONERO_DATA_DIR: /data-monero
+      MONERO_RPC_EXPOSE: ${MONERO_RPC_EXPOSE:-0}
+      MONERO_RPC_BIND_IP: ${MONERO_RPC_BIND_IP:-127.0.0.1}
+      MONERO_RPC_PORT: ${MONERO_RPC_PORT:-18081}
+      MONERO_ZMQ_EXPOSE: ${MONERO_ZMQ_EXPOSE:-0}
+      MONERO_ZMQ_BIND_IP: ${MONERO_ZMQ_BIND_IP:-127.0.0.1}
+      MONERO_ZMQ_PORT: ${MONERO_ZMQ_PORT:-18083}
+      TARI_ENABLED: ${TARI_ENABLED:-0}
+      TARI_ACTIVE: ${TARI_ACTIVE:-1}
+      TARI_GRPC_URL: ${TARI_GRPC_URL:-http://172.29.0.32:18142}
+      TARI_DATA_DIR: /data-tari
+      TARI_GRPC_EXPOSE: ${TARI_GRPC_EXPOSE:-0}
+      TARI_GRPC_BIND_IP: ${TARI_GRPC_BIND_IP:-127.0.0.1}
+      TARI_GRPC_PORT: ${TARI_GRPC_PORT:-18142}
+      TARI_STEADY_CPUS: ${TARI_STEADY_CPUS:-1}
+      TARI_STEADY_MEM_LIMIT_MB: ${TARI_STEADY_MEM_LIMIT_MB:-4096}
+      TARI_RESOURCE_PROFILE: ${TARI_RESOURCE_PROFILE:-off}
+      LITECOIN_ENABLED: ${LITECOIN_ENABLED:-0}
+      LITECOIN_ACTIVE: ${LITECOIN_ACTIVE:-1}
+      LITECOIN_RPC_URL: ${LITECOIN_RPC_URL:-http://172.29.0.33:9332}
+      LITECOIN_RPC_USER: ${LITECOIN_RPC_USER:-}
+      LITECOIN_RPC_PASSWORD: ${LITECOIN_RPC_PASSWORD:-}
+      LITECOIN_DATA_DIR: /data-litecoin
+      LITECOIN_RPC_EXPOSE: ${LITECOIN_RPC_EXPOSE:-0}
+      LITECOIN_RPC_BIND_IP: ${LITECOIN_RPC_BIND_IP:-127.0.0.1}
+      LITECOIN_RPC_PORT: ${LITECOIN_RPC_PORT:-9332}
+      LITECOIN_STEADY_CPUS: ${LITECOIN_STEADY_CPUS:-1}
+      LITECOIN_STEADY_MEM_LIMIT_MB: ${LITECOIN_STEADY_MEM_LIMIT_MB:-4096}
+      LITECOIN_RESOURCE_PROFILE: ${LITECOIN_RESOURCE_PROFILE:-off}
+      DOGECOIN_ENABLED: ${DOGECOIN_ENABLED:-0}
+      DOGECOIN_ACTIVE: ${DOGECOIN_ACTIVE:-1}
+      DOGECOIN_RPC_URL: ${DOGECOIN_RPC_URL:-http://172.29.0.34:22555}
+      DOGECOIN_RPC_USER: ${DOGECOIN_RPC_USER:-}
+      DOGECOIN_RPC_PASSWORD: ${DOGECOIN_RPC_PASSWORD:-}
+      DOGECOIN_DATA_DIR: /data-dogecoin
+      DOGECOIN_RPC_EXPOSE: ${DOGECOIN_RPC_EXPOSE:-0}
+      DOGECOIN_RPC_BIND_IP: ${DOGECOIN_RPC_BIND_IP:-127.0.0.1}
+      DOGECOIN_RPC_PORT: ${DOGECOIN_RPC_PORT:-22555}
+      DOGECOIN_STEADY_CPUS: ${DOGECOIN_STEADY_CPUS:-1}
+      DOGECOIN_STEADY_MEM_LIMIT_MB: ${DOGECOIN_STEADY_MEM_LIMIT_MB:-4096}
+      DOGECOIN_RESOURCE_PROFILE: ${DOGECOIN_RESOURCE_PROFILE:-off}
+      BITCOINCASH_ENABLED: ${BITCOINCASH_ENABLED:-0}
+      BITCOINCASH_ACTIVE: ${BITCOINCASH_ACTIVE:-1}
+      BITCOINCASH_RPC_URL: ${BITCOINCASH_RPC_URL:-http://172.29.0.35:8332}
+      BITCOINCASH_RPC_USER: ${BITCOINCASH_RPC_USER:-}
+      BITCOINCASH_RPC_PASSWORD: ${BITCOINCASH_RPC_PASSWORD:-}
+      BITCOINCASH_DATA_DIR: /data-bitcoincash
+      BITCOINCASH_RPC_EXPOSE: ${BITCOINCASH_RPC_EXPOSE:-0}
+      BITCOINCASH_RPC_BIND_IP: ${BITCOINCASH_RPC_BIND_IP:-127.0.0.1}
+      BITCOINCASH_RPC_PORT: ${BITCOINCASH_RPC_PORT:-8332}
+      BITCOINCASH_STEADY_CPUS: ${BITCOINCASH_STEADY_CPUS:-1}
+      BITCOINCASH_STEADY_MEM_LIMIT_MB: ${BITCOINCASH_STEADY_MEM_LIMIT_MB:-4096}
+      BITCOINCASH_RESOURCE_PROFILE: ${BITCOINCASH_RESOURCE_PROFILE:-off}
+      ZCASH_ENABLED: ${ZCASH_ENABLED:-0}
+      ZCASH_ACTIVE: ${ZCASH_ACTIVE:-1}
+      ZCASH_RPC_URL: ${ZCASH_RPC_URL:-http://172.29.0.36:8232}
+      ZCASH_RPC_USER: ${ZCASH_RPC_USER:-}
+      ZCASH_RPC_PASSWORD: ${ZCASH_RPC_PASSWORD:-}
+      ZCASH_DATA_DIR: /data-zcash
+      ZCASH_RPC_EXPOSE: ${ZCASH_RPC_EXPOSE:-0}
+      ZCASH_RPC_BIND_IP: ${ZCASH_RPC_BIND_IP:-127.0.0.1}
+      ZCASH_RPC_PORT: ${ZCASH_RPC_PORT:-8232}
+      ZCASH_STEADY_CPUS: ${ZCASH_STEADY_CPUS:-1}
+      ZCASH_STEADY_MEM_LIMIT_MB: ${ZCASH_STEADY_MEM_LIMIT_MB:-4096}
+      ZCASH_RESOURCE_PROFILE: ${ZCASH_RESOURCE_PROFILE:-off}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      DASHBOARD_BIND_IP: ${DASHBOARD_BIND_IP:-127.0.0.1}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-80}
       DASHBOARD_CONTROL: ${DASHBOARD_CONTROL:-0}
       SETTINGS_PORT: "8001"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       HEALTHCHECKS_URL: ${HEALTHCHECKS_URL:-}
       ALERT_NEW_BLOCK: ${ALERT_NEW_BLOCK:-0}
+      ALERT_NEW_BLOCK_MONERO: ${ALERT_NEW_BLOCK_MONERO:-0}
+      ALERT_NEW_BLOCK_TARI: ${ALERT_NEW_BLOCK_TARI:-0}
+      ALERT_NEW_BLOCK_LITECOIN: ${ALERT_NEW_BLOCK_LITECOIN:-0}
+      ALERT_NEW_BLOCK_DOGECOIN: ${ALERT_NEW_BLOCK_DOGECOIN:-0}
+      ALERT_NEW_BLOCK_BITCOINCASH: ${ALERT_NEW_BLOCK_BITCOINCASH:-0}
+      ALERT_NEW_BLOCK_ZCASH: ${ALERT_NEW_BLOCK_ZCASH:-0}
       NODE_NAME: ${NODE_NAME:-bitcoin-node}
       STACK_VERSION: ${STACK_VERSION:-dev}
       WATCH_WALLETS_B64: ${WATCH_WALLETS_B64:-}
     volumes:
       - ${BITCOIN_DATA_DIR:-./data/bitcoin}:/data:ro
+      - ${MONERO_DATA_DIR:-./data/monero}:/data-monero:ro
+      - ${TARI_DATA_DIR:-./data/tari}:/data-tari:ro
+      - ${LITECOIN_DATA_DIR:-./data/litecoin}:/data-litecoin:ro
+      - ${DOGECOIN_DATA_DIR:-./data/dogecoin}:/data-dogecoin:ro
+      - ${BITCOINCASH_DATA_DIR:-./data/bitcoincash}:/data-bitcoincash:ro
+      - ${ZCASH_DATA_DIR:-./data/zcash}:/data-zcash:ro
       # writable state (the saved watch-only wallet list); the chain stays read-only
       - dashboard_state:/state
     restart: unless-stopped
@@ -148,8 +502,6 @@ services:
         ipv4_address: 172.29.0.27
     dns:
       - 127.0.0.1
-    depends_on:
-      - bitcoin
 
 networks:
   btc_net:
@@ -166,3 +518,4 @@ networks:
 volumes:
   tor_data:
   dashboard_state:
+  monero_wallets:

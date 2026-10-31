@@ -44,13 +44,41 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/configure.sh \
   ./usr/lib/bitcoin-starter-stack/docker-compose.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.tari-grpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.litecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.dogecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.bitcoincash-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.zcash-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
+  ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/tari/config.toml \
+  ./usr/lib/bitcoin-starter-stack/build/litecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/dogecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/zakurad.toml \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
+  ./usr/lib/bitcoin-starter-stack/node-resource-profile \
+  ./usr/lib/bitcoin-starter-stack/node-port-control \
+  ./usr/lib/bitcoin-starter-stack/node-control \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.timer \
   ./usr/share/doc/bitcoin-starter-stack/README.md \
+  ./usr/share/doc/bitcoin-starter-stack/docs/nodes.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/privacy.md; do
   grep -q " $required$" "$tmp/contents" || fail "package is missing $required"
 done
-if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
+if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|\.proto$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
   fail "package contains development-only files"
 fi
 if grep -Eq ' \./(etc|var)/' "$tmp/contents"; then
@@ -59,6 +87,8 @@ fi
 depends=$(dpkg-deb -f "$deb" Depends)
 printf '%s' "$depends" | grep -q 'docker-ce | docker.io' || fail "Docker Engine dependency alternatives are missing"
 printf '%s' "$depends" | grep -q 'curl' || fail "curl dependency is missing"
+printf '%s' "$depends" | grep -q 'util-linux' || fail "resource profile lock dependency is missing"
+printf '%s' "$depends" | grep -q 'iproute2' || fail "port listener inspection dependency is missing"
 printf '%s' "$depends" | grep -q 'docker-compose-plugin (>= 2.33.1) | docker-compose-v2 (>= 2.33.1) | docker-compose (>= 2.33.1)' || fail "Compose v2 dependency alternatives are missing minimum versions"
 
 mkdir "$tmp/control"
@@ -97,10 +127,16 @@ if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
 fi
 case " $* " in
   *' config --images '*) printf 'example.invalid/stack:test\n' ;;
-  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_DOCKER_LOG.images-ready" ]; exit ;;
+  *' pull '*) touch "$FAKE_DOCKER_LOG.images-ready" ;;
 esac
 EOF
 chmod +x "$fake/docker"
+cat >"$fake/systemctl" <<'EOF'
+#!/bin/sh
+printf 'systemctl %s\n' "$*" >>"$FAKE_DOCKER_LOG"
+EOF
+chmod +x "$fake/systemctl"
 
 home=$tmp/home
 config_dir=$tmp/etc/bitcoin-starter-stack
@@ -118,24 +154,33 @@ out=$("$wrapper" upgrade)
 printf '%s' "$out" | grep -q 'sudo apt install --only-upgrade bitcoin-starter-stack' || fail "upgrade omitted APT instructions"
 [ ! -e "$log" ] || fail "package upgrade invoked Docker"
 
-wizard_out=$(printf 'packagepassword1234567890\n\n\nn\n\nn\n' | "$wrapper" init)
+wizard_out=$(printf 'packagepassword1234567890\nbitcoin\n\n\nn\n\nn\n' | "$wrapper" init)
 printf '%s' "$wizard_out" | grep -q 'Publish the dashboard' && fail "package wizard still prompts for dashboard onion publishing"
 printf '%s' "$wizard_out" | grep -q 'Accept inbound Bitcoin' && fail "package wizard still prompts for inbound onion connections"
 printf '%s' "$wizard_out" | grep -q 'One-click upgrades' && fail "package wizard offered unsupported dashboard upgrades"
-[ "$(jq -r '.bitcoin.node_password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the shared password"
-[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not share the dashboard password"
+[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the dashboard password"
+bitcoin_password=$(jq -r '.bitcoin.node_password' "$config_dir/config.json")
+monero_password=$(jq -r '.monero.node_password' "$config_dir/config.json")
+printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wizard did not generate a Bitcoin RPC password"
+printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "package wizard did not generate a Monero RPC password"
+[ "$bitcoin_password" != "$monero_password" ] || fail "package wizard reused a node password"
 [ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
+[ "$(jq -r '.bitcoin.steady_cpus' "$config_dir/config.json")" = 1 ] || fail "package wizard did not write the Bitcoin steady CPU default"
+[ "$(jq -r '.bitcoin.steady_mem_limit_mb' "$config_dir/config.json")" = 2048 ] || fail "package wizard did not write the Bitcoin steady memory default"
 [ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
-[ "$(printf '%s' "$wizard_out" | grep -c 'Password: packagepassword1234567890')" = 1 ] || fail "package wizard did not print the new login exactly once"
+[ "$(printf '%s' "$wizard_out" | grep -c 'username: admin  password:')" = 2 ] || fail "package wizard did not print the selected node and dashboard credentials"
+printf '%s' "$wizard_out" | grep -q 'Monero RPC' && fail "package wizard printed credentials for an unselected node"
 printf '%s' "$wizard_out" | grep -q 'Download missing containers and start the stack now? \[Y/n\]' || fail "package wizard omitted explicit download/start prompt"
 printf '%s' "$wizard_out" | grep -q 'Later: bitcoin-stack pull && bitcoin-stack up' || fail "package wizard deferred-start instructions omit image download"
 rm -f "$config_dir/config.json"
 
 : >"$log"
-printf 'packagepassword1234567890\n\n\nn\n\n\n' |
+printf 'packagepassword1234567890\nbitcoin\n\n\nn\n\n\n' |
   FAKE_IMAGES_MISSING=1 "$wrapper" init >/dev/null
 grep -q -- 'compose .* pull' "$log" || fail "package wizard did not pull missing images"
 grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wizard start allows implicit pulls or builds"
+grep -q 'systemctl enable --now bitcoin-starter-stack-resource-profile.timer' "$log" || fail "package wizard did not start the resource profile timer"
+grep -q 'systemctl enable --now bitcoin-starter-stack-port-control.timer' "$log" || fail "package wizard did not start the LAN port-control timer"
 
 "$wrapper" apply >/dev/null
 env_file=$state_dir/.env
@@ -144,6 +189,12 @@ grep -q "^BITCOIN_DATA_DIR=$data_root/bitcoin$" "$env_file" || fail "data path i
 grep -q '^BITCOIN_DBCACHE=128$' "$env_file" || fail "fresh package install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$env_file" || fail "fresh package install is not pruned to 10000 MB"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$env_file" || fail "fresh package install exposed RPC"
+grep -q '^MONERO_ENABLED=0$' "$env_file" || fail "fresh package install enabled Monero"
+grep -q '^COMPOSE_PROFILES=bitcoin$' "$env_file" || fail "fresh package install did not select Bitcoin"
+grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$env_file" || fail "wizard did not enable the compact Bitcoin profile"
+grep -q '^MONERO_RESOURCE_PROFILE=off$' "$env_file" || fail "wizard enabled the compact profile for an unselected node"
+grep -q '^BITCOIN_STEADY_CPUS=1$' "$env_file" || fail "wizard did not render the Bitcoin steady CPU default"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$env_file" || fail "wizard did not render the Bitcoin steady memory default"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$env_file" || fail "fresh package install enabled an optional Compose override"
 grep -q "^STACK_ROOT=$runtime$" "$env_file" || fail "immutable payload path was not rendered"
 wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)
@@ -151,6 +202,9 @@ wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)
 [ -d "$data_root/bitcoin" ] || fail "data directory was not created"
 [ "$(stat -c %u "$data_root/bitcoin")" = 1000 ] || fail "data directory is not owned by the container uid"
 [ "$(stat -c %a "$data_root/bitcoin")" = 700 ] || fail "data directory permissions are not private"
+[ "$(stat -c %u "$data_root/zcash")" = 10001 ] || fail "Zcash data directory is not owned by the Zakura uid"
+[ "$(stat -c %g "$data_root/zcash")" = 1000 ] || fail "Zcash data directory is not readable by the dashboard group"
+[ "$(stat -c %a "$data_root/zcash")" = 750 ] || fail "Zcash data directory permissions block its runtime handoff"
 [ ! -e "$home" ] || fail "package wrote configuration or data under HOME"
 [ ! -e "$runtime/.env" ] || fail "package wrote state into /usr/lib payload"
 grep -q -- "--project-directory $state_dir" "$log" || fail "Compose project directory is not package state"

@@ -42,14 +42,53 @@ func (m *Monitor) loadState() {
 	var state persistedMonitorState
 	if json.Unmarshal(b, &state) == nil && (state.NotifiedStack == "" || releaseVersion.MatchString(state.NotifiedStack)) {
 		m.state.notifiedStack = state.NotifiedStack
+		applyPersistedNodeState(&m.state, state.Bitcoin)
+		applyPersistedNodeState(&m.moneroState, state.Monero)
+		for id, saved := range state.Nodes {
+			if normalizeNodeID(id) == "" || id == nodeBitcoin || id == nodeMonero {
+				continue
+			}
+			if m.extraStates[id] == nil {
+				m.extraStates[id] = &monitorState{}
+			}
+			applyPersistedNodeState(m.extraStates[id], saved)
+		}
 	}
 }
 
 func (m *Monitor) saveState() {
-	b, err := json.Marshal(persistedMonitorState{NotifiedStack: m.state.notifiedStack})
+	b, err := json.Marshal(m.persistedState())
 	if err != nil || writePrivateFileAtomic(m.statePath, append(b, '\n')) != nil {
 		m.writeOutput("Monitor state write failed")
 	}
+}
+
+func (m *Monitor) persistedState() persistedMonitorState {
+	nodes := make(map[string]persistedNodeState, len(m.extraStates))
+	for id, state := range m.extraStates {
+		nodes[id] = persistedNodeFromState(*state)
+	}
+	return persistedMonitorState{
+		NotifiedStack: m.state.notifiedStack,
+		Bitcoin:       persistedNodeFromState(m.state),
+		Monero:        persistedNodeFromState(m.moneroState),
+		Nodes:         nodes,
+	}
+}
+
+func persistedNodeFromState(state monitorState) persistedNodeState {
+	return persistedNodeState{
+		Fails: state.fails, DownAlerted: state.downAlerted, ChainKnown: state.chainKnown,
+		IBD: state.ibd, SyncPending: state.syncPending, LastBlock: state.lastBlock,
+		HasLastBlock: state.hasLastBlock, PendingBlock: state.pendingBlock, DiskAlerted: state.diskAlerted,
+	}
+}
+
+func applyPersistedNodeState(state *monitorState, saved persistedNodeState) {
+	state.fails, state.downAlerted, state.chainKnown = saved.Fails, saved.DownAlerted, false
+	state.ibd, state.syncPending = saved.IBD, saved.SyncPending
+	state.lastBlock, state.hasLastBlock, state.pendingBlock = saved.LastBlock, saved.HasLastBlock, saved.PendingBlock
+	state.diskAlerted = saved.DiskAlerted
 }
 
 func (m *Monitor) latestReleaseTag(ctx context.Context, url string) string {

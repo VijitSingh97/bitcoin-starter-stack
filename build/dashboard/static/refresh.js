@@ -43,5 +43,8 @@ if (typeof document !== "undefined") {
     }
   }
 
+  window.addEventListener("node-power-updated", event => {
+    if (event.detail?.id === "bitcoin" && event.detail?.active) tick();
+  });
   setInterval(tick, INTERVAL_MS);
 }

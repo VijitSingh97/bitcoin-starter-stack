@@ -1,0 +1,569 @@
+#!/bin/sh
+set -eu
+
+stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+state_root=${BITCOIN_STACK_STATE_DIR:-$stack_root}
+config_root=${BITCOIN_STACK_CONFIG_DIR:-$state_root}
+env_file=$state_root/.env
+config_file=$config_root/config.json
+config_lock=$state_root/.config.lock
+docker_bin=${DOCKER_BIN:-docker}
+ss_bin=${SS_BIN:-ss}
+ip_bin=${IP_BIN:-ip}
+lsof_bin=${LSOF_BIN:-/usr/sbin/lsof}
+ifconfig_bin=${IFCONFIG_BIN:-/sbin/ifconfig}
+host_os=${PORT_CONTROL_OS:-$(uname -s)}
+control_state=$state_root/port-control
+request_path=/state/port-control.request
+processing_path=/state/port-control.processing
+capability_path=/state/port-control.capability
+now=${PORT_CONTROL_NOW_EPOCH:-$(date +%s)}
+
+[ -r "$env_file" ] || exit 0
+mkdir -p "$control_state"
+chmod 700 "$control_state"
+exec 9>"$control_state/.lock"
+flock -n 9 || exit 0
+
+env_get() {
+  sed -n "s/^$1=//p" "$env_file" | tail -n 1
+}
+
+dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
+[ -n "$dashboard_id" ] || exit 0
+config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
+case ",$config_files," in
+  *",$stack_root/docker-compose.yml,"*) ;;
+  *) exit 0 ;;
+esac
+
+dashboard_exec() {
+  "$docker_bin" exec -u 1000 dashboard "$@"
+}
+
+write_status() {
+  status=$(jq -nc --arg id "$1" --arg state "$2" --arg message "$3" \
+    --arg error_code "${4:-}" --arg port "${5:-}" '
+      {id:$id,state:$state,message:$message,affected_services:["tor","dashboard"]} |
+      if $error_code == "" then . else . + {error_code:$error_code} end |
+      if $port == "" then . else . + {port:$port} end')
+  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+    'umask 077; cat >/state/.port-control.status.tmp; mv /state/.port-control.status.tmp /state/port-control.status' >/dev/null
+}
+
+clear_processing() {
+  dashboard_exec rm -f "$processing_path" >/dev/null 2>&1 || true
+}
+
+private_ipv4() {
+  ip=$1
+  case "$ip" in
+    *[!0-9.]* | .* | *. | *..*) return 1 ;;
+  esac
+  IFS=. read -r a b c d extra <<EOF
+$ip
+EOF
+  [ -z "$extra" ] || return 1
+  set -- "$a" "$b" "$c" "$d"
+  for octet in "$@"; do
+    case "$octet" in '' | *[!0-9]* | 0[0-9]* | 00*) return 1 ;; esac
+    [ "$octet" -le 255 ] || return 1
+  done
+  if [ "$1" = 10 ]; then
+    return 0
+  fi
+  if [ "$1" = 172 ] && [ "$2" -ge 16 ] && [ "$2" -le 31 ]; then
+    return 0
+  fi
+  [ "$1" = 192 ] && [ "$2" = 168 ]
+}
+
+published_ports() {
+  ports_json=$("$docker_bin" inspect --format '{{json .NetworkSettings.Ports}}' "$1" 2>/dev/null) || return 1
+  printf '%s' "$ports_json" | jq -e 'type == "object"' >/dev/null 2>&1 || return 1
+  printf '%s' "$ports_json" | jq -r 'to_entries[] | select(.key | endswith("/tcp")) | .value[]? |
+    [.HostIp, .HostPort] | @tsv'
+}
+
+binding_conflicts() {
+  desired_ip=$1
+  desired_port=$2
+  occupied_ip=$3
+  occupied_port=$4
+  case "$occupied_ip" in ::ffff:*) occupied_ip=${occupied_ip#::ffff:} ;; esac
+  [ "$desired_port" = "$occupied_port" ] || return 1
+  case "$occupied_ip" in
+    '' | 0.0.0.0 | '*' | :: | '[::]') return 0 ;;
+  esac
+  [ "$desired_ip" = "$occupied_ip" ]
+}
+
+own_listener() {
+  listener_ip=$1
+  listener_port=$2
+  normalized_listener_ip=$listener_ip
+  case "$normalized_listener_ip" in ::ffff:*) normalized_listener_ip=${normalized_listener_ip#::ffff:} ;; esac
+  case "$normalized_listener_ip" in '' | '*' | :: | '[::]') normalized_listener_ip=0.0.0.0 ;; esac
+  while IFS="$(printf '\t')" read -r own_ip own_port; do
+    case "$own_ip" in ::ffff:*) own_ip=${own_ip#::ffff:} ;; esac
+    case "$own_ip" in '' | '*' | :: | '[::]') own_ip=0.0.0.0 ;; esac
+    if [ "$own_ip" = "$normalized_listener_ip" ] && [ "$own_port" = "$listener_port" ]; then
+      return 0
+    fi
+  done <<EOF
+$own_bindings
+EOF
+  return 1
+}
+
+port_available() {
+  desired_ip=$1
+  desired_port=$2
+  while IFS="$(printf '\t')" read -r occupied_ip occupied_port; do
+    [ -n "$occupied_port" ] || continue
+    binding_conflicts "$desired_ip" "$desired_port" "$occupied_ip" "$occupied_port" && return 1
+  done <<EOF
+$other_bindings
+EOF
+  while IFS="$(printf '\t')" read -r occupied_ip occupied_port; do
+    [ -n "$occupied_port" ] || continue
+    if binding_conflicts "$desired_ip" "$desired_port" "$occupied_ip" "$occupied_port" &&
+      ! own_listener "$occupied_ip" "$occupied_port"; then
+      return 1
+    fi
+  done <<EOF
+$host_bindings
+EOF
+}
+
+host_tcp_listeners() {
+  case "$host_os" in
+    Linux)
+      output=$($ss_bin -H -ltn 2>/dev/null) || return 1
+      printf '%s\n' "$output" | awk '
+        NF == 0 { next }
+        NF < 4 { bad=1; next }
+        {
+          endpoint=$4
+          if (endpoint ~ /^\[/) {
+            sub(/^\[/, "", endpoint)
+            count=split(endpoint, parts, /\]:/)
+            if (count == 2 && parts[2] ~ /^[0-9]+$/) print parts[1] "\t" parts[2]
+            else bad=1
+          } else {
+            port=endpoint
+            sub(/^.*:/, "", port)
+            address=endpoint
+            sub(/:[^:]*$/, "", address)
+            if (port ~ /^[0-9]+$/ && address != "") print address "\t" port
+            else bad=1
+          }
+        }
+        END { exit bad }
+      '
+      ;;
+    Darwin)
+      output_file=$(mktemp "$control_state/.lsof.XXXXXX") || return 1
+      status_file=$output_file.status
+      (
+        child_pid=
+        trap 'kill -KILL "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 124' HUP INT TERM
+        "$lsof_bin" -b -nP -iTCP -sTCP:LISTEN -F n >"$output_file" 2>/dev/null &
+        child_pid=$!
+        if wait "$child_pid"; then
+          child_status=0
+        else
+          child_status=$?
+        fi
+        printf '%s\n' "$child_status" >"$status_file"
+        exit "$child_status"
+      ) &
+      lsof_wait=0
+      lsof_pid=$!
+      while [ ! -f "$status_file" ] && [ "$lsof_wait" -lt 50 ]; do
+        sleep 0.1
+        lsof_wait=$((lsof_wait + 1))
+      done
+      if [ ! -f "$status_file" ]; then
+        kill -TERM "$lsof_pid" 2>/dev/null || true
+        wait "$lsof_pid" 2>/dev/null || true
+        rm -f "$output_file" "$status_file"
+        return 1
+      fi
+      if ! wait "$lsof_pid"; then
+        rm -f "$output_file" "$status_file"
+        return 1
+      fi
+      output=$(cat "$output_file")
+      rm -f "$output_file" "$status_file"
+      printf '%s\n' "$output" | awk '
+        substr($0, 1, 1) != "n" { next }
+        {
+          endpoint=substr($0, 2)
+          if (endpoint ~ /^\[/) {
+            sub(/^\[/, "", endpoint)
+            count=split(endpoint, parts, /\]:/)
+            if (count == 2 && parts[2] ~ /^[0-9]+$/) print parts[1] "\t" parts[2]
+            else bad=1
+          } else {
+            port=endpoint
+            sub(/^.*:/, "", port)
+            address=endpoint
+            sub(/:[^:]*$/, "", address)
+            if (port ~ /^[0-9]+$/ && address != "") print address "\t" port
+            else bad=1
+          }
+        }
+        END { exit bad }
+      '
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+host_ipv4_addresses() {
+  case "$host_os" in
+    Linux)
+      output=$($ip_bin -o -4 addr show 2>/dev/null) || return 1
+      ;;
+    Darwin)
+      output=$($ifconfig_bin -a 2>/dev/null) || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  addresses=$(printf '%s\n' "$output" | awk '
+    {
+      for (i=1; i<=NF; i++) {
+        if ($i == "inet" && (i + 1) <= NF) {
+          address=$(i + 1)
+          sub(/\/.*/, "", address)
+          if (address ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print address
+        }
+      }
+    }
+  ')
+  [ -n "$addresses" ] || return 1
+  printf '%s\n' "$addresses"
+}
+
+password=$(env_get DASHBOARD_PASSWORD)
+if [ -z "$password" ]; then
+  dashboard_exec rm -f "$capability_path" >/dev/null 2>&1 || true
+  exit 0
+fi
+dashboard_exec sh -c \
+  'umask 077; printf "ready\n" > /state/.port-control.capability.tmp; mv /state/.port-control.capability.tmp /state/port-control.capability' >/dev/null
+
+if ! dashboard_exec test -f "$processing_path" >/dev/null 2>&1; then
+  dashboard_exec test -f "$request_path" >/dev/null 2>&1 || exit 0
+  dashboard_exec mv "$request_path" "$processing_path" >/dev/null 2>&1 || exit 0
+fi
+
+size=$(dashboard_exec sh -c 'wc -c < /state/port-control.processing' 2>/dev/null | tr -d ' ' || true)
+case "$size" in '' | *[!0-9]*) size=4097 ;; esac
+if [ "$size" -gt 4096 ]; then
+  write_status "" rejected "Invalid request."
+  clear_processing
+  exit 0
+fi
+request=$(dashboard_exec cat "$processing_path" 2>/dev/null || true)
+if ! printf '%s' "$request" | jq -e --argjson now "$now" '
+  type == "object" and
+  keys == ["changes", "id", "requested_at"] and
+  (.id | type == "string" and test("^[0-9a-f]{32}$")) and
+  (.requested_at | type == "number" and floor == . and . >= $now - 300 and . <= $now + 30) and
+  (.changes | type == "array" and length >= 1 and length <= 8) and
+  ((.changes | map(.port) | unique | length) == (.changes | length)) and
+  all(.changes[];
+    type == "object" and
+    (.port == "bitcoin_rpc" or .port == "monero_rpc" or .port == "monero_zmq" or .port == "tari_grpc" or
+     .port == "litecoin_rpc" or .port == "dogecoin_rpc" or .port == "bitcoincash_rpc" or .port == "zcash_rpc") and
+    (.enabled | type == "boolean") and
+    (if .enabled then
+      keys == ["bind_ip", "enabled", "host_port", "port"] and
+      (.bind_ip | type == "string") and
+      (.host_port | type == "number" and floor == . and . >= 1 and . <= 65535)
+    else keys == ["enabled", "port"] end))
+' >/dev/null 2>&1; then
+  write_status "" rejected "Invalid request."
+  clear_processing
+  exit 0
+fi
+
+while IFS="$(printf '\t')" read -r bind_ip host_port; do
+  if [ -n "$bind_ip" ] && { ! private_ipv4 "$bind_ip" || [ "$host_port" -lt 1 ] || [ "$host_port" -gt 65535 ]; }; then
+      write_status "" rejected "Invalid request."
+      clear_processing
+      exit 0
+  fi
+done <<EOF
+$(printf '%s' "$request" | jq -r '.changes[] | select(.enabled) | [.bind_ip, (.host_port | tostring)] | @tsv')
+EOF
+
+request_id=$(printf '%s' "$request" | jq -r .id)
+seen_file=$control_state/seen
+if [ -r "$seen_file" ] && grep -Fxq "$request_id" "$seen_file"; then
+  write_status "$request_id" rejected "Request already processed."
+  clear_processing
+  exit 0
+fi
+remember_seen() {
+  printf '%s\n' "$request_id" >>"$seen_file"
+  chmod 600 "$seen_file"
+  seen_tmp=$(mktemp "$control_state/.seen.tmp.XXXXXX")
+  tail -n 256 "$seen_file" >"$seen_tmp"
+  chmod 600 "$seen_tmp"
+  mv "$seen_tmp" "$seen_file"
+}
+
+changes=$(printf '%s' "$request" | jq -c .changes)
+inflight_file=$control_state/inflight
+inflight=$(cat "$inflight_file" 2>/dev/null || true)
+mkdir -p "$config_root"
+exec 8>"$config_lock"
+flock 8
+
+recovering=0
+if [ "$inflight" = "$request_id" ]; then
+  recovering=1
+else
+  printf '%s\n' "$request_id" >"$inflight_file"
+  chmod 600 "$inflight_file"
+fi
+committed=0
+committed_snapshot=
+rollback_snapshot=
+rollback_had_config=0
+attempt=0
+while [ "$attempt" -lt 3 ]; do
+  attempt=$((attempt + 1))
+  config_snapshot=$(mktemp "$control_state/.config.snapshot.XXXXXX")
+  config_tmp=$(mktemp "$config_root/.config.port-control.XXXXXX")
+  validate_dir=$(mktemp -d "$control_state/.validate.XXXXXX")
+  chmod 600 "$config_snapshot" "$config_tmp"
+  if [ -f "$config_file" ]; then
+    had_config=1
+    cat "$config_file" >"$config_snapshot"
+  else
+    had_config=0
+    printf '{}\n' >"$config_snapshot"
+  fi
+  if ! jq -e --argjson changes "$changes" --argjson recovering "$recovering" --rawfile existing_env "$env_file" '
+    def strong_password: type == "string" and length >= 24 and test("^[A-Za-z0-9]+$");
+    def env_value($key):
+      ($existing_env | split("\n") | map(select(startswith($key + "="))) | last // "") as $line |
+      if $line == "" then "" else ($line | split("=")[1:] | join("=")) end;
+    def effective_password($configured; $key):
+      if ($configured | type == "string" and length > 0) then $configured else env_value($key) end;
+    . as $config |
+    type == "object" and
+    all($changes[];
+      (if (.port | startswith("bitcoin_rpc")) then
+        (($config.bitcoin.enabled // true) == true and
+          ((.enabled | not) or (effective_password($config.bitcoin.node_password; "BITCOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "tari_grpc" then ($config.tari.enabled == true)
+      elif .port == "litecoin_rpc" then ($config.litecoin.enabled == true and ((.enabled | not) or (effective_password($config.litecoin.node_password; "LITECOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "dogecoin_rpc" then ($config.dogecoin.enabled == true and ((.enabled | not) or (effective_password($config.dogecoin.node_password; "DOGECOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "bitcoincash_rpc" then ($config.bitcoincash.enabled == true and ((.enabled | not) or (effective_password($config.bitcoincash.node_password; "BITCOINCASH_RPC_PASSWORD") | strong_password)))
+      elif .port == "zcash_rpc" then ($config.zcash.enabled == true and ((.enabled | not) or (effective_password($config.zcash.node_password; "ZCASH_RPC_PASSWORD") | strong_password)))
+      else
+        ($config.monero.enabled == true and
+          ((.enabled | not) or (effective_password($config.monero.node_password; "MONERO_RPC_PASSWORD") | strong_password)))
+      end) and
+      ($recovering or
+        (if .enabled then
+           if .port == "bitcoin_rpc" then
+             ($config.bitcoin.rpc_expose != true or $config.bitcoin.rpc_bind_ip != .bind_ip or ($config.bitcoin.rpc_port // 8332) != .host_port)
+           elif .port == "monero_rpc" then
+             ($config.monero.rpc_expose != true or $config.monero.rpc_bind_ip != .bind_ip or ($config.monero.rpc_port // 18081) != .host_port)
+           elif .port == "tari_grpc" then ($config.tari.grpc_expose != true or $config.tari.grpc_bind_ip != .bind_ip or ($config.tari.grpc_port // 18142) != .host_port)
+           elif .port == "litecoin_rpc" then ($config.litecoin.rpc_expose != true or $config.litecoin.rpc_bind_ip != .bind_ip or ($config.litecoin.rpc_port // 9332) != .host_port)
+           elif .port == "dogecoin_rpc" then ($config.dogecoin.rpc_expose != true or $config.dogecoin.rpc_bind_ip != .bind_ip or ($config.dogecoin.rpc_port // 22555) != .host_port)
+           elif .port == "bitcoincash_rpc" then ($config.bitcoincash.rpc_expose != true or $config.bitcoincash.rpc_bind_ip != .bind_ip or ($config.bitcoincash.rpc_port // 8332) != .host_port)
+           elif .port == "zcash_rpc" then ($config.zcash.rpc_expose != true or $config.zcash.rpc_bind_ip != .bind_ip or ($config.zcash.rpc_port // 8232) != .host_port)
+           else
+             ($config.monero.zmq_expose != true or $config.monero.zmq_bind_ip != .bind_ip or ($config.monero.zmq_port // 18083) != .host_port)
+           end
+         elif .port == "bitcoin_rpc" then $config.bitcoin.rpc_expose == true
+         elif .port == "monero_rpc" then $config.monero.rpc_expose == true
+         elif .port == "tari_grpc" then $config.tari.grpc_expose == true
+         elif .port == "litecoin_rpc" then $config.litecoin.rpc_expose == true
+         elif .port == "dogecoin_rpc" then $config.dogecoin.rpc_expose == true
+         elif .port == "bitcoincash_rpc" then $config.bitcoincash.rpc_expose == true
+         elif .port == "zcash_rpc" then $config.zcash.rpc_expose == true
+         else $config.monero.zmq_expose == true end)))
+  ' "$config_snapshot" >/dev/null 2>&1; then
+    rm -rf "$config_snapshot" "$config_tmp" "$validate_dir" "$inflight_file"
+    remember_seen
+    clear_processing
+    write_status "$request_id" rejected "Invalid or unchanged port settings."
+    exit 0
+  fi
+  jq --argjson changes "$changes" '
+    reduce $changes[] as $change (.;
+      if $change.port == "bitcoin_rpc" then
+        .bitcoin.rpc_expose = $change.enabled |
+        if $change.enabled then .bitcoin.rpc_bind_ip = $change.bind_ip | .bitcoin.rpc_port = $change.host_port else . end
+      elif $change.port == "monero_rpc" then
+        .monero.rpc_expose = $change.enabled |
+        if $change.enabled then .monero.rpc_bind_ip = $change.bind_ip | .monero.rpc_port = $change.host_port else . end
+      elif $change.port == "monero_zmq" then
+        .monero.zmq_expose = $change.enabled |
+        if $change.enabled then .monero.zmq_bind_ip = $change.bind_ip | .monero.zmq_port = $change.host_port else . end
+      elif $change.port == "tari_grpc" then
+        .tari.grpc_expose = $change.enabled | if $change.enabled then .tari.grpc_bind_ip=$change.bind_ip | .tari.grpc_port=$change.host_port else . end
+      elif $change.port == "litecoin_rpc" then
+        .litecoin.rpc_expose = $change.enabled | if $change.enabled then .litecoin.rpc_bind_ip=$change.bind_ip | .litecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "dogecoin_rpc" then
+        .dogecoin.rpc_expose = $change.enabled | if $change.enabled then .dogecoin.rpc_bind_ip=$change.bind_ip | .dogecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "bitcoincash_rpc" then
+        .bitcoincash.rpc_expose = $change.enabled | if $change.enabled then .bitcoincash.rpc_bind_ip=$change.bind_ip | .bitcoincash.rpc_port=$change.host_port else . end
+      else
+        .zcash.rpc_expose = $change.enabled | if $change.enabled then .zcash.rpc_bind_ip=$change.bind_ip | .zcash.rpc_port=$change.host_port else . end
+      end)
+  ' "$config_snapshot" >"$config_tmp"
+  cp "$config_tmp" "$validate_dir/config.json"
+  if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate_dir" \
+    BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+    rm -rf "$config_snapshot" "$config_tmp" "$validate_dir" "$inflight_file"
+    remember_seen
+    clear_processing
+    write_status "$request_id" rejected "Invalid or conflicting port settings."
+    exit 0
+  fi
+  rm -rf "$validate_dir"
+  if printf '%s' "$changes" | jq -e 'any(.[]; .enabled)' >/dev/null; then
+    tor_id=$($docker_bin inspect --format '{{.Id}}' tor 2>/dev/null || true)
+    own_bindings=
+    other_bindings=
+    host_bindings=
+    inspection_ok=1
+    if [ -z "$tor_id" ] || ! own_bindings=$(published_ports "$tor_id"); then
+      inspection_ok=0
+    fi
+    tor_config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' \
+      "$tor_id" 2>/dev/null || true)
+    case ",$tor_config_files," in
+      *",$stack_root/docker-compose.yml,"*) ;;
+      *) inspection_ok=0 ;;
+    esac
+    if ! container_ids=$($docker_bin ps -q --no-trunc 2>/dev/null); then
+      inspection_ok=0
+      container_ids=
+    fi
+    for container_id in $container_ids; do
+      [ "$container_id" = "$tor_id" ] && continue
+      if ! bindings=$(published_ports "$container_id"); then
+        inspection_ok=0
+        break
+      fi
+      if [ -n "$bindings" ]; then
+        other_bindings=$(printf '%s\n%s' "$other_bindings" "$bindings")
+      fi
+    done
+    if ! host_bindings=$(host_tcp_listeners); then
+      inspection_ok=0
+      host_bindings=
+    fi
+    if ! host_ipv4s=$(host_ipv4_addresses); then
+      inspection_ok=0
+      host_ipv4s=
+    fi
+    if [ "$inspection_ok" != 1 ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" failed "Port availability could not be checked." port_check_failed
+      exit 0
+    fi
+    unavailable_address_port=
+    while IFS="$(printf '\t')" read -r port bind_ip; do
+      [ -n "$port" ] || continue
+      if ! printf '%s\n' "$host_ipv4s" | grep -Fxq "$bind_ip"; then
+        unavailable_address_port=$port
+        break
+      fi
+    done <<EOF
+$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip] | @tsv')
+EOF
+    if [ -n "$unavailable_address_port" ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" rejected "Selected LAN address is not assigned to this host." bind_address_unavailable "$unavailable_address_port"
+      exit 0
+    fi
+    conflict_port=
+    while IFS="$(printf '\t')" read -r port bind_ip host_port; do
+      [ -n "$port" ] || continue
+      if ! port_available "$bind_ip" "$host_port"; then
+        conflict_port=$port
+        break
+      fi
+    done <<EOF
+$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip, (.host_port | tostring)] | @tsv')
+EOF
+    if [ -n "$conflict_port" ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" rejected "Selected port is already in use." port_in_use "$conflict_port"
+      exit 0
+    fi
+  fi
+  if { [ "$had_config" = 1 ] && [ -f "$config_file" ] && cmp -s "$config_snapshot" "$config_file"; } ||
+    { [ "$had_config" = 0 ] && [ ! -e "$config_file" ]; }; then
+    rollback_snapshot=$config_snapshot
+    rollback_had_config=$had_config
+    committed_snapshot=$(mktemp "$control_state/.config.committed.XXXXXX")
+    cp "$config_tmp" "$committed_snapshot"
+    chmod 600 "$committed_snapshot"
+    mv "$config_tmp" "$config_file"
+    committed=1
+    break
+  fi
+  rm -f "$config_snapshot" "$config_tmp"
+done
+if [ "$committed" != 1 ]; then
+  rm -f "$inflight_file"
+  remember_seen
+  clear_processing
+  write_status "$request_id" failed "Port settings could not be saved."
+  exit 0
+fi
+
+if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+  BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+  "$stack_root/stack" apply-port-settings >/dev/null 2>&1; then
+  final_state=applied
+  final_message="LAN port settings applied."
+else
+  final_state=failed
+  final_message="Port settings are saved but could not be applied."
+  if [ -n "$committed_snapshot" ] && cmp -s "$committed_snapshot" "$config_file"; then
+    rollback_tmp=$(mktemp "$config_root/.config.port-control-rollback.XXXXXX")
+    if [ "$rollback_had_config" = 1 ]; then
+      cat "$rollback_snapshot" >"$rollback_tmp"
+      chmod 600 "$rollback_tmp"
+      mv "$rollback_tmp" "$config_file"
+    else
+      rm -f "$rollback_tmp" "$config_file"
+    fi
+    if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+      "$stack_root/stack" apply-port-settings >/dev/null 2>&1; then
+      final_message="Port settings could not be applied; prior settings were restored."
+    else
+      cp "$committed_snapshot" "$config_file"
+      chmod 600 "$config_file"
+      BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+        BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
+        "$stack_root/configure.sh" >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+rm -f "$committed_snapshot" "$rollback_snapshot"
+remember_seen
+rm -f "$inflight_file"
+clear_processing
+write_status "$request_id" "$final_state" "$final_message"

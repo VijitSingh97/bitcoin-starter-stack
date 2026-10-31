@@ -14,18 +14,35 @@ fail() {
 
 # 1. Runs with NO config.json — defaults applied, RPC credentials auto-generated
 (cd "$tmp" && ./configure.sh) >/dev/null || fail "zero-config run failed"
+[ -f "$tmp/.config.lock" ] || fail "standalone configure did not use the shared config lock"
 grep -q '^BITCOIN_RPC_USER=admin$' "$tmp/.env" || fail "RPC user default is not 'admin'"
 grep -qE '^BITCOIN_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "RPC password not auto-generated"
 rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
-[ "$rpc_password" = "$dashboard_password" ] || fail "fresh install did not share the generated password"
+monero_password=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' "$tmp/.env")
+monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
+if [ -z "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ]; then
+  fail "fresh install did not generate all passwords"
+fi
+passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" | sort -u | wc -l | tr -d ' ')
+[ "$passwords" = "5" ] || fail "fresh install did not separate service passwords"
+grep -q '^MONERO_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Monero wallet RPC user default is not admin"
+grep -q '^MONERO_WALLET_RPC_URL=http://172.29.0.31:18082$' "$tmp/.env" || fail "Monero wallet RPC URL is not internal"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
+grep -q '^COMPOSE_PROFILES=bitcoin$' "$tmp/.env" || fail "zero-config install did not select only Bitcoin"
+grep -q '^BITCOIN_ENABLED=1$' "$tmp/.env" || fail "Bitcoin default is not enabled"
+grep -q '^MONERO_ENABLED=0$' "$tmp/.env" || fail "Monero default is not disabled"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default is not off"
 grep -q '^BITCOIN_RPC_BIND_IP=$' "$tmp/.env" || fail "LAN RPC bind default is not empty"
 grep -q '^BITCOIN_RPC_PORT=8332$' "$tmp/.env" || fail "LAN RPC port default not applied"
 grep -q '^BITCOIN_DBCACHE=128$' "$tmp/.env" || fail "fresh install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$tmp/.env" || fail "fresh install prune default is not 10000 MB"
 grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "fresh install inbound onion default is not off"
+grep -q '^BITCOIN_STEADY_CPUS=1$' "$tmp/.env" || fail "Bitcoin steady CPU default is not 1"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Bitcoin steady memory default is not 2048 MB"
+grep -q '^MONERO_STEADY_CPUS=1$' "$tmp/.env" || fail "Monero steady CPU default is not 1"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Monero steady memory default is not 2048 MB"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "fresh install dashboard onion default is not off"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
@@ -40,16 +57,23 @@ u1=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p1=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 s1=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h1=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
+mw1=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+wf1=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
 (cd "$tmp" && ./configure.sh) >/dev/null
 u2=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p2=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
 s2=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h2=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
+mw2=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+wf2=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
 if [ "$u1" != "$u2" ] || [ "$p1" != "$p2" ]; then
   fail "credentials changed on re-run (not idempotent)"
 fi
 if [ "$s1" != "$s2" ] || [ "$h1" != "$h2" ]; then
   fail "rpcauth salt/hash changed on re-run — would recreate bitcoind on every apply/upgrade"
+fi
+if [ "$mw1" != "$mw2" ] || [ "$wf1" != "$wf2" ]; then
+  fail "Monero wallet credentials changed on re-run"
 fi
 
 # Existing rendered settings remain authoritative when a new default is added.
@@ -80,6 +104,16 @@ cp configure.sh "$existing_custom/"
 printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\nBITCOIN_DBCACHE=512\n' >"$existing_custom/.env"
 (cd "$existing_custom" && ./configure.sh) >/dev/null
 grep -q '^BITCOIN_DBCACHE=512$' "$existing_custom/.env" || fail "custom existing dbcache was replaced"
+
+legacy_limits="$tmp/legacy-limits"
+mkdir "$legacy_limits"
+cp configure.sh "$legacy_limits/"
+printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\nBITCOIN_STEADY_CPUS=0.75\nBITCOIN_STEADY_MEM_LIMIT_MB=1536\nMONERO_STEADY_CPUS=1.25\nMONERO_STEADY_MEM_LIMIT_MB=3072\n' >"$legacy_limits/.env"
+(cd "$legacy_limits" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_STEADY_CPUS=0.75$' "$legacy_limits/.env" || fail "existing Bitcoin steady CPU limit was replaced"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=1536$' "$legacy_limits/.env" || fail "existing Bitcoin steady memory limit was replaced"
+grep -q '^MONERO_STEADY_CPUS=1.25$' "$legacy_limits/.env" || fail "existing Monero steady CPU limit was replaced"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=3072$' "$legacy_limits/.env" || fail "existing Monero steady memory limit was replaced"
 
 echo '{"bitcoin":{"dbcache_mb":"256","prune_mb":0,"inbound_onion":false},"dashboard":{"onion":false}}' >"$legacy/config.json"
 (cd "$legacy" && ./configure.sh) >/dev/null
@@ -130,17 +164,23 @@ grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
-grep -q '^DASHBOARD_PASSWORD=mypass123$' "$tmp/.env" || fail "fresh explicit password was not shared with dashboard"
+grep -qE '^DASHBOARD_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "dashboard password was not independently generated"
+grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
+grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"
+grep -qE '^MONERO_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet password was not generated"
+grep -q '^MONERO_DATA_DIR=./data/monero$' "$tmp/.env" || fail "Monero data_dir default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
+grep -q '^ALERT_NEW_BLOCK_MONERO=0$' "$tmp/.env" || fail "Monero new-block alert default not applied"
 grep -q '^NODE_NAME=' "$tmp/.env" || fail "node name not rendered"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | jq -e '.[0].name == "Binance (public)"' >/dev/null ||
   fail "missing wallets must seed the public Binance example"
 [ -d "$tmp/data/bitcoin" ] || fail "data dir not created"
+[ -d "$tmp/data/monero" ] || fail "Monero data dir not created"
 
 # An explicit empty roster opts out of the public example.
 echo '{"wallets": []}' >"$tmp/config.json"
@@ -181,7 +221,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
  "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
- "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true},
+ "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true, "alert_new_block_monero": true, "alert_new_block_tari": true, "alert_new_block_litecoin": true, "alert_new_block_dogecoin": true, "alert_new_block_bitcoincash": true, "alert_new_block_zcash": true},
  "wallets": [{"name": "Cold storage", "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "birthday": "2021-01-01"}]}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
@@ -200,6 +240,10 @@ grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token n
 grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
 grep -q '^ALERT_NEW_BLOCK=1$' "$tmp/.env" || fail "new-block alert not rendered"
+grep -q '^ALERT_NEW_BLOCK_MONERO=1$' "$tmp/.env" || fail "Monero new-block alert not rendered"
+for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+  grep -q "^ALERT_NEW_BLOCK_${chain}=1$" "$tmp/.env" || fail "${chain} new-block alert not rendered"
+done
 # wallets round-trip through the base64 blob (decode and check the name survived)
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | grep -q '"name":"Cold storage"' ||
@@ -303,7 +347,7 @@ echo '{"bitcoin": {"mem_limit_mb": "lots"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric mem_limit_mb was accepted"
 rm -f "$tmp/config.json"
 
-# 12. Preserved legacy passwordless onion dashboards still warn.
+# 12. Passwordless onion dashboards are rejected.
 warn="$tmp/warn"
 mkdir "$warn"
 cp configure.sh "$warn/"
@@ -311,10 +355,36 @@ printf 'BITCOIN_RPC_USER=u\nBITCOIN_RPC_PASSWORD=p\nDASHBOARD_PASSWORD=\n' >"$wa
 cat >"$warn/config.json" <<'EOF'
 {"dashboard": {"onion": true}}
 EOF
-out=$(cd "$warn" && ./configure.sh)
-echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
+if out=$(cd "$warn" && ./configure.sh 2>&1); then
+  fail "passwordless onion dashboard was accepted"
+fi
+echo "$out" | grep -q "dashboard.password is required" || fail "passwordless onion error is not actionable"
 
-# 13. Version string: release number for a clean tagged checkout, branch-commit
+# 13. Zcash renders as a selectable Tor-only node with an authenticated LAN proxy.
+multi="$tmp/multi"
+mkdir "$multi"
+cp configure.sh VERSION "$multi/"
+cat >"$multi/config.json" <<'EOF'
+{
+  "bitcoin": {"enabled": false},
+  "zcash": {
+    "enabled": true,
+    "node_password": "abcdefghijklmnopqrstuvwx",
+    "rpc_expose": true,
+    "rpc_bind_ip": "192.168.1.44",
+    "rpc_port": 28232,
+    "resource_profile": "compact"
+  }
+}
+EOF
+(cd "$multi" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_PROFILES=zcash$' "$multi/.env" || fail "Zcash profile was not selected"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.zcash-rpc.yml$' "$multi/.env" || fail "Zcash RPC proxy override was not selected"
+grep -q '^ZCASH_RPC_URL=http://172.29.0.36:8232$' "$multi/.env" || fail "Zcash internal RPC URL changed"
+grep -q '^ZCASH_STEADY_MEM_LIMIT_MB=4096$' "$multi/.env" || fail "Zcash post-sync memory budget changed"
+grep -q '^ZCASH_DATA_DIR=./data/zcash$' "$multi/.env" || fail "Zcash data path default changed"
+
+# 14. Version string: release number for a clean tagged checkout, branch-commit
 #     for a dev build (drives the dashboard's version display).
 if command -v git >/dev/null; then
   gtmp=$(mktemp -d)
@@ -367,5 +437,84 @@ if command -v docker >/dev/null; then
   echo "$rpc_rendered" | grep -A5 'target: 8332' | grep -q 'published: "18332"' ||
     fail "rendered COMPOSE_FILE did not select the RPC override"
 fi
+
+# Monero is opt-in, pruned, and its LAN RPC/ZMQ relays require private binds.
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118"},"monero":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118","zmq_expose":true,"zmq_bind_ip":"192.168.1.118"},"tari":{"enabled":true}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "disabled nodes retained stale LAN relay overrides"
+grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Bitcoin retained stale RPC exposure"
+grep -q '^MONERO_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale RPC exposure"
+grep -q '^MONERO_ZMQ_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale ZMQ exposure"
+
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":false},"monero":{"enabled":true,"node_username":"moneroadmin","node_password":"moneropassword1234567890123456","data_dir":"./monero-chain","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_PROFILES=monero$' "$tmp/.env" || fail "Monero-only selection did not disable Bitcoin"
+grep -q '^MONERO_ENABLED=1$' "$tmp/.env" || fail "Monero enablement not rendered"
+grep -q '^MONERO_RPC_USER=moneroadmin$' "$tmp/.env" || fail "separate Monero RPC user not rendered"
+grep -q '^MONERO_RPC_PASSWORD=moneropassword1234567890123456$' "$tmp/.env" || fail "separate Monero RPC password not rendered"
+grep -q '^MONERO_DATA_DIR=./monero-chain$' "$tmp/.env" || fail "Monero data path not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.monero-rpc.yml:docker-compose.monero-zmq.yml$' "$tmp/.env" ||
+  fail "Monero LAN overrides not selected"
+[ -d "$tmp/monero-chain" ] || fail "Monero data directory not created"
+
+for field in rpc zmq; do
+  jq -n --arg field "$field" '{monero:{enabled:true,node_password:"longmoneropassword123456789",($field+"_expose"):true}}' >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Monero $field exposure without a bind address was accepted"
+done
+echo '{"monero":{"enabled":true,"node_password":"short","rpc_expose":true,"rpc_bind_ip":"192.168.1.118"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "short exposed Monero RPC password was accepted"
+
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin and Monero RPC host port collision was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28083},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "Bitcoin RPC and Monero ZMQ host port collision was accepted"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"enabled":true,"node_password":"longbitcoinpassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081},"monero":{"enabled":true,"node_password":"longmoneropassword123456789","rpc_expose":true,"rpc_bind_ip":"192.168.1.119","rpc_port":28081}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null || fail "same cross-chain host port on different bind addresses was rejected"
+
+for field in bitcoin monero; do
+  for port in 080 0008332 18446744073709551617; do
+    jq -n --arg field "$field" --arg port "$port" '{($field):{rpc_port:$port}}' >"$tmp/config.json"
+    (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "$field accepted an ambiguous or overflowing RPC port"
+  done
+done
+
+echo '{"bitcoin":{"resource_profile":"compact"},"monero":{"resource_profile":"compact"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Bitcoin compact resource profile not rendered"
+grep -q '^MONERO_RESOURCE_PROFILE=compact$' "$tmp/.env" || fail "Monero compact resource profile not rendered"
+cat >"$tmp/config.json" <<'EOF'
+{"bitcoin":{"resource_profile":"compact","steady_cpus":0.5,"steady_mem_limit_mb":1536},"monero":{"resource_profile":"compact","steady_cpus":1.5,"steady_mem_limit_mb":3072}}
+EOF
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^BITCOIN_STEADY_CPUS=0.5$' "$tmp/.env" || fail "custom Bitcoin steady CPU limit not rendered"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=1536$' "$tmp/.env" || fail "custom Bitcoin steady memory limit not rendered"
+grep -q '^MONERO_STEADY_CPUS=1.5$' "$tmp/.env" || fail "custom Monero steady CPU limit not rendered"
+grep -q '^MONERO_STEADY_MEM_LIMIT_MB=3072$' "$tmp/.env" || fail "custom Monero steady memory limit not rendered"
+for invalid in \
+  '{"bitcoin":{"steady_cpus":0}}' \
+  '{"bitcoin":{"steady_cpus":0.001}}' \
+  '{"bitcoin":{"steady_cpus":1.234}}' \
+  '{"bitcoin":{"steady_cpus":"1"}}' \
+  '{"bitcoin":{"steady_cpus":1.2.3}}' \
+  '{"monero":{"steady_mem_limit_mb":256}}' \
+  '{"monero":{"steady_mem_limit_mb":512.5}}' \
+  '{"monero":{"steady_mem_limit_mb":"2048"}}'; do
+  printf '%s\n' "$invalid" >"$tmp/config.json"
+  (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "invalid steady resource limit was accepted: $invalid"
+done
+echo '{"bitcoin":{"resource_profile":"tiny"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unknown Bitcoin resource profile was accepted"
+echo '{"monero":{"resource_profile":"tiny"}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "unknown Monero resource profile was accepted"
 
 echo "PASS: test_configure.sh"

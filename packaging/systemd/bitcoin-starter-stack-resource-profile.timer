@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Node Starter Stack sync resource profiles
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=10s
+Persistent=true
+Unit=bitcoin-starter-stack-resource-profile.service
+
+[Install]
+WantedBy=timers.target

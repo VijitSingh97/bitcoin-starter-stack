@@ -663,11 +663,18 @@ func TestPrunedWatchScansAreSerialized(t *testing.T) {
 	release := make(chan struct{})
 	mock := &prunedRPCMock{bestBlock: bestBlock, result: validPrunedScan(bestBlock), startObserved: make(chan struct{}, 2), release: release}
 	a, handler, _ := newPrunedTestApp(t, t.TempDir(), mock)
-	if response := addPrunedWatch(t, handler, "One", genesisAddress); response.Code != http.StatusOK {
-		t.Fatalf("first add = %d %q", response.Code, response.Body.String())
+	first, err := a.watch.Add("One", genesisAddress, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if response := addPrunedWatch(t, handler, "Two", "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"); response.Code != http.StatusOK {
-		t.Fatalf("second add = %d %q", response.Code, response.Body.String())
+	second, err := a.watch.Add("Two", "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.watch.SetPending(first.Key, true)
+	a.watch.SetPending(second.Key, true)
+	if !a.scanner.enqueue(first, true) {
+		t.Fatal("scan was not queued")
 	}
 	select {
 	case <-mock.startObserved:

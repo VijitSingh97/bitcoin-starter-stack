@@ -1,6 +1,8 @@
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
 WORKDIR /src
-COPY build/dashboard/go.mod build/dashboard/*.go ./
+COPY build/dashboard/go.mod build/dashboard/go.sum ./
+RUN go mod download
+COPY build/dashboard/*.go ./
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /dashboard .
 
@@ -11,6 +13,7 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 COPY build/dashboard/index.html ./index.html
 COPY build/dashboard/static ./static
 COPY VERSION ./VERSION
+COPY build/dashboard/THIRD_PARTY_NOTICES ./THIRD_PARTY_NOTICES
 RUN mkdir -p /state && chown 1000:1000 /state
 USER 1000:1000
 EXPOSE 8000

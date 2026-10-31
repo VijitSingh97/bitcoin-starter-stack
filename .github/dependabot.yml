@@ -10,6 +10,32 @@ updates:
     schedule:
       interval: weekly
 
+  - package-ecosystem: docker
+    directory: /build/monero
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /build/litecoin
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /build/dogecoin
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /build/bitcoincash
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /build/dashboard
+    schedule:
+      interval: weekly
+
+  # Direct node images stay digest-pinned here.
   - package-ecosystem: docker-compose
     directory: /
     schedule:

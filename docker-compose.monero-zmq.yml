@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${MONERO_ZMQ_BIND_IP:?set monero.zmq_bind_ip in config.json}:${MONERO_ZMQ_PORT:-18083}:18083"

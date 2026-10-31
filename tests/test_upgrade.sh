@@ -109,7 +109,7 @@ for _ in $(seq 1 30); do
 done
 [ -n "$ok" ] || fail "stack not healthy after upgrade ($unhealthy)"
 # and serving the new baked version
-curl -fsS -u x:upgradetest localhost 2>/dev/null | grep -q "v0.0.2" || fail "dashboard not serving v0.0.2 after upgrade"
+curl -fsS -u x:upgradetest localhost 2>/dev/null | grep "v0.0.2" >/dev/null || fail "dashboard not serving v0.0.2 after upgrade"
 docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
   fail "notification settings did not survive upgrade"
 

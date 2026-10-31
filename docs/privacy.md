@@ -1,10 +1,19 @@
 # Tor-only runtime networking
 
-Bitcoin and the dashboard have no external network route. Their Docker network is
-internal; only the Tor container also joins an external network. Both applications
-use numeric addresses for local services, and local DNS forwarding is disabled.
-Prices, alerts, and release checks send hostnames to Tor for remote resolution.
-An unavailable Tor proxy causes those requests to fail, without a direct fallback.
+Bitcoin, Monero and its wallet service, Tari, Litecoin, Dogecoin, Bitcoin Cash,
+Zcash through Zakura, and the dashboard have no direct external network route.
+Their Docker network is internal; only the Tor container also joins an external
+network. These services use numeric addresses for local services, and local DNS
+forwarding is disabled. Bitcoin-family nodes and Monero use their native Tor
+proxy settings. Tari uses its native Tor transport. Prices, alerts, and release
+checks send hostnames to Tor for remote resolution. An unavailable Tor proxy
+causes those requests to fail, without a direct fallback.
+
+Zakura has no native Tor transport. Its peer list contains only four internal
+TCP listeners on the Tor container. Each listener resolves and reaches one
+upstream seed through Tor SOCKS4A; Zakura has no direct DNS or external route.
+If Tor or every bridge is unavailable, peer discovery fails closed instead of
+using clearnet.
 The existing Tor container forwards LAN HTTP to the dashboard's fixed internal
 address; the dashboard itself has no published port or external network.
 
@@ -25,6 +34,24 @@ binds are rejected. RPC is unencrypted, so keep it on a trusted LAN and do not
 forward it through a router. Exposed RPC requires a password of at least 24
 characters, and each host relay accepts at most 32 concurrent connections. See
 [LAN wallet RPC](configuration.md#lan-wallet-rpc-opt-in).
+
+Zcash LAN RPC terminates at the Go dashboard's authenticated read-only proxy.
+The proxy forwards only a fixed allowlist of read-only methods to Zakura's
+cookie-authenticated native RPC at `172.29.0.36:8232`. Native Zakura RPC remains
+unpublished on the internal Docker network and is never the target of the host
+relay. The healthcheck makes the rotating cookie group-readable only to the
+non-root dashboard group. Treat the internal network as part of the trusted
+stack boundary because a compromised sibling container could still reach
+another internal service.
+
+Monero view-only monitoring does not publish another port. The password-protected
+dashboard sends a primary address and private view key to the internal wallet
+service at `172.29.0.31:18082`. That service stores only an encrypted watch-only
+wallet file in its private volume. Dashboard metadata is mode `600` and does not
+retain the raw view key. A private spend key or seed is never accepted, so this
+path cannot sign or send. Treat the private view key and signed key images as
+sensitive: use the trusted LAN dashboard or its authenticated onion service, and
+do not put them in `config.json`, Git, URLs, or command lines.
 
 ## Downloads and upgrades
 

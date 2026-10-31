@@ -212,9 +212,24 @@ func request(t *testing.T, handler http.Handler, method, path, password string) 
 	return w
 }
 
+func TestDashboardCannotBeFramed(t *testing.T) {
+	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	for _, path := range []string{"/", "/api/settings", "/api/settings/ports", "/missing"} {
+		for _, password := range []string{"", "dashboard-secret"} {
+			response := request(t, handler, http.MethodGet, path, password)
+			if response.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" || response.Header().Get("X-Frame-Options") != "DENY" {
+				t.Errorf("%s omitted frame protections for status %d", path, response.Code)
+			}
+		}
+	}
+}
+
 func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
+	t.Setenv("NODE_NAME", "mini-1 <node>")
 	fixture := &rpcFixture{}
-	_, handler := testApp(t, fixture, "dashboard-secret")
+	a, _ := testApp(t, fixture, "dashboard-secret")
+	a.cfg.bitcoinRPCEndpoint = "192.168.1.50:8332"
+	handler := a.routes()
 	if got := request(t, handler, http.MethodGet, "/", ""); got.Code != http.StatusUnauthorized || got.Header().Get("WWW-Authenticate") == "" {
 		t.Fatalf("unauthenticated response = %d, challenge %q", got.Code, got.Header().Get("WWW-Authenticate"))
 	}
@@ -232,7 +247,7 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 		t.Fatalf("status = %d", got.Code)
 	}
 	body := got.Body.String()
-	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`} {
+	for _, want := range []string{"900000 / 900001", "4200 tx", "10 / 10 / 10", "Pruned", `id="btc-price"`, `/static/prices.js`, "192.168.1.50:8332 · LAN", "Configured LAN access", `class="node-set-title">mini-1 &lt;node&gt; Node Set</h1>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
@@ -246,6 +261,7 @@ func TestIndexAuthRPCParityAndEscaping(t *testing.T) {
 }
 
 func TestInvalidRPCRendersLoading(t *testing.T) {
+	t.Setenv("NODE_NAME", "mini-1")
 	fixture := &rpcFixture{invalid: true}
 	_, handler := testApp(t, fixture, "")
 	got := request(t, handler, http.MethodGet, "/", "")
@@ -254,6 +270,12 @@ func TestInvalidRPCRendersLoading(t *testing.T) {
 	}
 	if strings.Contains(got.Body.String(), "% synced") {
 		t.Fatal("unavailable Core must not invent a sync percentage")
+	}
+	if !strings.Contains(got.Body.String(), `id="monero-panel"`) || !strings.Contains(got.Body.String(), `/static/nodes.js`) {
+		t.Fatal("Bitcoin loading page omitted the independent Monero panel")
+	}
+	if !strings.Contains(got.Body.String(), `class="node-set-title">mini-1 Node Set</h1>`) {
+		t.Fatal("loading overview omitted the node set title")
 	}
 }
 
@@ -352,9 +374,9 @@ func TestMetricsAndReadAPIs(t *testing.T) {
 		t.Fatalf("fees = %d %q", fees.Code, fees.Body.String())
 	}
 	a.prices.mu.Lock()
-	a.prices.prices = map[string]float64{"usd": 70000}
-	a.prices.updatedAt = 1_800_000_000
-	a.prices.lastFetchFailed = false
+	a.prices.assetPrices["bitcoin"] = map[string]float64{"usd": 70000}
+	a.prices.assetUpdatedAt["bitcoin"] = 1_800_000_000
+	a.prices.assetFailed["bitcoin"] = false
 	a.prices.mu.Unlock()
 	a.prices.now = func() time.Time { return time.Unix(1_800_000_000, 0) }
 	priceCalls := 0
@@ -402,6 +424,91 @@ func TestRuntimeConfigKeepsPasswordOptional(t *testing.T) {
 	cfg, err := envConfig()
 	if err != nil || cfg.dashboardPassword != "" || cfg.version != "1.31.1" || cfg.settingsPort != "" {
 		t.Fatalf("configuration: %#v %v", cfg, err)
+	}
+}
+
+func TestBitcoinEnabledDefaultsOnAndCanBeDisabledWithoutRPCCredentials(t *testing.T) {
+	t.Setenv("MONERO_ENABLED", "")
+	t.Setenv("BITCOIN_ENABLED", "")
+	t.Setenv("RPC_USER", "rpc-user")
+	t.Setenv("RPC_PASSWORD", "rpc-password")
+	cfg, err := envConfig()
+	if err != nil || cfg.bitcoinDisabled {
+		t.Fatalf("default Bitcoin configuration: %#v %v", cfg, err)
+	}
+
+	t.Setenv("BITCOIN_ENABLED", "false")
+	t.Setenv("RPC_USER", "")
+	t.Setenv("RPC_PASSWORD", "")
+	cfg, err = envConfig()
+	if err != nil || !cfg.bitcoinDisabled {
+		t.Fatalf("disabled Bitcoin configuration: %#v %v", cfg, err)
+	}
+}
+
+func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
+	fixture := &rpcFixture{}
+	rpcServer := httptest.NewServer(http.HandlerFunc(fixture.handler))
+	defer rpcServer.Close()
+
+	cfg := config{bitcoinDisabled: true, rpcURL: rpcServer.URL, stateDir: t.TempDir(), dataDir: t.TempDir(), version: "1.31.1"}
+	a, err := newApp(cfg, &rpcClient{url: rpcServer.URL, client: rpcServer.Client()}, "index.html", "static", log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := a.routes()
+	index := request(t, handler, http.MethodGet, "/", "")
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") {
+		t.Fatalf("disabled index = %d %q", index.Code, index.Body.String())
+	}
+	for _, marker := range []string{`id="monero-panel"`, `id="tari-panel"`, `id="litecoin-panel"`, `id="dogecoin-panel"`, `id="bitcoincash-panel"`, `id="zcash-panel"`, `id="settings-dialog"`, `/static/nodes.js`, `/static/prices.js`, `/static/settings.js`} {
+		if !strings.Contains(index.Body.String(), marker) {
+			t.Fatalf("Bitcoin-disabled page omitted shared dashboard marker %q", marker)
+		}
+	}
+	metrics := request(t, handler, http.MethodGet, "/metrics", "")
+	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "bitcoin_node_enabled 0") || !strings.Contains(metrics.Body.String(), "bitcoin_node_up 0") {
+		t.Fatalf("disabled metrics = %d %q", metrics.Code, metrics.Body.String())
+	}
+	for _, check := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/watch"},
+		{http.MethodPost, "/api/watch"},
+		{http.MethodDelete, "/api/watch/Cold"},
+	} {
+		response := request(t, handler, check.method, check.path, "")
+		if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != "Bitcoin node is not configured" {
+			t.Fatalf("%s %s = %d %q", check.method, check.path, response.Code, response.Body.String())
+		}
+	}
+	if a.nodeRPC("getblockchaininfo", nil) != nil || a.walletRPC("wallet", "getbalances", nil, time.Second) != nil {
+		t.Fatal("disabled Bitcoin RPC helpers returned data")
+	}
+
+	done := a.startBackground(context.Background())
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled Bitcoin background workers did not stop immediately")
+	}
+	if fixture.count() != 0 {
+		t.Fatalf("disabled Bitcoin made %d RPC requests", fixture.count())
+	}
+}
+
+func TestBitcoinUnavailablePageKeepsSharedPanelsAndSettings(t *testing.T) {
+	_, handler := testApp(t, &rpcFixture{invalid: true}, "")
+	response := request(t, handler, http.MethodGet, "/", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Bitcoin Node Initializing") {
+		t.Fatalf("unavailable Bitcoin page = %d %q", response.Code, response.Body.String())
+	}
+	for _, marker := range []string{`id="monero-panel"`, `id="tari-panel"`, `id="litecoin-panel"`, `id="dogecoin-panel"`, `id="bitcoincash-panel"`, `id="zcash-panel"`, `id="settings-dialog"`} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Fatalf("unavailable Bitcoin page omitted shared dashboard marker %q", marker)
+		}
 	}
 }
 

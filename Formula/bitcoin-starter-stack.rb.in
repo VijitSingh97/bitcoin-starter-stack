@@ -1,0 +1,90 @@
+class BitcoinStarterStack < Formula
+  desc "Run private cryptocurrency nodes behind Tor"
+  homepage "https://github.com/VijitSingh97/bitcoin-starter-stack"
+  url "@RELEASE_URL@"
+  version "@VERSION@"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on "bash"
+  depends_on "flock"
+  depends_on "jq"
+  depends_on "openssl@3"
+  uses_from_macos "lsof"
+  on_linux do
+    depends_on "iproute2"
+  end
+
+  def install
+    libexec.install "stack", "configure.sh", "VERSION", ".dockerignore"
+    libexec.install Dir["docker-compose*.yml"]
+    libexec.install "build"
+    (libexec/"scripts").install "scripts/bitcoin-stack", "scripts/node-control", "scripts/node-port-control",
+                                "scripts/node-resource-profile"
+
+    dependency_path = [formula_opt_bin("bash"), formula_opt_bin("flock"), formula_opt_bin("jq"),
+                       formula_opt_bin("openssl@3")]
+    if OS.linux?
+      dependency_path << formula_opt_bin("iproute2")
+      dependency_path << Formula["iproute2"].opt_sbin
+    end
+
+    (bin/"bitcoin-stack").write <<~SH
+      #!#{formula_opt_bin("bash")}/bash
+      set -euo pipefail
+
+      export BITCOIN_STACK_ROOT="#{opt_libexec}"
+      export BITCOIN_STACK_PACKAGE_MANAGED=brew
+      export PATH="#{dependency_path.join(":")}:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      exec "#{formula_opt_bin("bash")}/bash" "#{opt_libexec}/scripts/bitcoin-stack" "$@"
+    SH
+  end
+
+  service do
+    run [opt_bin/"bitcoin-stack", "host-service"]
+    keep_alive crashed: true
+    restart_delay 10
+    process_type :background
+    log_path var/"log/bitcoin-starter-stack.log"
+    error_log_path var/"log/bitcoin-starter-stack.log"
+    environment_variables PATH: std_service_path_env
+  end
+
+  def caveats
+    <<~EOS
+      Docker Desktop (macOS) or Docker Engine with Compose 2.33.1+ (Linux) is required and is not installed by this formula.
+
+      Setup is explicit and does not run during installation:
+        bitcoin-stack init
+
+      To supervise an already configured stack at login:
+        brew services start bitcoin-starter-stack
+    EOS
+  end
+
+  test do
+    ENV["HOME"] = testpath
+    ENV["XDG_CONFIG_HOME"] = testpath/"xdg-config"
+    ENV["XDG_DATA_HOME"] = testpath/"xdg-data"
+    input = "brewtestpassword1234567890\nbitcoin\n\n\nn\n\nn\n"
+    output = pipe_output("#{bin}/bitcoin-stack init", input)
+    assert_match "Wrote private config.json", output
+    assert_match "Later: bitcoin-stack pull && bitcoin-stack up", output
+
+    config_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/config/config.json"
+    else
+      testpath/"xdg-config/bitcoin-starter-stack/config.json"
+    end
+    state_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/state"
+    else
+      testpath/"xdg-data/bitcoin-starter-stack/state"
+    end
+    config = JSON.parse(config_path.read)
+    assert_predicate formula_opt_bin("openssl@3")/"openssl", :executable?
+    assert_equal "brewtestpassword1234567890", config.dig("dashboard", "password")
+    assert_equal 1, config.dig("bitcoin", "steady_cpus")
+    refute_path_exists state_path/".env"
+  end
+end

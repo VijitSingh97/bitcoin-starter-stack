@@ -15,8 +15,9 @@ import (
 )
 
 func priceResponse(updatedAt int64) string {
-	return `{"bitcoin":{"usd":70000,"eur":65000,"gbp":55000,"inr":5800000,"cad":95000,"aud":105000,"jpy":11000000,"rub":6500000,"cny":500000,"last_updated_at":` +
-		json.Number(strconv.FormatInt(updatedAt, 10)).String() + `}}`
+	timestamp := json.Number(strconv.FormatInt(updatedAt, 10)).String()
+	return `{"bitcoin":{"usd":70000,"eur":65000,"gbp":55000,"inr":5800000,"cad":95000,"aud":105000,"jpy":11000000,"rub":6500000,"cny":500000,"last_updated_at":` + timestamp +
+		`},"monero":{"usd":350,"eur":325,"gbp":275,"inr":29000,"cad":475,"aud":525,"jpy":55000,"rub":32500,"cny":2500,"last_updated_at":` + timestamp + `}}`
 }
 
 func priceCacheForTest(now time.Time, handler roundTripFunc) *PriceCache {
@@ -27,9 +28,26 @@ func priceCacheForTest(now time.Time, handler roundTripFunc) *PriceCache {
 	return cache
 }
 
+func allAssetPriceResponse(t *testing.T, updatedAt int64) string {
+	t.Helper()
+	payload := make(map[string]map[string]any, len(priceAssets))
+	for assetIndex, asset := range priceAssets {
+		quote := map[string]any{"last_updated_at": updatedAt}
+		for currencyIndex, currency := range priceCurrencies {
+			quote[currency] = float64((assetIndex + 1) * (currencyIndex + 1))
+		}
+		payload[asset] = quote
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestNewPriceCacheUsesFixedCoinGeckoURLAndTorClient(t *testing.T) {
 	cache := NewPriceCache()
-	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
+	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,tari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
 		t.Fatalf("provider URL = %q", cache.url)
 	}
 	if cache.client == nil || cache.client.Transport == nil || cache.client.Timeout != 30*time.Second {
@@ -72,11 +90,97 @@ func TestPriceCacheRefreshAndSnapshot(t *testing.T) {
 	if got := cache.Snapshot()["prices"].(map[string]float64)["usd"]; got != 70000 {
 		t.Fatalf("snapshot mutated cache: usd = %v", got)
 	}
+	monero := cache.SnapshotAsset("monero")
+	if monero["available"] != true || monero["updated_at"] != now.Unix() || monero["prices"].(map[string]float64)["usd"] != 350 {
+		t.Fatalf("monero snapshot = %#v", monero)
+	}
+	if unknown := cache.SnapshotAsset("dogecoin"); unknown["available"] != false || unknown["stale"] != true {
+		t.Fatalf("unknown asset snapshot = %#v", unknown)
+	}
 	for range 100 {
 		_ = cache.Snapshot()
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("Snapshot made provider requests: calls = %d", calls.Load())
+	}
+}
+
+func TestPriceCachePublishesEveryConfiguredAsset(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, allAssetPriceResponse(t, now.Unix())), nil
+	})
+	if err := cache.refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range priceAssets {
+		snapshot := cache.SnapshotAsset(asset)
+		if snapshot["available"] != true || snapshot["stale"] != false || len(snapshot["prices"].(map[string]float64)) != len(priceCurrencies) {
+			t.Fatalf("%s snapshot = %#v", asset, snapshot)
+		}
+	}
+}
+
+func TestPriceCacheKeepsBitcoinCompatibleWhenMoneroQuoteIsMissing(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	body := strings.Split(priceResponse(now.Unix()), `,"monero"`)[0] + `}`
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, body), nil
+	})
+	if err := cache.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := cache.Snapshot(); snapshot["available"] != true {
+		t.Fatalf("bitcoin snapshot = %#v", snapshot)
+	}
+	if snapshot := cache.SnapshotAsset("monero"); snapshot["available"] != false {
+		t.Fatalf("monero snapshot = %#v", snapshot)
+	}
+}
+
+func TestPartialRefreshMarksRetainedMoneroQuoteStaleButBitcoinFresh(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	currentBody := priceResponse(now.Unix())
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, currentBody), nil
+	})
+	if err := cache.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(time.Minute)
+	cache.now = func() time.Time { return now }
+	currentBody = strings.Split(priceResponse(now.Unix()), `,"monero"`)[0] + `}`
+	if err := cache.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	bitcoin := cache.Snapshot()
+	if bitcoin["available"] != true || bitcoin["stale"] != false || bitcoin["updated_at"] != now.Unix() {
+		t.Fatalf("bitcoin snapshot = %#v", bitcoin)
+	}
+	monero := cache.SnapshotAsset("monero")
+	if monero["available"] != true || monero["stale"] != true || monero["updated_at"] != now.Add(-time.Minute).Unix() || monero["prices"].(map[string]float64)["usd"] != 350 {
+		t.Fatalf("retained Monero snapshot = %#v", monero)
+	}
+}
+
+func TestInvalidMoneroRefreshMarksRetainedQuoteStale(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	body := priceResponse(now.Unix())
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, body), nil
+	})
+	if err := cache.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	cache.now = func() time.Time { return now }
+	body = strings.Replace(priceResponse(now.Unix()), `"usd":350`, `"usd":0`, 1)
+	if err := cache.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if bitcoin, monero := cache.Snapshot(), cache.SnapshotAsset("monero"); bitcoin["stale"] != false || monero["available"] != true || monero["stale"] != true || monero["prices"].(map[string]float64)["usd"] != 350 {
+		t.Fatalf("snapshots = bitcoin %#v, monero %#v", bitcoin, monero)
 	}
 }
 

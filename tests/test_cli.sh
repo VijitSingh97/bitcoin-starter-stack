@@ -8,6 +8,10 @@ fail() {
   exit 1
 }
 
+[ -x scripts/node-control ] || fail "source node-control helper is not executable"
+grep -Fq 'scripts/node-control" || echo "upgrade-agent: node control check failed' stack ||
+  fail "upgrade-agent does not run node-control"
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cp stack configure.sh config.example.json "$tmp/"
@@ -45,19 +49,26 @@ echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded w
 
 # init wizard builds config.json from piped answers (Enter = default; last = don't start)
 rm -f config.json .env
-printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric shared password"
+printf 'bad password\n' | ./stack init >/dev/null 2>&1 && fail "init accepted a non-alphanumeric dashboard password"
 [ ! -f config.json ] || fail "failed init wrote config.json"
-# shared password, data dir, dashboard bind, control, LAN RPC, prune, start
-out=$(printf 'hunter2hunter2hunter2hunter2\n%s\n192.168.1.116\ny\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
+# dashboard password, nodes, dashboard bind, control, Bitcoin data/RPC/prune, start
+out=$(printf 'hunter2hunter2hunter2hunter2\nbitcoin\n192.168.1.116\ny\n%s\ny\n192.168.1.117\n18332\n10\nn\n' "$tmp/bitcoin-data" | ./stack init)
 [ -f config.json ] || fail "init did not write config.json"
 printf '%s' "$out" | grep -q 'Later: ./stack pull && ./stack up' || fail "init deferred-start instructions omit image download"
-[ "$(printf '%s' "$out" | grep -c 'Password: hunter2hunter2hunter2hunter2')" = "1" ] || fail "init did not print the new login exactly once"
-[ "$(printf '%s' "$out" | grep -c 'Username: admin')" = "1" ] || fail "init did not print the username exactly once"
+printf '%s' "$out" | grep -q 'Dashboard — username: admin  password: hunter2hunter2hunter2hunter2' || fail "init did not print the dashboard login"
+[ "$(printf '%s' "$out" | grep -c 'username: admin  password:')" = "2" ] || fail "init did not print the selected node and dashboard credentials"
+printf '%s' "$out" | grep -q 'Monero RPC' && fail "init printed credentials for an unselected node"
 # shellcheck disable=SC2012 # fixed filename, ls is the portable way to read the mode string
 perms=$(ls -l config.json | cut -c1-10)
 [ "$perms" = "-rw-------" ] || fail "init config.json is not mode 600"
 [ "$(jq -r '.dashboard.password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: dashboard password"
-[ "$(jq -r '.bitcoin.node_password' config.json)" = "hunter2hunter2hunter2hunter2" ] || fail "init: shared RPC password"
+bitcoin_password=$(jq -r '.bitcoin.node_password' config.json)
+monero_password=$(jq -r '.monero.node_password' config.json)
+printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Bitcoin RPC password was not generated"
+printf '%s' "$monero_password" | grep -qE '^[0-9a-f]{48}$' || fail "init: Monero RPC password was not generated"
+if [ "$bitcoin_password" = "$monero_password" ] || [ "$bitcoin_password" = hunter2hunter2hunter2hunter2 ]; then
+  fail "init: node passwords are not separate"
+fi
 [ "$(jq -r '.dashboard.control' config.json)" = "true" ] || fail "init: answering y should enable dashboard control"
 [ "$(jq -r '.bitcoin.data_dir' config.json)" = "$tmp/bitcoin-data" ] || fail "init: data directory"
 [ "$(jq -r '.dashboard.bind_ip' config.json)" = "192.168.1.116" ] || fail "init: dashboard bind address"
@@ -68,23 +79,25 @@ perms=$(ls -l config.json | cut -c1-10)
 [ "$(jq -r '.bitcoin.rpc_port' config.json)" = "18332" ] || fail "init: RPC host port"
 [ "$(jq -r 'has("sync_over_clearnet") or (.bitcoin | has("sync_over_clearnet"))' config.json)" = "false" ] || fail "init: clearnet setting should be absent"
 [ "$(jq -r '.bitcoin.prune_mb' config.json)" = "10000" ] || fail "init: 10 GB should render 10000 MB"
+[ "$(jq -r '.bitcoin.resource_profile // "off"' config.json)" = "off" ] || fail "init: source setup enabled an unavailable resource profile"
 [ "$(jq -r '.bitcoin.node_username // "unset"' config.json)" = "unset" ] || fail "init: default username should be omitted"
 # the generated config must feed configure.sh cleanly (creds auto-generated)
 ./configure.sh >/dev/null || fail "configure.sh rejected the wizard's config.json"
 grep -q '^BITCOIN_RPC_USER=admin$' .env || fail "wizard config: username default not applied"
-grep -q '^BITCOIN_RPC_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: shared RPC password not rendered"
+grep -q "^BITCOIN_RPC_PASSWORD=$bitcoin_password$" .env || fail "wizard config: Bitcoin RPC password not rendered"
+grep -q "^MONERO_RPC_PASSWORD=$monero_password$" .env || fail "wizard config: Monero RPC password not rendered"
 grep -q '^DASHBOARD_PASSWORD=hunter2hunter2hunter2hunter2$' .env || fail "wizard config: dashboard password not rendered"
 grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' .env || fail "wizard config: RPC override not enabled"
 
 # Enter at the dashboard-password prompt generates a strong one (#76):
 # Existing archival, path, and bind settings survive a wizard rewrite.
 jq '.bitcoin.prune_mb=0' config.json >config.next && mv config.next config.json
-out=$(printf 'y\n\n\n\nn\nn\n\nn\n' | ./stack init)
+out=$(printf 'y\n\nbitcoin\n\nn\n\nn\n\nn\n' | ./stack init)
 generated=$(jq -r '.dashboard.password' config.json)
 printf '%s' "$generated" | grep -qE '^[0-9a-f]{48}$' ||
   fail "init: empty password should generate a 48-hex one"
-[ "$(jq -r '.bitcoin.node_password' config.json)" = "$generated" ] || fail "init: generated password was not shared"
-[ "$(printf '%s' "$out" | grep -c "Password: $generated")" = "1" ] || fail "init did not print generated login exactly once"
+[ "$(jq -r '.bitcoin.node_password' config.json)" != "$generated" ] || fail "init: generated passwords were shared"
+printf '%s' "$out" | grep -q "Dashboard — username: admin  password: $generated" || fail "init did not print generated dashboard login"
 printf '%s' "$out" | grep -q 'hunter2hunter2hunter2hunter2' && fail "init printed the previous credential"
 [ "$(jq -r '.dashboard.control // false' config.json)" = "false" ] ||
   fail "init: upgrade button must default to off"
@@ -98,16 +111,49 @@ legacy_wizard="$tmp/legacy-wizard"
 mkdir "$legacy_wizard"
 cp stack configure.sh "$legacy_wizard/"
 printf 'BITCOIN_RPC_USER=bitcoin\nBITCOIN_RPC_PASSWORD=oldrpc\n' >"$legacy_wizard/.env"
-(cd "$legacy_wizard" && printf 'legacywizardpassword1234\n\n\nn\nn\n\nn\n' | ./stack init >/dev/null)
+(cd "$legacy_wizard" && printf 'legacywizardpassword1234\nbitcoin\n\nn\n\nn\n\nn\n' | ./stack init >/dev/null)
 [ "$(jq -r '.bitcoin.prune_mb' "$legacy_wizard/config.json")" = "0" ] || fail "init converted a pre-prune environment"
 
-# ensure_agent: up/apply must start the agent + install the @reboot cron entry
-# when dashboard.control is on, remove both when off, and defer to systemd.
+multi_wizard="$tmp/multi-wizard"
+mkdir "$multi_wizard"
+cp stack configure.sh "$multi_wizard/"
+printf '1.2.3\n' >"$multi_wizard/VERSION"
+(cd "$multi_wizard" && printf 'dashboardpassword1234567890\nboth\n\nn\n\nn\n\n%s\ny\n192.168.1.118\n28081\ny\n192.168.1.118\n28083\nn\n' "$tmp/monero-data" | ./stack init >/dev/null)
+[ "$(jq -r '.monero.enabled' "$multi_wizard/config.json")" = "true" ] || fail "init: both-node selection did not enable Monero"
+[ "$(jq -r '.bitcoin.enabled // true' "$multi_wizard/config.json")" = "true" ] || fail "init: both-node selection disabled Bitcoin"
+[ "$(jq -r '.monero.data_dir' "$multi_wizard/config.json")" = "$tmp/monero-data" ] || fail "init: Monero data directory"
+[ "$(jq -r '.monero.rpc_expose' "$multi_wizard/config.json")" = "true" ] || fail "init: Monero RPC exposure"
+[ "$(jq -r '.monero.zmq_expose' "$multi_wizard/config.json")" = "true" ] || fail "init: Monero ZMQ exposure"
+[ "$(jq -r '.bitcoin.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Bitcoin compact profile"
+[ "$(jq -r '.monero.resource_profile // "off"' "$multi_wizard/config.json")" = "off" ] || fail "init: source setup enabled the Monero compact profile"
+[ "$(jq -r '.bitcoin.steady_cpus' "$multi_wizard/config.json")" = "1" ] || fail "init: Bitcoin steady CPU default was not written"
+[ "$(jq -r '.bitcoin.steady_mem_limit_mb' "$multi_wizard/config.json")" = "2048" ] || fail "init: Bitcoin steady memory default was not written"
+[ "$(jq -r '.monero.steady_cpus' "$multi_wizard/config.json")" = "1" ] || fail "init: Monero steady CPU default was not written"
+[ "$(jq -r '.monero.steady_mem_limit_mb' "$multi_wizard/config.json")" = "2048" ] || fail "init: Monero steady memory default was not written"
+(cd "$multi_wizard" && ./configure.sh >/dev/null)
+grep -q '^COMPOSE_PROFILES=bitcoin,monero$' "$multi_wizard/.env" || fail "init: both-node profiles not rendered"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.monero-rpc.yml:docker-compose.monero-zmq.yml$' "$multi_wizard/.env" || fail "init: Monero LAN overrides not rendered"
+
+monero_wizard="$tmp/monero-wizard"
+mkdir "$monero_wizard"
+cp stack configure.sh "$monero_wizard/"
+printf '1.2.3\n' >"$monero_wizard/VERSION"
+monero_out=$(cd "$monero_wizard" && printf 'dashboardpassword1234567890\nmonero\n\nn\n\nn\nn\nn\n' | ./stack init)
+printf '%s' "$monero_out" | grep -q 'Bitcoin data directory' && fail "init: Monero-only setup asked Bitcoin storage questions"
+printf '%s' "$monero_out" | grep -q 'Expose Bitcoin RPC' && fail "init: Monero-only setup asked Bitcoin RPC questions"
+printf '%s' "$monero_out" | grep -q 'Bitcoin RPC —' && fail "init: Monero-only setup printed Bitcoin credentials"
+[ "$(jq -r '.bitcoin.enabled' "$monero_wizard/config.json")" = "false" ] || fail "init: Monero-only setup enabled Bitcoin"
+[ "$(jq -r '.monero.enabled' "$monero_wizard/config.json")" = "true" ] || fail "init: Monero-only setup disabled Monero"
+(cd "$monero_wizard" && ./configure.sh >/dev/null)
+grep -q '^COMPOSE_PROFILES=monero$' "$monero_wizard/.env" || fail "init: Monero-only profile not rendered"
+
+# ensure_agent: up/apply must start the host-control agent + install the @reboot
+# cron entry when a dashboard password is set, and defer to systemd.
 # Everything host-touching (crontab, docker, pgrep/pkill, setsid, systemctl) is
 # stubbed onto PATH so the real machine is never modified.
 stub=$tmp/stubs
 mkdir -p "$stub"
-export FAKE_CRON="$tmp/fake-crontab" FAKE_LOG="$tmp/stub-calls.log"
+export FAKE_CRON="$tmp/fake-crontab" FAKE_LOG="$tmp/stub-calls.log" FAKE_IMAGES_READY="$tmp/images-ready"
 cat >"$stub/crontab" <<'EOS'
 #!/usr/bin/env bash
 if [ "${1:-}" = "-l" ]; then [ -f "$FAKE_CRON" ] && cat "$FAKE_CRON" || exit 1; else cat >"$FAKE_CRON"; fi
@@ -117,8 +163,9 @@ cat >"$stub/docker" <<'EOS'
 echo "docker $*" >>"$FAKE_LOG"
 case " $* " in
   *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
-  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
-  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ]; exit ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_IMAGES_READY" ]; exit ;;
+  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
+  *' inspect --format {{.State.Running}} dashboard '*) printf 'true\n' ;;
 esac
 exit 0
 EOS
@@ -138,6 +185,14 @@ cat >"$stub/systemctl" <<'EOS'
 #!/usr/bin/env bash
 exit 1
 EOS
+cat >"$stub/uname" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_UNAME:-Linux}"
+EOS
+cat >"$stub/flock" <<'EOS'
+#!/usr/bin/env bash
+echo "flock $*" >>"$FAKE_LOG"
+EOS
 chmod +x "$stub"/*
 
 wizard="$tmp/wizard"
@@ -145,8 +200,12 @@ mkdir "$wizard"
 cp stack configure.sh "$wizard/"
 printf '1.2.3\n' >"$wizard/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
-  FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
+rm -f "$FAKE_IMAGES_READY"
+(cd "$wizard" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
+  FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >"$tmp/wizard-init.log" 2>&1) || {
+  cat "$tmp/wizard-init.log"
+  fail "init failed with mocked Linux host controls"
+}
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "init did not pull missing images"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
 
@@ -155,7 +214,7 @@ mkdir "$wizard_loaded"
 cp stack configure.sh "$wizard_loaded/"
 printf '1.2.3\n' >"$wizard_loaded/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard_loaded" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+(cd "$wizard_loaded" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
 grep -q 'docker compose pull' "$FAKE_LOG" && fail "init pulled images that were already local"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init did not start local images"
@@ -165,7 +224,8 @@ mkdir "$wizard_failed"
 cp stack configure.sh "$wizard_failed/"
 printf '1.2.3\n' >"$wizard_failed/VERSION"
 rm -f "$FAKE_LOG"
-(cd "$wizard_failed" && printf 'wizardpassword1234567890\n\n\nn\nn\n\n\n' |
+rm -f "$FAKE_IMAGES_READY"
+(cd "$wizard_failed" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init ignored a missing-image pull failure"
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "init failure did not attempt a pull"
@@ -174,7 +234,12 @@ grep -q 'docker compose up -d' "$FAKE_LOG" && fail "init started after a failed 
 echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 
 # control on -> cron entry installed, agent started
+: >"$FAKE_LOG"
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+  fail "apply did not hold the config lock through Compose"
+grep -q 'docker exec -i -u 1000 dashboard sh -c .*node-runtime.json' "$FAKE_LOG" ||
+  fail "apply did not synchronize dashboard node runtime state"
 grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
 # the agent start is backgrounded — give the stub a moment to log the call
@@ -189,6 +254,14 @@ printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: sta
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 [ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
+: >"$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply-port-settings >/dev/null
+grep -q 'docker compose up -d --pull never --no-build --no-deps tor dashboard' "$FAKE_LOG" ||
+  fail "port settings apply was not limited to Tor and dashboard"
+: >"$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack up >/dev/null
+awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+  fail "up did not hold the config lock through Compose"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up --build >/dev/null 2>&1 && fail "up allows an implicit build"
 
 # Explicit pulls use the host Docker configuration and report pull failures.
@@ -218,12 +291,27 @@ FAKE_ORIGIN=git@github.com:example/stack.git PATH="$stub:$PATH" ./stack upgrade 
 [ ! -f "$FAKE_LOG" ] || fail "SSH upgrade attempted a network fetch"
 rm -f "$stub/git"
 
-# control off -> cron entry removed, agent killed
+# Upgrade control can be off while close-only LAN port controls keep the agent.
 echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json
+HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: control-off dashboard lost LAN port controls"
+grep -q "pkill" "$FAKE_LOG" && fail "ensure_agent: control-off dashboard stopped the host-control agent"
+
+# No dashboard password means the host-control API is unavailable.
+echo '{"dashboard": {"password": "", "control": false}}' >config.json
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: cron entry not removed"
 grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: agent not stopped"
 printf '%s' "$out" | grep -q "upgrade-agent: stopped" || fail "ensure_agent: stop not reported"
+
+# Source installs on macOS must not install a Linux cron/setsid agent.
+rm -f "$FAKE_CRON" "$FAKE_LOG"
+echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
+out=$(FAKE_UNAME=Darwin HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+[ ! -f "$FAKE_CRON" ] || fail "ensure_agent: macOS source install wrote a cron entry"
+grep -q '^setsid ' "$FAKE_LOG" 2>/dev/null && fail "ensure_agent: macOS source install launched setsid"
+printf '%s' "$out" | grep -q 'Homebrew installation' || fail "ensure_agent: macOS source install omitted Homebrew guidance"
+printf '%s' "$out" | grep -q './stack host-service' || fail "ensure_agent: macOS source install omitted foreground guidance"
 
 # systemd unit enabled -> stack stays out of the way entirely
 cat >"$stub/systemctl" <<'EOS'

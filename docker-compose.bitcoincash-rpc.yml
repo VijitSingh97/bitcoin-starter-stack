@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${BITCOINCASH_RPC_BIND_IP:?set bitcoincash.rpc_bind_ip in config.json}:${BITCOINCASH_RPC_PORT:-8332}:18332"

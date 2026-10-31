@@ -1,9 +1,30 @@
 #!/bin/sh
 set -eu
 
-config_dir=${BITCOIN_STACK_CONFIG_DIR:-/etc/bitcoin-starter-stack}
-state_dir=${BITCOIN_STACK_STATE_DIR:-/var/lib/bitcoin-starter-stack}
-data_dir=${BITCOIN_STACK_DATA_DIR:-$state_dir/data}
+package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-1}
+if [ "$package_managed" = brew ]; then
+  case "$(uname -s)" in
+    Darwin)
+      app_root=${BITCOIN_STACK_HOME:-${HOME:?}/Library/Application Support/bitcoin-starter-stack}
+      default_config=$app_root/config
+      default_state=$app_root/state
+      default_data=$app_root/data
+      ;;
+    Linux)
+      default_config=${XDG_CONFIG_HOME:-${HOME:?}/.config}/bitcoin-starter-stack
+      default_state=${XDG_DATA_HOME:-${HOME:?}/.local/share}/bitcoin-starter-stack/state
+      default_data=${XDG_DATA_HOME:-${HOME:?}/.local/share}/bitcoin-starter-stack/data
+      ;;
+    *) echo "bitcoin-stack supports macOS and Linux." >&2; exit 1 ;;
+  esac
+else
+  default_config=/etc/bitcoin-starter-stack
+  default_state=/var/lib/bitcoin-starter-stack
+  default_data=$default_state/data
+fi
+config_dir=${BITCOIN_STACK_CONFIG_DIR:-$default_config}
+state_dir=${BITCOIN_STACK_STATE_DIR:-$default_state}
+data_dir=${BITCOIN_STACK_DATA_DIR:-$default_data}
 for path in "$config_dir" "$state_dir" "$data_dir"; do
   case "$path" in /*) ;; *) echo "Package configuration and state directories must be absolute paths." >&2; exit 1 ;; esac
   if [ -e "$path" ] && [ ! -d "$path" ]; then
@@ -14,13 +35,59 @@ done
 
 umask 077
 mkdir -p "$config_dir" "$state_dir" "$data_dir" || {
-  echo "Could not create package configuration and state directories; run bitcoin-stack with sudo." >&2
+  echo "Could not create package configuration and state directories; check ownership and permissions (APT installations may need sudo)." >&2
   exit 1
 }
-export BITCOIN_STACK_ROOT="${BITCOIN_STACK_ROOT:-/usr/lib/bitcoin-starter-stack}"
+stack_root=${BITCOIN_STACK_ROOT:-/usr/lib/bitcoin-starter-stack}
+if [ "$package_managed" = brew ]; then
+  asset_files='build/bitcoin/bitcoin.conf
+build/tari/config.toml
+build/tari/entrypoint.sh
+build/zcash/zakurad.toml
+build/zcash/healthcheck.sh'
+  asset_base=$state_dir/package-assets
+  mkdir -p "$asset_base"
+  for relative in $asset_files; do
+    [ -f "$stack_root/$relative" ] || {
+      echo "Package asset is missing: $relative" >&2
+      exit 1
+    }
+  done
+  if command -v sha256sum >/dev/null 2>&1; then
+    asset_hash=$(
+      for relative in $asset_files; do
+        sha256sum "$stack_root/$relative" | awk -v path="$relative" '{print path " " $1}'
+      done | sha256sum | awk '{print $1}'
+    )
+  else
+    asset_hash=$(
+      for relative in $asset_files; do
+        shasum -a 256 "$stack_root/$relative" | awk -v path="$relative" '{print path " " $1}'
+      done | shasum -a 256 | awk '{print $1}'
+    )
+  fi
+  asset_root=$asset_base/$asset_hash
+  exec 6>"$asset_base/.lock"
+  flock 6
+  if [ ! -d "$asset_root" ]; then
+    asset_tmp=$(mktemp -d "$asset_base/.assets.XXXXXX")
+    trap 'rm -rf "$asset_tmp"' EXIT HUP INT TERM
+    for relative in $asset_files; do
+      mkdir -p "$asset_tmp/${relative%/*}"
+      cp "$stack_root/$relative" "$asset_tmp/$relative"
+    done
+    chmod -R u=rwX,go=rX "$asset_tmp"
+    mv "$asset_tmp" "$asset_root"
+    trap - EXIT HUP INT TERM
+  fi
+  flock -u 6
+  exec 6>&-
+  export BITCOIN_STACK_ASSET_ROOT="$asset_root"
+fi
+export BITCOIN_STACK_ROOT="$stack_root"
 export BITCOIN_STACK_CONFIG_DIR="$config_dir"
 export BITCOIN_STACK_STATE_DIR="$state_dir"
 export BITCOIN_STACK_DATA_DIR="$data_dir"
 export BITCOIN_STACK_COMMAND=bitcoin-stack
-export BITCOIN_STACK_PACKAGE_MANAGED=1
+export BITCOIN_STACK_PACKAGE_MANAGED="$package_managed"
 exec "$BITCOIN_STACK_ROOT/stack" "$@"

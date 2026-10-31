@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, towerLayout, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, towerLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -66,6 +66,34 @@ test("smooth clamps to [0,1] and eases the ends", () => {
   assert.ok(smooth(0.25) < 0.25);
 });
 
+test("nextHighlight eases both into and out of the highlighted state", () => {
+  const growing = nextHighlight(0, true, 60);
+  assert.ok(growing > 0 && growing < 1);
+  assert.ok(nextHighlight(growing, true, 60) > growing);
+  const shrinking = nextHighlight(1, false, 60);
+  assert.ok(shrinking > 0 && shrinking < 1);
+  assert.ok(nextHighlight(shrinking, false, 60) < shrinking);
+});
+
+test("nextScene reverses cleanly and changes towers through the overview", () => {
+  const opening = nextScene("", "bitcoin", 0, 60);
+  assert.equal(opening.node, "bitcoin");
+  assert.ok(opening.progress > 0 && opening.progress < 1);
+
+  const reversing = nextScene("bitcoin", "", opening.progress, 30);
+  assert.equal(reversing.node, "bitcoin");
+  assert.ok(reversing.progress < opening.progress);
+  assert.ok(nextScene("bitcoin", "bitcoin", reversing.progress, 30).progress > reversing.progress);
+
+  const switching = nextScene("bitcoin", "monero", 0, 16);
+  assert.equal(switching.node, "monero");
+  assert.ok(switching.progress > 0);
+  const pendingSwitch = nextScene("bitcoin", "monero", 0.8, 30);
+  assert.equal(pendingSwitch.node, "bitcoin");
+  assert.ok(pendingSwitch.progress < 0.8);
+  assert.deepEqual(nextScene("bitcoin", "monero", 1, 16, true), { node: "monero", progress: 1 });
+});
+
 test("towerLayout stacks (centres the tower) below the wide breakpoint", () => {
   for (const W of [375, 900, 1023]) {  // phones through the awkward mid-range
     const m = towerLayout(W);
@@ -81,4 +109,44 @@ test("towerLayout keeps the tower clear of the card zone on wide screens", () =>
     assert.ok(ox - (GRID * tw) / 2 >= 500, `W=${W} overlaps card`);
     assert.ok(ox + (GRID * tw) / 2 <= W + 1, `W=${W} runs off screen`);
   }
+});
+
+test("preview tower reaches the viewport bottom", () => {
+  for (const [H, anchorY, tw] of [[667, 200, 14], [900, 270, 40], [2160, 648, 46]]) {
+    const depth = previewDepth(H, anchorY, tw);
+    for (const [gx, gy] of [[GRID, 0], [0, GRID], [GRID, GRID]]) {
+      const bottom = project(gx, gy, 0, tw, tw * 0.5, 0, anchorY - GRID * (tw / 4) + (depth + 1) * tw * 0.5).y;
+      assert.ok(bottom > H, `H=${H} corner=${gx},${gy} stops at ${bottom}`);
+    }
+  }
+});
+
+test("zoom keeps at least the overview tower depth throughout the transition", () => {
+  const H = 900;
+  const overviewY = H * 0.3;
+  const overviewTw = 40;
+  const initialDepth = previewDepth(H, overviewY, overviewTw);
+  for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+    const anchorY = overviewY + (H * 0.6 - overviewY) * progress;
+    const tw = overviewTw + (52 - overviewTw) * progress;
+    const depth = sceneDepth(H, anchorY, tw, overviewY, overviewTw);
+    assert.ok(depth >= initialDepth, `progress=${progress} shrank from ${initialDepth} to ${depth}`);
+    for (const [gx, gy] of [[GRID, 0], [0, GRID], [GRID, GRID]]) {
+      const bottom = project(gx, gy, 0, tw, tw * 0.5, 0, anchorY - GRID * (tw / 4) + (depth + 1) * tw * 0.5).y;
+      assert.ok(bottom > H, `progress=${progress} corner=${gx},${gy} stops at ${bottom}`);
+    }
+  }
+});
+
+test("overview block labels use each live node height only when labels are enabled", () => {
+  assert.deepEqual(overviewBlockLabels({ bitcoin: "974001", monero: "3512002" }, true, true), {
+    bitcoin: "loading block 974001",
+    monero: "loading block 3512002",
+  });
+  assert.deepEqual(overviewBlockLabels({ bitcoin: "974001", monero: "" }, true, true), {
+    bitcoin: "loading block 974001",
+    monero: "",
+  });
+  assert.deepEqual(overviewBlockLabels({ bitcoin: "974001", monero: "3512002" }, false, true), { bitcoin: "", monero: "" });
+  assert.deepEqual(overviewBlockLabels({ bitcoin: "974001", monero: "3512002" }, true, false), { bitcoin: "", monero: "" });
 });
