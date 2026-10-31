@@ -87,8 +87,8 @@ generated state always win, so an upgrade never converts a full node to pruning.
 The first package release supports fresh installations only; keep an existing
 source-managed production node on its current upgrade path. Package mode blocks
 startup when the fixed service names belong to another Compose installation.
-The commands below remain the supported installation until the feed is live.
-When the package is released, verify and install its signing key as described in
+Until the feed is live, use the release tarball section below. When the package
+is released, verify and install its signing key as described in
 [Package feed](privacy.md#package-feed), then add the feed:
 
 ```bash
@@ -116,7 +116,9 @@ cd bitcoin-starter-stack
 ./stack init
 ```
 
-The tarball's semantic version matches its published container images.
+The tarball's semantic version matches its published container images. The
+current `v1.31.1` tarball uses an interactive `./stack init` wizard; follow its
+bundled README. The no-question defaults below describe the next release.
 Development branches use unpublished image tags and require images built in a
 separate development environment; do not use a branch checkout for installation.
 
@@ -125,7 +127,7 @@ locally. `init` sees that they are present and starts without downloading.
 Routine `up` and `apply` never download or build implicitly; `pull` is the
 explicit command for obtaining images ahead of time.
 
-## Default first start
+## Default first start in the next release
 
 Run `bitcoin-stack init` for Homebrew, `sudo bitcoin-stack init` for APT, or
 `./stack init` for source. A fresh run:

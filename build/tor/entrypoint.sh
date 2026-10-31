@@ -66,7 +66,6 @@ stop() {
 }
 trap 'stop; exit 0' TERM INT
 
-status=0
 while :; do
   running=1
   for pid in $pids; do
@@ -75,11 +74,5 @@ while :; do
   [ "$running" = "1" ] || break
   sleep 1
 done
-for pid in $pids; do
-  if ! kill -0 "$pid" 2>/dev/null; then
-    wait "$pid" || status=$?
-    break
-  fi
-done
 stop
-exit "$status"
+exit 1

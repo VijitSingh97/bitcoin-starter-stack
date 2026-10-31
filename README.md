@@ -170,9 +170,10 @@ cd bitcoin-starter-stack
 ./stack init
 ```
 
-The download and extraction do not start Docker containers. `./stack init` is
-the explicit setup step. It writes private configuration, downloads missing images,
-and starts a pruned Bitcoin node with no questions.
+The download and extraction do not start Docker containers. In `v1.31.1`,
+`./stack init` opens the interactive setup wizard; follow the README bundled in
+that tarball. The no-question Bitcoin-only defaults below belong to the next
+release containing this branch.
 
 Homebrew support for macOS and Linux is prepared but unreleased. After a release
 publishes the generated formula, its commands will be:
@@ -201,7 +202,7 @@ The first package release is for fresh installs and will not migrate an existing
 source-managed node. Development branches use unpublished image tags and are
 not an installation path.
 
-### 2. Open the dashboard
+### 2. Open the dashboard in the next release
 
 Run the installation's `init` command once. Setup uses these defaults:
 

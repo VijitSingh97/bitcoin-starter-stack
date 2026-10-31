@@ -24,6 +24,7 @@ tests/test_zcash.sh
 tests/test_native_nodes.sh
 tests/test_apt.sh
 tests/test_compose.sh
+tests/test_tor_supervisor.sh
 tests/test_e2e.sh
 tests/test_upgrade.sh
 tests/test_postsync.sh
