@@ -220,6 +220,7 @@ echo "$tari_wallet_rendered" | grep -q 'ipv4_address: 172.29.0.37' || fail "Tari
 echo "$tari_wallet_rendered" | grep -q 'read_only: true' || fail "Tari wallet root filesystem is writable"
 echo "$tari_wallet_rendered" | grep -q 'source: tari_wallet' || fail "Tari wallet control volume is not persistent"
 echo "$tari_wallet_rendered" | grep -q 'source: tari_wallet_data' || fail "Tari wallet private data volume is not persistent"
+echo "$tari_wallet_rendered" | grep -q '127.0.0.1' || fail "Tari wallet DNS is not fail-closed"
 echo "$tari_wallet_rendered" | grep -q 'published:' && fail "Tari wallet gRPC is published to the host"
 echo "$all_nodes" | sed -n '/^  dashboard:$/,/^  dogecoin:$/p' | grep -q 'TARI_WALLET_GRPC_URL: http://172.29.0.37:18143' || fail "dashboard is not wired to Tari wallet gRPC"
 dashboard_nodes=$(echo "$all_nodes" | sed -n '/^  dashboard:$/,/^  [a-z][a-z-]*:$/p')

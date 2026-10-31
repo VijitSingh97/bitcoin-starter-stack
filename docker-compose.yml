@@ -273,6 +273,7 @@ services:
     networks:
       btc_net:
         ipv4_address: 172.29.0.37
+    dns: ["127.0.0.1"]
 
   litecoin:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-litecoin:${STACK_VERSION:-latest}
