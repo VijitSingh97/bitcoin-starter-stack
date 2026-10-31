@@ -28,6 +28,7 @@ shows the overridable settings with their defaults:
 {
     "bitcoin": {
         "enabled": true,
+        "active": true,
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 128,
@@ -44,6 +45,7 @@ shows the overridable settings with their defaults:
     },
     "monero": {
         "enabled": false,
+        "active": true,
         "node_username": "admin",
         "data_dir": "./data/monero",
         "resource_profile": "off",
@@ -56,6 +58,69 @@ shows the overridable settings with their defaults:
         "zmq_bind_ip": "",
         "zmq_port": 18083
     },
+    "tari": {
+        "enabled": false,
+        "active": true,
+        "data_dir": "./data/tari",
+        "pruning_horizon": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "grpc_expose": false,
+        "grpc_bind_ip": "",
+        "grpc_port": 18142
+    },
+    "litecoin": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/litecoin",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 9332
+    },
+    "dogecoin": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/dogecoin",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 22555
+    },
+    "bitcoincash": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/bitcoincash",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 8332
+    },
+    "zcash": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/zcash",
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 8232
+    },
     "dashboard": {
         "password": "",
         "onion": false,
@@ -67,7 +132,12 @@ shows the overridable settings with their defaults:
         "telegram_chat_id": "",
         "healthchecks_url": "",
         "alert_new_block": false,
-        "alert_new_block_monero": false
+        "alert_new_block_monero": false,
+        "alert_new_block_tari": false,
+        "alert_new_block_litecoin": false,
+        "alert_new_block_dogecoin": false,
+        "alert_new_block_bitcoincash": false,
+        "alert_new_block_zcash": false
     },
     "wallets": [
         {
@@ -109,8 +179,20 @@ shows the overridable settings with their defaults:
 | `monero.zmq_expose` | `false` | Publishes the Monero ZMQ feed to one trusted private-LAN address for software such as P2Pool. ZMQ has no application authentication. |
 | `monero.zmq_bind_ip` | `""` | Private IPv4 address assigned to this host. Required when ZMQ exposure is enabled. |
 | `monero.zmq_port` | `18083` | Host port for the opt-in ZMQ relay. |
+| `<node>.enabled` | `false` for Tari, Litecoin, Dogecoin, Bitcoin Cash, and Zcash | Adds that node to the configured stack and dashboard. At least one node must be enabled. |
+| `<node>.active` | `true` | Starts the configured node. Dashboard deactivation changes this to `false` while preserving data and configuration. |
+| `<node>.data_dir` | `./data/<node>` (source), `/var/lib/bitcoin-starter-stack/data/<node>` (APT) | Host directory for that chain's data. |
+| `<node>.resource_profile` | `off`; `compact` for APT wizard selections | Syncs uncapped, then applies that node's steady ceiling after repeated healthy sync checks. |
+| `<node>.steady_cpus` | `1` | Independent post-sync CPU ceiling for Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash. |
+| `<node>.steady_mem_limit_mb` | `4096` | Independent post-sync memory-plus-swap ceiling for those nodes. This is a budget, not a qualified minimum. |
+| `tari.pruning_horizon` | `10000` | Positive retained-block horizon for Minotari's pruned state. |
+| `tari.grpc_expose`, `grpc_bind_ip`, `grpc_port` | `false`, `""`, `18142` | Optional unauthenticated Tari gRPC for Pithead on a trusted private LAN or WireGuard link. |
+| `litecoin.prune_mb`, `dogecoin.prune_mb`, `bitcoincash.prune_mb` | `10000` | Recent block-file target in MiB. Chainstate and other state are additional. |
+| `litecoin.rpc_port`, `dogecoin.rpc_port`, `bitcoincash.rpc_port` | `9332`, `22555`, `8332` | Default host port for each opt-in authenticated private-LAN RPC proxy. Each also has `rpc_expose` and `rpc_bind_ip`. |
+| `zcash.rpc_expose`, `rpc_bind_ip`, `rpc_port` | `false`, `""`, `8232` | Optional authenticated read-only dashboard proxy. Native cookie-authenticated Zakura RPC stays internal and is never published. |
+| `litecoin.node_password`, `dogecoin.node_password`, `bitcoincash.node_password`, `zcash.node_password` | auto-generated | Separate RPC or proxy passwords. LAN exposure requires at least 24 letters or numbers. |
 | `dashboard.password` | auto-generated | Enables basic auth on fresh installs. It is separate from both node passwords. The wizard prints the selected credentials once after setup. |
-| `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). Set a password with it. |
+| `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service and requires a non-empty `dashboard.password` — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). |
 | `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. `./stack up`/`apply` start and manage the host-side agent for you; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
 | `dashboard.bind_ip` | `127.0.0.1` | Host address for dashboard port 80. Use loopback for access from this machine only, or an RFC1918 address (`10/8`, `172.16/12`, or `192.168/16`) assigned to this host for LAN access. Public, wildcard, and IPv6 binds are rejected. |
 | `notifications.telegram_bot_token` | `""` (off) | With `telegram_chat_id`, enables Telegram alerts (node down/recovered, sync complete, disk low) — see [Notifications](notifications.md#telegram-alerts). |
@@ -118,6 +200,7 @@ shows the overridable settings with their defaults:
 | `notifications.healthchecks_url` | `""` (off) | Healthchecks.io ping URL for a dead-man's switch — see [Notifications](notifications.md#healthchecksio-dead-mans-switch). |
 | `notifications.alert_new_block` | `false` | `true` sends a Telegram alert on each new block once synced (~144/day). |
 | `notifications.alert_new_block_monero` | `false` | Monero's independent new-block Telegram alerts once synced (~720/day). The legacy `alert_new_block` key continues to mean Bitcoin. |
+| `notifications.alert_new_block_<node>` | `false` | Independent new-block alerts for `tari`, `litecoin`, `dogecoin`, `bitcoincash`, or `zcash`, sent only after that node is synced. |
 | `wallets` | Binance public example | First-start **seed** for watch-only balances — each `{ name, key, birthday? }`, where `key` is a public extended key, public descriptor, or address. The example is clearly marked and excluded from personal totals. Set `[]` to opt out. After first start the saved dashboard list is authoritative. Personal wallet views and all changes require a dashboard password. See [Watch-only](watch-only.md). |
 
 `configure.sh` applies the defaults above for any omitted key, and generates
@@ -148,6 +231,11 @@ timer. The `steady_*` values have no effect while the profile is `off`.
         "resource_profile": "compact",
         "steady_cpus": 1,
         "steady_mem_limit_mb": 2048
+    },
+    "litecoin": {
+        "resource_profile": "compact",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096
     }
 }
 ```
@@ -159,7 +247,9 @@ fields; keep its other settings. Then run:
 sudo bitcoin-stack apply
 ```
 
-For example, `steady_cpus: 2` and `steady_mem_limit_mb: 3072` give that node a
+Tari, Litecoin, Dogecoin, Bitcoin Cash, and Zcash use 4096 MiB by default;
+Bitcoin and Monero use 2048 MiB. For example, `steady_cpus: 2` and
+`steady_mem_limit_mb: 3072` give that node a
 2-core, 3-GiB post-sync ceiling. Changing a cap recreates the affected container
 and rechecks sync before applying the new values. The chain data stays in its
 volume. Set `resource_profile` to `"off"` and apply to stop automatic capping.

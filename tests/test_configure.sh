@@ -221,7 +221,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
  "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
- "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true, "alert_new_block_monero": true},
+ "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true, "alert_new_block_monero": true, "alert_new_block_tari": true, "alert_new_block_litecoin": true, "alert_new_block_dogecoin": true, "alert_new_block_bitcoincash": true, "alert_new_block_zcash": true},
  "wallets": [{"name": "Cold storage", "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "birthday": "2021-01-01"}]}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
@@ -241,6 +241,9 @@ grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not re
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
 grep -q '^ALERT_NEW_BLOCK=1$' "$tmp/.env" || fail "new-block alert not rendered"
 grep -q '^ALERT_NEW_BLOCK_MONERO=1$' "$tmp/.env" || fail "Monero new-block alert not rendered"
+for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+  grep -q "^ALERT_NEW_BLOCK_${chain}=1$" "$tmp/.env" || fail "${chain} new-block alert not rendered"
+done
 # wallets round-trip through the base64 blob (decode and check the name survived)
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 printf '%s' "$watch_b64" | openssl base64 -d -A | grep -q '"name":"Cold storage"' ||
@@ -344,7 +347,7 @@ echo '{"bitcoin": {"mem_limit_mb": "lots"}}' >"$tmp/config.json"
 (cd "$tmp" && ./configure.sh) >/dev/null 2>&1 && fail "non-numeric mem_limit_mb was accepted"
 rm -f "$tmp/config.json"
 
-# 12. Preserved legacy passwordless onion dashboards still warn.
+# 12. Passwordless onion dashboards are rejected.
 warn="$tmp/warn"
 mkdir "$warn"
 cp configure.sh "$warn/"
@@ -352,10 +355,36 @@ printf 'BITCOIN_RPC_USER=u\nBITCOIN_RPC_PASSWORD=p\nDASHBOARD_PASSWORD=\n' >"$wa
 cat >"$warn/config.json" <<'EOF'
 {"dashboard": {"onion": true}}
 EOF
-out=$(cd "$warn" && ./configure.sh)
-echo "$out" | grep -q "WARNING" || fail "no warning for onion dashboard without password"
+if out=$(cd "$warn" && ./configure.sh 2>&1); then
+  fail "passwordless onion dashboard was accepted"
+fi
+echo "$out" | grep -q "dashboard.password is required" || fail "passwordless onion error is not actionable"
 
-# 13. Version string: release number for a clean tagged checkout, branch-commit
+# 13. Zcash renders as a selectable Tor-only node with an authenticated LAN proxy.
+multi="$tmp/multi"
+mkdir "$multi"
+cp configure.sh VERSION "$multi/"
+cat >"$multi/config.json" <<'EOF'
+{
+  "bitcoin": {"enabled": false},
+  "zcash": {
+    "enabled": true,
+    "node_password": "abcdefghijklmnopqrstuvwx",
+    "rpc_expose": true,
+    "rpc_bind_ip": "192.168.1.44",
+    "rpc_port": 28232,
+    "resource_profile": "compact"
+  }
+}
+EOF
+(cd "$multi" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_PROFILES=zcash$' "$multi/.env" || fail "Zcash profile was not selected"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.zcash-rpc.yml$' "$multi/.env" || fail "Zcash RPC proxy override was not selected"
+grep -q '^ZCASH_RPC_URL=http://172.29.0.36:8232$' "$multi/.env" || fail "Zcash internal RPC URL changed"
+grep -q '^ZCASH_STEADY_MEM_LIMIT_MB=4096$' "$multi/.env" || fail "Zcash post-sync memory budget changed"
+grep -q '^ZCASH_DATA_DIR=./data/zcash$' "$multi/.env" || fail "Zcash data path default changed"
+
+# 14. Version string: release number for a clean tagged checkout, branch-commit
 #     for a dev build (drives the dashboard's version display).
 if command -v git >/dev/null; then
   gtmp=$(mktemp -d)
@@ -411,7 +440,7 @@ fi
 
 # Monero is opt-in, pruned, and its LAN RPC/ZMQ relays require private binds.
 cat >"$tmp/config.json" <<'EOF'
-{"bitcoin":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118"},"monero":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118","zmq_expose":true,"zmq_bind_ip":"192.168.1.118"}}
+{"bitcoin":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118"},"monero":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118","zmq_expose":true,"zmq_bind_ip":"192.168.1.118"},"tari":{"enabled":true}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "disabled nodes retained stale LAN relay overrides"

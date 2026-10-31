@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${TARI_GRPC_BIND_IP:?set tari.grpc_bind_ip in config.json}:${TARI_GRPC_PORT:-18142}:18142"

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"sync"
@@ -46,9 +47,10 @@ type monitorState struct {
 }
 
 type persistedMonitorState struct {
-	NotifiedStack string             `json:"notified_stack"`
-	Bitcoin       persistedNodeState `json:"bitcoin"`
-	Monero        persistedNodeState `json:"monero"`
+	NotifiedStack string                        `json:"notified_stack"`
+	Bitcoin       persistedNodeState            `json:"bitcoin"`
+	Monero        persistedNodeState            `json:"monero"`
+	Nodes         map[string]persistedNodeState `json:"nodes,omitempty"`
 }
 
 type persistedNodeState struct {
@@ -88,6 +90,10 @@ type Monitor struct {
 	bitcoinEnabled bool
 	moneroEnabled  bool
 	moneroDataDir  string
+	extraStates    map[string]*monitorState
+	extraDataDirs  map[string]string
+	extraEnabled   map[string]bool
+	transitioning  func(string) bool
 	healthTicks    int
 	healthPingDue  int
 
@@ -128,9 +134,25 @@ func NewMonitor(version, dataDir, stateDir string) *Monitor {
 		diskFreeGB:         freeGB,
 		output:             os.Stdout,
 		tickEvery:          time.Minute,
+		extraStates:        make(map[string]*monitorState),
+		extraDataDirs:      make(map[string]string),
+		extraEnabled:       make(map[string]bool),
 	}
 	monitor.loadState()
 	return monitor
+}
+
+func (m *Monitor) configureAdditionalNodes(nodes map[string]nodeConfig) {
+	for id, node := range nodes {
+		if !node.Supported {
+			continue
+		}
+		m.extraEnabled[id] = node.Enabled
+		m.extraDataDirs[id] = node.DataDir
+		if m.extraStates[id] == nil {
+			m.extraStates[id] = &monitorState{}
+		}
+	}
 }
 
 func (m *Monitor) configureNodes(bitcoinEnabled, moneroEnabled bool, moneroDataDir string) {
@@ -289,7 +311,163 @@ func (m *Monitor) tickNodes(ctx context.Context, bitcoinInfo, moneroInfo map[str
 		m.checkUpdatesWithNotification(ctx, anySynced)
 	}
 	m.healthTicks++
-	if before != m.persistedState() {
+	if !reflect.DeepEqual(before, m.persistedState()) {
+		m.saveState()
+	}
+}
+
+func (m *Monitor) RunConfiguredNodes(ctx context.Context, probes map[string]func() map[string]any) {
+	onlinePending := make(map[string]bool, len(probes))
+	for id := range probes {
+		onlinePending[id] = true
+	}
+	ticker := time.NewTicker(m.tickEvery)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		results := make(chan struct {
+			id   string
+			info map[string]any
+		}, len(probes))
+		started := 0
+		for id, probe := range probes {
+			if m.transitioning != nil && m.transitioning(id) {
+				continue
+			}
+			started++
+			go func(id string, probe func() map[string]any) {
+				results <- struct {
+					id   string
+					info map[string]any
+				}{id, probe()}
+			}(id, probe)
+		}
+		infos := make(map[string]map[string]any, len(probes))
+		for range started {
+			select {
+			case result := <-results:
+				infos[result.id] = result.info
+			case <-ctx.Done():
+				return
+			}
+		}
+		for id, info := range infos {
+			if m.transitioning != nil && m.transitioning(id) {
+				continue
+			}
+			if info != nil && info["active"] == false {
+				continue
+			}
+			state := m.monitorStateFor(id)
+			if state != nil {
+				onlinePending[id] = m.announceOnline(ctx, nodeDisplayName(id), state, info, onlinePending[id])
+			}
+		}
+		m.tickConfiguredNodes(ctx, infos)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *Monitor) monitorStateFor(id string) *monitorState {
+	switch id {
+	case nodeBitcoin:
+		return &m.state
+	case nodeMonero:
+		return &m.moneroState
+	default:
+		return m.extraStates[id]
+	}
+}
+
+func nodeDisplayName(id string) string {
+	switch id {
+	case nodeBitcoin:
+		return "Bitcoin"
+	case nodeMonero:
+		return "Monero"
+	case nodeTari:
+		return "Tari"
+	case nodeLitecoin:
+		return "Litecoin"
+	case nodeDogecoin:
+		return "Dogecoin"
+	case nodeBitcoinCash:
+		return "Bitcoin Cash"
+	case nodeZcash:
+		return "Zcash"
+	}
+	return id
+}
+
+func (m *Monitor) nodeDataDir(id string) string {
+	if id == nodeBitcoin {
+		return m.dataDir
+	}
+	if id == nodeMonero {
+		return m.moneroDataDir
+	}
+	return m.extraDataDirs[id]
+}
+
+func alertNewBlockFor(settings notificationSettings, id string) bool {
+	switch id {
+	case nodeBitcoin:
+		return settings.AlertNewBlock
+	case nodeMonero:
+		return settings.AlertNewBlockMonero
+	case nodeTari:
+		return settings.AlertNewBlockTari
+	case nodeLitecoin:
+		return settings.AlertNewBlockLitecoin
+	case nodeDogecoin:
+		return settings.AlertNewBlockDogecoin
+	case nodeBitcoinCash:
+		return settings.AlertNewBlockBitcoinCash
+	case nodeZcash:
+		return settings.AlertNewBlockZcash
+	}
+	return false
+}
+
+func (m *Monitor) tickConfiguredNodes(ctx context.Context, infos map[string]map[string]any) {
+	before := m.persistedState()
+	settings := m.notificationSettings()
+	allHealthy, healthReady, anySynced, activeCount := true, true, false, 0
+	for id, info := range infos {
+		if m.transitioning != nil && m.transitioning(id) {
+			continue
+		}
+		if info != nil && info["active"] == false {
+			continue
+		}
+		state := m.monitorStateFor(id)
+		if state == nil {
+			continue
+		}
+		activeCount++
+		healthy, hasIBD, ibd := m.tickNode(ctx, state, nodeDisplayName(id), m.nodeDataDir(id), alertNewBlockFor(settings, id), info)
+		allHealthy = allHealthy && healthy
+		healthReady = healthReady && (healthy || state.fails >= downAfterTicks)
+		anySynced = anySynced || (healthy && hasIBD && !ibd)
+		state.ticks++
+	}
+	if activeCount == 0 {
+		return
+	}
+	if m.healthTicks >= m.healthPingDue && healthReady && m.pingHealthchecks(ctx, allHealthy) {
+		m.healthPingDue = m.healthTicks + pingEveryTicks
+	}
+	if m.healthTicks%updateCheckEveryTick == 0 {
+		m.checkUpdatesWithNotification(ctx, anySynced)
+	}
+	m.healthTicks++
+	if !reflect.DeepEqual(before, m.persistedState()) {
 		m.saveState()
 	}
 }

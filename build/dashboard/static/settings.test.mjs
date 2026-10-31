@@ -12,7 +12,7 @@ test("settings remain read-only unless the server confirms configuration access"
 test("a port-only save does not create an unnecessary notification override", () => {
   const saved = {
     telegram_enabled: false, telegram_chat_id: "", healthchecks_enabled: false,
-    alert_new_block: false, alert_new_block_bitcoin: false, alert_new_block_monero: false, tower_labels: false, default_currency: "USD",
+    alert_new_block: false, alert_new_block_bitcoin: false, alert_new_block_monero: false, alert_new_block_tari:false, alert_new_block_litecoin:false, alert_new_block_dogecoin:false, alert_new_block_bitcoincash:false, alert_new_block_zcash:false, tower_labels: false, default_currency: "USD",
   };
   assert.equal(notificationChanged(saved, notificationPayload({})), false);
   assert.equal(notificationChanged(saved, notificationPayload({ alert_new_block_monero: true })), true);
@@ -20,9 +20,9 @@ test("a port-only save does not create an unnecessary notification override", ()
 });
 
 test("node-specific settings show only configured nodes", () => {
-  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: true, monero_enabled: false }), { bitcoin: true, monero: false });
-  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: false, monero_enabled: true }), { bitcoin: false, monero: true });
-  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: "true", monero_enabled: 1 }), { bitcoin: false, monero: false });
+  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: true, monero_enabled: false }), { bitcoin: true, monero: false, tari:false, litecoin:false, dogecoin:false, bitcoincash:false, zcash:false });
+  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: false, monero_enabled: true }), { bitcoin: false, monero: true, tari:false, litecoin:false, dogecoin:false, bitcoincash:false, zcash:false });
+  assert.deepEqual(configuredNodeVisibility({ bitcoin_enabled: "true", monero_enabled: 1 }), { bitcoin: false, monero: false, tari:false, litecoin:false, dogecoin:false, bitcoincash:false, zcash:false });
 });
 
 test("port controls expose only typed configured ports and trusted states", () => {
@@ -110,6 +110,7 @@ test("blank secret fields keep saved secrets without copying them into the reque
     healthchecks_enabled: true, alert_new_block_bitcoin: false, alert_new_block_monero: true }), {
     telegram_enabled: true, telegram_chat_id: "-10042", healthchecks_enabled: true, alert_new_block: false,
     alert_new_block_monero: true,
+    alert_new_block_tari:false, alert_new_block_litecoin:false, alert_new_block_dogecoin:false, alert_new_block_bitcoincash:false, alert_new_block_zcash:false,
     tower_labels: false,
     default_currency: "USD",
   });
@@ -121,6 +122,7 @@ test("disabled services do not send stale secrets or chat IDs", () => {
     healthchecks_url: "https://example.com/not-a-real-ping", alert_new_block_bitcoin: true }), {
     telegram_enabled: false, telegram_chat_id: "", healthchecks_enabled: false, alert_new_block: true,
     alert_new_block_monero: false,
+    alert_new_block_tari:false, alert_new_block_litecoin:false, alert_new_block_dogecoin:false, alert_new_block_bitcoincash:false, alert_new_block_zcash:false,
     tower_labels: false,
     default_currency: "USD",
   });

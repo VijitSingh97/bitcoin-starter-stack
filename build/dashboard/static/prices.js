@@ -9,7 +9,7 @@ export function normalizeCurrency(value) {
 }
 
 export function priceURL(asset = "bitcoin") {
-  return asset === "monero" ? `${PRICE_URL}?asset=monero` : PRICE_URL;
+  return ["monero", "tari", "litecoin", "dogecoin", "bitcoin-cash", "zcash"].includes(asset) ? `${PRICE_URL}?asset=${asset}` : PRICE_URL;
 }
 
 export function formatPrice(amount, currency, NumberFormat = Intl.NumberFormat) {
@@ -39,7 +39,7 @@ export function priceView(data, currency, formatTime = defaultTime) {
 }
 
 export function panelCurrency(openedNode, asset, current, configured) {
-  return openedNode === asset ? normalizeCurrency(configured) : normalizeCurrency(current);
+  return (openedNode === "bitcoincash" ? "bitcoin-cash" : openedNode) === asset ? normalizeCurrency(configured) : normalizeCurrency(current);
 }
 
 export function towerPriceView(data, currency) {

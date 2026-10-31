@@ -1,6 +1,7 @@
 {
     "bitcoin": {
         "enabled": true,
+        "active": true,
         "node_username": "admin",
         "data_dir": "./data/bitcoin",
         "dbcache_mb": 128,
@@ -17,6 +18,7 @@
     },
     "monero": {
         "enabled": false,
+        "active": true,
         "node_username": "admin",
         "data_dir": "./data/monero",
         "resource_profile": "off",
@@ -29,6 +31,69 @@
         "zmq_bind_ip": "",
         "zmq_port": 18083
     },
+    "tari": {
+        "enabled": false,
+        "active": true,
+        "data_dir": "./data/tari",
+        "pruning_horizon": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "grpc_expose": false,
+        "grpc_bind_ip": "",
+        "grpc_port": 18142
+    },
+    "litecoin": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/litecoin",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 9332
+    },
+    "dogecoin": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/dogecoin",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 22555
+    },
+    "bitcoincash": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/bitcoincash",
+        "prune_mb": 10000,
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 8332
+    },
+    "zcash": {
+        "enabled": false,
+        "active": true,
+        "node_username": "admin",
+        "data_dir": "./data/zcash",
+        "resource_profile": "off",
+        "steady_cpus": 1,
+        "steady_mem_limit_mb": 4096,
+        "rpc_expose": false,
+        "rpc_bind_ip": "",
+        "rpc_port": 8232
+    },
     "dashboard": {
         "password": "",
         "onion": false,
@@ -40,7 +105,12 @@
         "telegram_chat_id": "",
         "healthchecks_url": "",
         "alert_new_block": false,
-        "alert_new_block_monero": false
+        "alert_new_block_monero": false,
+        "alert_new_block_tari": false,
+        "alert_new_block_litecoin": false,
+        "alert_new_block_dogecoin": false,
+        "alert_new_block_bitcoincash": false,
+        "alert_new_block_zcash": false
     },
     "wallets": [
         {

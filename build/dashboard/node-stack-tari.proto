@@ -1,0 +1,107 @@
+// Copyright 2020. The Tari Project
+//
+// Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+// following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+// disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+// following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+// products derived from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+// INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+// USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Minimal wire-compatible subset of Tari v6.0.1-pre.0 applications/minotari_app_grpc/proto/base_node.proto.
+// Upstream: https://github.com/tari-project/tari/blob/v6.0.1-pre.0/applications/minotari_app_grpc/proto/base_node.proto
+
+syntax = "proto3";
+
+package tari.rpc;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/VijitSingh97/bitcoin-starter-stack/dashboard;main";
+
+enum BaseNodeState {
+  START_UP = 0;
+  HEADER_SYNC = 1;
+  HORIZON_SYNC = 2;
+  CONNECTING = 3;
+  BLOCK_SYNC = 4;
+  LISTENING = 5;
+  SYNC_FAILED = 6;
+}
+
+enum SyncState {
+  STARTUP = 0;
+  HEADER_STARTING = 1;
+  HEADER = 2;
+  BLOCK_STARTING = 3;
+  BLOCK = 4;
+  DONE = 5;
+}
+
+message MetaData {
+  uint64 best_block_height = 1;
+  bytes best_block_hash = 2;
+  bytes accumulated_difficulty = 5;
+  uint64 pruned_height = 6;
+  uint64 timestamp = 7;
+}
+
+message TipInfoResponse {
+  MetaData metadata = 1;
+  bool initial_sync_achieved = 2;
+  BaseNodeState base_node_state = 3;
+  bool failed_checkpoints = 4;
+}
+
+message SyncProgressResponse {
+  uint64 tip_height = 1;
+  uint64 local_height = 2;
+  SyncState state = 3;
+  string short_desc = 4;
+  uint64 initial_connected_peers = 5;
+}
+
+message BaseNodeGetVersionResponse {
+  string version = 1;
+  uint32 network = 2;
+}
+
+message MempoolStatsResponse {
+  uint64 unconfirmed_txs = 2;
+  uint64 reorg_txs = 3;
+  uint64 unconfirmed_weight = 4;
+}
+
+message GetNetworkStateRequest {}
+
+message GetNetworkStateResponse {
+  MetaData metadata = 1;
+  bool initial_sync_achieved = 2;
+  BaseNodeState base_node_state = 3;
+  bool failed_checkpoints = 4;
+  uint64 reward = 5;
+  uint64 sha3x_estimated_hash_rate = 6;
+  uint64 monero_randomx_estimated_hash_rate = 7;
+  uint64 num_connections = 8;
+  uint64 tari_randomx_estimated_hash_rate = 10;
+}
+
+service BaseNode {
+  rpc GetVersion(google.protobuf.Empty) returns (BaseNodeGetVersionResponse);
+  rpc GetSyncProgress(google.protobuf.Empty) returns (SyncProgressResponse);
+  rpc GetTipInfo(google.protobuf.Empty) returns (TipInfoResponse);
+  rpc GetMempoolStats(google.protobuf.Empty) returns (MempoolStatsResponse);
+  rpc GetNetworkState(GetNetworkStateRequest) returns (GetNetworkStateResponse);
+}

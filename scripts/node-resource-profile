@@ -98,6 +98,70 @@ monero_synced() {
   ' >/dev/null
 }
 
+utxo_synced() {
+  service=$1 cli=$2 config=$3
+  info=$(compose exec -T "$service" "$cli" -datadir=/data -conf="$config" getblockchaininfo 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -e --argjson now "$current_time" '
+    .initialblockdownload == false and (.blocks | type == "number") and
+    (.headers | type == "number") and .blocks + 1 >= .headers and
+    ((.mediantime // .time) | type == "number") and ((.mediantime // .time) >= $now - 21600) and
+    ((.warnings // "") == "" or (.warnings // []) == [])
+  ' >/dev/null
+}
+litecoin_synced() { utxo_synced litecoin litecoin-cli /tmp/litecoin.conf; }
+dogecoin_synced() { utxo_synced dogecoin dogecoin-cli /tmp/dogecoin.conf; }
+bitcoincash_synced() { utxo_synced bitcoincash bitcoin-cli /tmp/bitcoin.conf; }
+tari_synced() {
+  dashboard_container_id=$(container_id dashboard)
+  [ -n "$dashboard_container_id" ] || return 1
+  # shellcheck disable=SC2016
+  "$docker_bin" exec -u 1000 "$dashboard_container_id" sh -c '
+    now=$1
+    marker=/state/tari.synced
+    [ -f "$marker" ] && [ "$(cat "$marker")" = ready ] && [ "$(stat -c %u "$marker")" = 1000 ] || exit 1
+    modified=$(stat -c %Y "$marker") || exit 1
+    age=$((now - modified))
+    [ "$age" -ge -30 ] && [ "$age" -le 120 ]
+  ' sh "$current_time" >/dev/null 2>&1
+}
+zcash_synced() {
+  # shellcheck disable=SC2016
+  info=$(compose exec -T -u 10001:1000 zcash sh -c '
+    cookie=$(cat /data/.cookie) || exit 1
+    case "$cookie" in
+      __cookie__:*:*) exit 1 ;;
+      __cookie__:*) [ "${#cookie}" -eq 55 ] || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    curl -fsS --max-time 10 -H "content-type: application/json" \
+      --user "$cookie" \
+      --data '\''{"jsonrpc":"2.0","id":"resource-profile","method":"getblockchaininfo","params":[]}'\'' \
+      http://127.0.0.1:8232/
+  ' 2>/dev/null) || return 1
+  best_hash=$(printf '%s' "$info" | jq -er '.result.bestblockhash | select(type=="string" and test("^[0-9a-f]{64}$"))') || return 1
+  # shellcheck disable=SC2016
+  header=$(compose exec -T -u 10001:1000 zcash sh -c '
+    cookie=$(cat /data/.cookie) || exit 1
+    case "$cookie" in
+      __cookie__:*:*) exit 1 ;;
+      __cookie__:*) [ "${#cookie}" -eq 55 ] || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    payload=$(printf '\''{"jsonrpc":"2.0","id":"resource-profile","method":"getblockheader","params":["%s"]}'\'' "$1")
+    curl -fsS --max-time 10 --user "$cookie" -H "content-type: application/json" --data "$payload" http://127.0.0.1:8232/
+  ' sh "$best_hash" 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$info" "$header" | jq -se --argjson now "$current_time" '
+    length == 2 and .[0].error == null and (.[0].result | type == "object") and
+    (.[0].result.blocks | type == "number") and .[0].result.blocks > 0 and
+    (.[0].result.estimatedheight | type == "number") and
+    .[0].result.blocks + 1 >= .[0].result.estimatedheight and
+    (.[0].result.verificationprogress | type == "number") and
+    .[0].result.verificationprogress >= 0.999999 and
+    .[1].error == null and (.[1].result.time | type == "number") and
+    .[1].result.time >= $now - 21600
+  ' >/dev/null
+}
+
 profile_enabled() {
   [ "$(env_get "$1")" = compact ]
 }
@@ -239,3 +303,8 @@ apply_profile() {
 current_time=${RESOURCE_NOW_EPOCH:-$(date +%s)}
 apply_profile bitcoin BITCOIN_RESOURCE_PROFILE bitcoin_synced BITCOIN_STEADY_CPUS BITCOIN_STEADY_MEM_LIMIT_MB
 apply_profile monero MONERO_RESOURCE_PROFILE monero_synced MONERO_STEADY_CPUS MONERO_STEADY_MEM_LIMIT_MB
+apply_profile tari TARI_RESOURCE_PROFILE tari_synced TARI_STEADY_CPUS TARI_STEADY_MEM_LIMIT_MB
+apply_profile litecoin LITECOIN_RESOURCE_PROFILE litecoin_synced LITECOIN_STEADY_CPUS LITECOIN_STEADY_MEM_LIMIT_MB
+apply_profile dogecoin DOGECOIN_RESOURCE_PROFILE dogecoin_synced DOGECOIN_STEADY_CPUS DOGECOIN_STEADY_MEM_LIMIT_MB
+apply_profile bitcoincash BITCOINCASH_RESOURCE_PROFILE bitcoincash_synced BITCOINCASH_STEADY_CPUS BITCOINCASH_STEADY_MEM_LIMIT_MB
+apply_profile zcash ZCASH_RESOURCE_PROFILE zcash_synced ZCASH_STEADY_CPUS ZCASH_STEADY_MEM_LIMIT_MB

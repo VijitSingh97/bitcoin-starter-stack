@@ -26,6 +26,18 @@ Anything the machine can't run is skipped with a `SKIP:` line. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same suite
 plus a full image build on every push and PR.
 
+The Tari client uses a minimal upstream protocol subset in
+`build/dashboard/node-stack-tari.proto`. With protoc 7.36.2,
+protoc-gen-go 1.36.10, and protoc-gen-go-grpc 1.5.1 installed, regenerate it with:
+
+```bash
+cd build/dashboard
+protoc --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative node-stack-tari.proto
+```
+
+Keep `THIRD_PARTY_NOTICES` current when changing the protocol or Go dependencies.
+
 ## Ground rules
 
 - Keep it minimal. This is a starter stack — prefer deleting over adding,

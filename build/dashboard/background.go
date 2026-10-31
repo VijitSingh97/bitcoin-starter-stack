@@ -32,24 +32,66 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 			worker()
 		}()
 	}
-	if !a.cfg.bitcoinDisabled || a.cfg.moneroEnabled {
+	hasNode := !a.cfg.bitcoinDisabled || a.cfg.moneroEnabled
+	for _, node := range a.cfg.nodes {
+		hasNode = hasNode || node.Enabled && node.Supported
+	}
+	if hasNode {
 		start(func() { a.prices.Run(ctx) })
 	}
 	if a.cfg.moneroWalletEnabled {
-		start(func() { a.moneroWatch.run(ctx) })
+		start(func() { a.moneroWatch.run(ctx, func() bool { return a.nodeWorkerRunnable(nodeMonero, true) }) })
 	}
 	if a.cfg.moneroEnabled {
 		start(func() { a.runMoneroFees(ctx) })
 	}
-	if !a.cfg.bitcoinDisabled || a.cfg.moneroEnabled {
-		var bitcoinHealth, moneroHealth func() map[string]any
+	for id, node := range a.cfg.nodes {
+		if !node.Enabled || node.Protocol != "bitcoin-json-rpc" && node.Protocol != "zcash-json-rpc" {
+			continue
+		}
+		id, node := id, node
+		start(func() {
+			a.every(ctx, time.Minute, func(ctx context.Context) {
+				if !a.nodeWorkerRunnable(id, true) {
+					return
+				}
+				rpc := &rpcClient{url: node.RPCURL, user: node.RPCUser, password: node.RPCPassword, client: &http.Client{Timeout: 5 * time.Second}}
+				if node.Protocol == "zcash-json-rpc" {
+					rpc.user, rpc.password, rpc.cookiePath = "", "", node.RPCCookiePath
+					var chain zcashBlockchainInfo
+					var fee zcashStandardFee
+					if rpc.call(ctx, "getblockchaininfo", nil, &chain) == nil && chain.Blocks >= max(chain.Headers, chain.EstimatedHeight) && chain.VerificationProgress >= 0.999999 && rpc.call(ctx, "getstandardfee", nil, &fee) == nil && fee.StandardFee > 0 {
+						a.recordAdditionalFee(id, float64(fee.StandardFee))
+					}
+					return
+				}
+				var chain familyBlockchainInfo
+				if rpc.call(ctx, "getblockchaininfo", nil, &chain) != nil || chain.InitialBlockDownload {
+					return
+				}
+				var estimate feeEstimate
+				if rpc.call(ctx, "estimatesmartfee", []any{1}, &estimate) == nil && estimate.FeeRate != nil {
+					a.recordAdditionalFee(id, *estimate.FeeRate*100000)
+				}
+			})
+		})
+	}
+	if hasNode {
+		probes := make(map[string]func() map[string]any)
 		if !a.cfg.bitcoinDisabled {
-			bitcoinHealth = func() map[string]any { return a.healthBlockchain(ctx) }
+			probes[nodeBitcoin] = func() map[string]any { return a.healthBlockchain(ctx) }
 		}
 		if a.cfg.moneroEnabled {
-			moneroHealth = func() map[string]any { return a.healthMonero(ctx) }
+			probes[nodeMonero] = func() map[string]any { return a.healthMonero(ctx) }
 		}
-		start(func() { a.monitor.RunNodes(ctx, bitcoinHealth, moneroHealth) })
+		for id, node := range a.cfg.nodes {
+			if !node.Enabled || !node.Supported {
+				continue
+			}
+			id, node := id, node
+			probes[id] = func() map[string]any { return a.healthAdditionalNode(ctx, id, node) }
+		}
+		start(func() { a.monitor.RunConfiguredNodes(ctx, probes) })
 	}
 	if a.cfg.bitcoinDisabled {
 		done := make(chan struct{})
@@ -61,12 +103,17 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	}
 	start(func() { a.scanner.run(ctx) })
 	entries := a.watch.Entries()
-	for _, entry := range entries {
-		a.watch.SetPending(entry.Key, true)
+	if a.nodeWorkerRunnable(nodeBitcoin, true) {
+		for _, entry := range entries {
+			a.watch.SetPending(entry.Key, true)
+		}
 	}
 	chain := func() map[string]any { return a.healthBlockchain(ctx) }
 	start(func() {
 		a.every(ctx, time.Minute, func(ctx context.Context) {
+			if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+				return
+			}
 			var info blockchainInfo
 			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) != nil || info.InitialBlockDownload {
 				return
@@ -79,6 +126,9 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	})
 	start(func() {
 		a.every(ctx, 10*time.Minute, func(context.Context) {
+			if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+				return
+			}
 			info := chain()
 			if info != nil && info["initialblockdownload"] != true {
 				a.watch.Sample(a.walletRPC)
@@ -87,6 +137,9 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	})
 	start(func() {
 		a.every(ctx, 30*time.Second, func(ctx context.Context) {
+			if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+				return
+			}
 			var info blockchainInfo
 			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
 				a.scanner.refresh(a.watch.Entries(), info)
@@ -97,8 +150,19 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
+			if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					continue
+				}
+			}
 			var info blockchainInfo
 			if a.rpc.call(ctx, "getblockchaininfo", nil, &info) == nil {
+				if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+					continue
+				}
 				for _, entry := range a.watch.Entries() {
 					a.watch.SetPending(entry.Key, true)
 					a.provisionForChain(entry, info)
@@ -121,6 +185,10 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 }
 
 func (a *app) healthMonero(parent context.Context) map[string]any {
+	if a.cfg.moneroEnabled && !a.nodeActive(nodeMonero, true) {
+		a.recordNodeHealth(nodeMonero, false)
+		return map[string]any{"active": false}
+	}
 	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
 	defer cancel()
 	rpc := moneroRPC{
@@ -131,8 +199,10 @@ func (a *app) healthMonero(parent context.Context) map[string]any {
 	}
 	var info moneroInfo
 	if rpc.call(ctx, "get_info", &info) != nil {
+		a.recordNodeHealth(nodeMonero, false)
 		return nil
 	}
+	a.recordNodeHealth(nodeMonero, true)
 	return map[string]any{
 		"initialblockdownload": !info.Synchronized || info.BusySyncing,
 		"blocks":               int64(info.Height),
@@ -140,6 +210,10 @@ func (a *app) healthMonero(parent context.Context) map[string]any {
 }
 
 func (a *app) healthBlockchain(parent context.Context) map[string]any {
+	if !a.nodeActive(nodeBitcoin, !a.cfg.bitcoinDisabled) {
+		a.recordNodeHealth(nodeBitcoin, false)
+		return map[string]any{"active": false}
+	}
 	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
 	defer cancel()
 	rpc := *a.rpc
@@ -148,8 +222,10 @@ func (a *app) healthBlockchain(parent context.Context) map[string]any {
 	rpc.client = &client
 	var result map[string]any
 	if rpc.call(ctx, "getblockchaininfo", nil, &result) != nil {
+		a.recordNodeHealth(nodeBitcoin, false)
 		return nil
 	}
+	a.recordNodeHealth(nodeBitcoin, true)
 	ibd, ok := result["initialblockdownload"].(bool)
 	if !ok {
 		return result
@@ -167,11 +243,56 @@ func (a *app) healthBlockchain(parent context.Context) map[string]any {
 	return result
 }
 
+func (a *app) healthAdditionalNode(parent context.Context, id string, node nodeConfig) map[string]any {
+	if !a.nodeActive(id, node.Enabled) {
+		a.recordNodeHealth(id, false)
+		if id == nodeTari {
+			a.updateTariSyncMarker(false)
+		}
+		return map[string]any{"active": false}
+	}
+	ctx, cancel := context.WithTimeout(parent, healthRPCTimeout)
+	defer cancel()
+	if node.Protocol == "tari-grpc" {
+		status, err := a.fetchTariStatus(ctx, node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
+		if err != nil {
+			a.recordNodeHealth(id, false)
+			a.updateTariSyncMarker(false)
+			return nil
+		}
+		return map[string]any{"active": true, "initialblockdownload": !status.Synced, "blocks": status.Height}
+	}
+	if node.Protocol == "zcash-json-rpc" {
+		status, err := a.fetchZcashStatus(ctx, node, genericNodeStatus{Enabled: true, Active: true, Supported: true})
+		if err != nil {
+			a.recordNodeHealth(id, false)
+			return nil
+		}
+		a.recordNodeHealth(id, true)
+		return map[string]any{"active": true, "initialblockdownload": !status.Synced, "blocks": status.Height}
+	}
+	rpc := &rpcClient{url: node.RPCURL, user: node.RPCUser, password: node.RPCPassword, client: &http.Client{}}
+	var result map[string]any
+	if rpc.call(ctx, "getblockchaininfo", nil, &result) != nil {
+		a.recordNodeHealth(id, false)
+		return nil
+	}
+	a.recordNodeHealth(id, true)
+	result["active"] = true
+	return result
+}
+
 func (a *app) provision(entry WatchEntry, pruned bool) {
+	if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+		return
+	}
 	a.provisionState(entry, pruned, false)
 }
 
 func (a *app) provisionForChain(entry WatchEntry, chain blockchainInfo) {
+	if !a.nodeWorkerRunnable(nodeBitcoin, true) {
+		return
+	}
 	if chain.Pruned && !chain.InitialBlockDownload && chain.BestBlockHash != "" {
 		if cache, _, ok := a.watch.scanSnapshot(entry); ok && cache.BestBlock == chain.BestBlockHash {
 			a.watch.ClearPendingIfCurrent(entry)
@@ -182,7 +303,7 @@ func (a *app) provisionForChain(entry WatchEntry, chain blockchainInfo) {
 }
 
 func (a *app) provisionState(entry WatchEntry, pruned, initialBlockDownload bool) {
-	if !a.watch.Contains(entry) {
+	if !a.nodeWorkerRunnable(nodeBitcoin, true) || !a.watch.Contains(entry) {
 		return
 	}
 	name, ok := ProvisionOne(a.nodeRPC, a.walletRPC, entry, pruned)
@@ -206,6 +327,10 @@ func (a *app) provisionState(entry WatchEntry, pruned, initialBlockDownload bool
 	if !a.watch.SetCoreWalletIfCurrent(entry, name) {
 		a.watch.DeprovisionNameIfUnused(a.nodeRPC, a.walletRPC, entry, name)
 	}
+}
+
+func (a *app) nodeWorkerRunnable(id string, fallback bool) bool {
+	return a.nodeActive(id, fallback) && !a.nodeTransitioning(id)
 }
 
 func (a *app) every(ctx context.Context, interval time.Duration, fn func(context.Context)) {

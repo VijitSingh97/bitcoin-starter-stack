@@ -1,146 +1,112 @@
-# Nodes and planned chains
+# Supported nodes
 
-Node Starter Stack currently implements Bitcoin Core and Monero. Choose one
-or both in setup. Each node gets its own data directory and RPC password;
-the dashboard has a third password. Existing Bitcoin installations keep their
-credentials and storage paths when upgraded.
+Node Manager supports Bitcoin Core, Monero, Tari, Litecoin, Dogecoin,
+Bitcoin Cash Node, and Zcash through Zakura. Select any non-empty combination in
+setup. Each selected chain gets a separate data directory and resource profile.
+RPC credentials are separate for each authenticated endpoint; the dashboard has
+its own password.
 
-The GitHub repository, Debian package (`bitcoin-starter-stack`), command
-(`bitcoin-stack`), container names, and existing Docker volumes retain their
-names for upgrade compatibility. The new product name does not move your data.
+The package and existing data paths retain the `bitcoin-starter-stack` name for
+upgrade compatibility. Changing the product name does not move chain data.
 
 ## Storage and resource planning
 
-| Node | Pruned storage | Current support | 1 CPU / 2 GiB per-node target |
-|---|---|---|---|
-| Bitcoin Core | Allow 30–60 GB total with the default 10 GB block-retention budget. Chainstate is additional to that budget. | Node status, public-only watch balances, fees, BTC prices, notifications, optional LAN RPC. | Short capped trial passed; full post-sync stability qualification is pending. |
-| Monero | Official documentation reports about 105 GiB pruned as of October 5, 2026. Allow 120–150 GiB for growth and working room. | Node status, native fees, XMR prices, view-only balances, optional restricted LAN RPC and LAN ZMQ for Pithead/P2Pool. | Experimental until a sustained capped test passes. |
+Pruning limits retained history, but every node still downloads and validates
+its chain. A block-retention setting does not include chainstate, indexes, logs,
+temporary compaction space, or future growth.
 
-Monero's base figure comes from its [official remote-node guide](https://docs.getmonero.org/interacting/remote-nodes/).
-The extra room above is our planning allowance, not an upstream minimum.
-Disk use grows; pruning does not make chainstate a fixed size.
+| Node | Default retained history | Disk planning allowance | Sync budget | Post-sync compact budget | Qualification |
+|---|---:|---:|---:|---:|---|
+| Bitcoin Core | 10,000 MiB of block files | 30–60 GB total | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB | Short capped trial passed; 24-hour qualification pending |
+| Monero | Native pruned mode | 120–150 GiB; upstream reported about 105 GiB pruned on October 5, 2026 | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB, plus its wallet service | Not yet qualified |
+| Tari | 10,000-block pruning horizon | No current measured total; use an expandable volume and measure after first sync | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Protocol and Tor startup proven; full sync not qualified |
+| Litecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
+| Dogecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
+| Bitcoin Cash Node | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Signed upstream binary and runtime startup proven; full sync not qualified |
+| Zcash / Zakura | Pruned state with 10,000 retained blocks | Upstream's published snapshot was roughly 11 GB when checked; plan 30–60 GB on an expandable volume until a full sync is measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Pruning, Tor bootstrap, and RPC proven; full sync not qualified |
 
-The resource budget applies **to each node**, not to the whole machine. Two
-nodes therefore need room for 4 GiB of node memory, plus Tor, the dashboard,
-Docker, filesystem cache, and the operating system. A container limit on an
-8 GB test host does not prove identical behavior on a 2 GB VPS.
+The Litecoin, Dogecoin, Bitcoin Cash, and Zcash figures are planning allowances,
+not measured usage. Tari has no defensible total-size estimate yet, so do not put
+it on a fixed small volume. The dashboard shows live chain and free-disk values;
+record the final size after the first complete sync and leave growth headroom.
 
-Initial sync can use all available CPU and memory. Both nodes still download
-and validate historical data; pruning reduces retained disk data, not the
-validation work. Tor throughput, disk latency, CPU, and starting height make
-sync times vary from hours to days or longer. Temperature protection remains
-the host operator's responsibility; unlimited containers cannot override it.
-For initial sync, budget around 2 CPU cores and 4 GiB RAM per node as a planning
-estimate, not a fixed minimum. See [sync versus normal operation](hardware.md#sync-versus-normal-operation)
-for estimates, measured evidence, and shared-service overhead.
+Monero's base figure comes from its
+[official remote-node guide](https://docs.getmonero.org/interacting/remote-nodes/).
+Tari pruning follows its
+[syncing and seeding specification](https://rfc.tari.com/RFC-0140_Syncing_and_seeding).
+Bitcoin-family pruning retains a configured amount of recent block files while
+keeping the live chainstate.
 
-## Wizard
+Budgets apply **per node**. Bitcoin plus Monero in compact mode therefore needs
+up to 4 GiB for the daemons. Three of the newer nodes need up to 12 GiB. Add
+memory and CPU for Tor, the Go dashboard, Docker, filesystem cache, the operating
+system, and Monero's optional wallet service. Sync one chain at a time on a small
+host. A container cap on a larger test machine does not qualify a real VPS with
+the same total RAM.
 
-APT/deb installation does not run an interactive prompt or start services.
-Run `sudo bitcoin-stack init` after installing. Source installs use `./stack init`.
+## Setup wizard
 
-Setup asks which implemented nodes to run and then asks only about those nodes:
+APT/deb installation does not start services or prompt during `apt install`.
+Run `sudo bitcoin-stack init` afterward. Source installs use `./stack init`.
+The wizard asks for:
 
-1. Dashboard password.
-2. Bitcoin, Monero, or both, and a loopback/private-LAN dashboard address.
-3. Each selected node's data directory.
-4. Optional LAN RPC, independently for each node; disabled by default.
-5. Bitcoin's recent-block budget, or Monero's default pruned mode.
-6. Optional Monero ZMQ for a trusted LAN P2Pool host; disabled by default.
-7. Download missing images and start now, or save configuration for later.
+1. A dashboard password and one or more chains.
+2. The dashboard's loopback or private-LAN address.
+3. A data directory for every selected node.
+4. Optional private-LAN RPC or gRPC exposure for each node, disabled by default.
+5. Bitcoin's recent-block budget and Monero's optional ZMQ endpoint.
+6. Whether to download missing images and start now.
 
-The wizard generates independent RPC passwords and prints selected services'
-credentials at the end. Save them privately. Package data defaults to
-`/var/lib/bitcoin-starter-stack/data/bitcoin` and
-`/var/lib/bitcoin-starter-stack/data/monero`. Source installs default to
-`./data/bitcoin` and `./data/monero`. You can choose a mounted SSD instead;
-the paths shown by the wizard are the paths it will actually use.
+Fresh package wizard installs use the `compact` profile: sync is uncapped, then
+the host timer waits for repeated healthy, current sync checks before applying
+the table's per-node ceiling with no extra swap. Source installs and existing
+profiles remain `off` unless configured. These are editable budgets, not claims
+that every chain has passed sustained operation within them.
 
-Fresh package wizard installs select the experimental `compact` profile for
-each selected node: unlimited sync, then a host timer qualifies three healthy,
-current sync checks before applying 1 CPU and 2048 MiB with no extra swap.
-Those defaults are saved as `steady_cpus` and `steady_mem_limit_mb` in each
-selected node's config section; edit them and run `sudo bitcoin-stack apply`
-to change the budget. Initial sync stays uncapped.
-Existing and source installs leave this off. The timer preserves explicit
-operator limits and refuses an unsafe handoff when memory stays too high.
-It requalifies recreated containers; an application upgrade can briefly return
-them to uncapped operation. Check `journalctl -u bitcoin-starter-stack-resource-profile`
-for a blocked handoff. See [configuration](configuration.md) for disabling it.
+Package data defaults to `/var/lib/bitcoin-starter-stack/data/<node>`. Source
+installs default to `./data/<node>`. Choose a mounted SSD path in the wizard when
+the default disk is too small.
 
-Dashboard onion access and inbound Bitcoin onion connections remain advanced
-configuration options, both off by default. Runtime public traffic uses Tor
-even when those inbound services are disabled. APT and container-image downloads
-use the host's networking, as explained in [Privacy](privacy.md).
+## Private-LAN endpoints
 
-## Monero as a remote node for Pithead
+All node endpoints are off by default and accept only an IPv4 address assigned
+to the host's private LAN. The host helper rejects public, wildcard, loopback,
+malformed, conflicting, and already-used bindings before applying a change.
 
-Enable restricted Monero RPC on your server's private IPv4 address. Its default
-port is **18081**. In Pithead, choose a remote Monero node and enter this host,
-port, and the generated **Monero RPC** username/password, not the dashboard login.
-The daemon uses Digest authentication. RPC is HTTP on a trusted LAN; do not
-forward it to the public internet.
+| Node | Default host port | Authentication and intended use |
+|---|---:|---|
+| Bitcoin Core | 8332 | Generated Bitcoin RPC login; trusted wallet apps |
+| Monero restricted RPC | 18081 | Generated Digest-auth login; wallets and Pithead/P2Pool |
+| Monero ZMQ | 18083 | No application authentication; trusted P2Pool host only |
+| Tari gRPC | 18142 | No application authentication; Pithead remote Tari base node on trusted LAN/WireGuard |
+| Litecoin | 9332 | Generated Litecoin RPC login |
+| Dogecoin | 22555 | Generated Dogecoin RPC login |
+| Bitcoin Cash Node | 8332 | Generated Bitcoin Cash RPC login |
+| Zcash | 8232 | Generated login to the dashboard's authenticated read-only proxy; native Zakura RPC is never published |
 
-For P2Pool, also enable the Monero ZMQ publisher, default port **18083**, on a
-trusted LAN. ZMQ has no password: only enable it where every host on the
-network is trusted. It is an independent opt-in, not a side effect of enabling
-RPC. The dashboard uses a separate authenticated internal RPC listener for
-complete uptime, version, and pruning status; restricted RPC redacts those
-fields. That internal listener is never published or relayed to the LAN.
+The public P2P runtime stays behind Tor whether or not a LAN endpoint is
+enabled. These LAN services are plaintext inside the trusted network. Never
+forward them to the public internet.
 
-This follows Pithead's [remote-node settings](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md)
-and [Monero configuration](https://github.com/p2pool-starter-stack/pithead/blob/develop/build/monero/bitmonero.conf.template).
-P2Pool needs mining-template/submission RPC and ZMQ notifications; restricted
-Monero RPC supports the relevant methods. No miner or Tari merge-mining proxy
-is started by this stack.
+## Pithead remote nodes
 
-The dashboard also runs an internal, authenticated wallet service for Monero
-view-only monitoring. It accepts a primary mainnet address and private view key,
-never a private spend key or seed. The service has no host port and stores
-encrypted watch-only wallet files in its own private Docker volume. See
-[Watch-only balances](watch-only.md#monero-view-only-wallets) and Monero's
-[official view-only guide](https://www.getmonero.org/resources/user-guides/view_only.html).
+For Monero, enable restricted RPC and, when P2Pool needs it, ZMQ. Enter the
+server's private address, the configured ports, and the **Monero RPC** login in
+Pithead. The dashboard login is unrelated. ZMQ has no password.
 
-## Tari planning for Pithead
+For Tari, enable gRPC on port 18142 and configure Pithead with `tari.mode:
+remote`, this host, and the gRPC port. Pithead's current mining client uses
+plaintext unauthenticated gRPC, so use only a trusted LAN or WireGuard link.
+The allowlist supports node status, mining-template creation, and block
+submission. The stack runs no miner, wallet, or payout key.
 
-Tari is not selectable in this stack yet. Its upstream
-[pruned mode](https://rfc.tari.com/RFC-0140_Syncing_and_seeding) uses
-`base_node.storage.pruning_horizon`: zero is archival; a positive block horizon
-enables pruning. The horizon, retained state, initial sync, and resulting disk
-use need testing on the pinned release. Pruning is not evidence that its RAM
-use fits the 2 GiB target.
+Pithead's current settings are documented in its
+[remote-node configuration](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md#remote-tari-node).
 
-The adapter should run only the base node, with public P2P traffic through Tor,
-DNS seeds disabled, and no clearnet initial-sync option. Its internal gRPC
-allowlist should cover dashboard status and Pithead's mining-template/block
-submission calls. Private-LAN gRPC on port **18142** should be a separate opt-in,
-off by default, using the same server-side address and port-conflict controls
-as the existing nodes. No wallet, miner, or payout private key is needed here.
+## Deactivation
 
-Pithead already supports a
-[remote Tari node](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md#remote-tari-node)
-through `tari.mode: remote`, `tari.remote.host`, and `tari.remote.grpc_port`.
-Its current mining client uses plaintext, unauthenticated gRPC and cannot use
-Tari's gRPC authentication or TLS options. Use a trusted LAN or WireGuard link;
-a dashboard password does not protect this separate mining endpoint. The
-integration test must confirm both template creation and block submission with
-the selected pruned release before the adapter becomes available in setup.
-
-## Other chains evaluated
-
-These are candidates, not selectable or downloadable adapters. Findings were
-checked against upstream sources on October 30, 2026. None has passed this
-stack's Tor isolation, upgrade, pruning, and capped stability tests yet.
-
-| Chain / daemon | Fit for this design | What remains before enabling it |
-|---|---|---|
-| [Litecoin Core](https://github.com/litecoin-project/litecoin/blob/master/doc/README.md) | Closest next adapter: Bitcoin-like JSON-RPC, pruning, and [Tor support](https://github.com/litecoin-project/litecoin/blob/master/doc/tor.md). | Pin verified images/binaries, test wallet/RPC differences, measure current disk use and 1 CPU / 2 GiB steady operation. Old upstream disk estimates are not current sizing guidance. |
-| [Dogecoin Core](https://github.com/dogecoin/dogecoin/blob/master/doc/getting-started.md) | Pruning and [Tor proxying](https://github.com/dogecoin/dogecoin/blob/master/doc/tor.md) are available. | Verify discovery cannot leak DNS, test chain-specific sync/fee behavior, and measure disk/RAM. No current 2 GiB qualification. |
-| [Tari / Minotari](https://github.com/tari-project/tari/blob/development/docs/guide/applications_overview.md) | Configurable pruning horizon and Tor transport; a different gRPC adapter is needed. Pithead can use its mining API remotely. | Explicit pruning (upstream horizon defaults to zero), fail-closed Tor tests, Pithead gRPC compatibility, and fresh disk/RAM benchmarks. No verified 2 GiB floor. |
-| [Zcash / Zebra](https://github.com/ZcashFoundation/zebra) | Does not currently meet our pruned-only profile. | Upstream historical block-body [pruning remains open](https://github.com/ZcashFoundation/zebra/issues/12071). Revisit after it ships; resource and Tor-isolation testing would still be required. |
-| [Bitcoin Cash Node](https://github.com/bitcoin-cash-node/bitcoin-cash-node/blob/master/doc/README.md) | Another Bitcoin-family candidate with pruning and [Tor support](https://github.com/bitcoin-cash-node/bitcoin-cash-node/blob/master/doc/tor.md). | Same packaging, isolation, RPC, storage, and stability checks as Litecoin. |
-
-The recommended order is Litecoin, Dogecoin, then Bitcoin Cash Node. Tari is a
-separate adapter and resource experiment. Zcash waits for pruning. New chains
-should appear in the wizard only after their complete install-and-monitor path
-works; a checkbox must not imply a resource guarantee we have not measured.
+An authenticated dashboard user can deactivate one configured node. The host
+helper gracefully stops only that daemon and its dependent wallet service,
+keeps its data and configuration, and leaves its tower visible but inactive.
+Activating it starts the same configured service again. At least one node must
+remain configured; deactivation is different from deleting a chain or its data.

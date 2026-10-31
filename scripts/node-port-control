@@ -158,11 +158,12 @@ if ! printf '%s' "$request" | jq -e --argjson now "$now" '
   keys == ["changes", "id", "requested_at"] and
   (.id | type == "string" and test("^[0-9a-f]{32}$")) and
   (.requested_at | type == "number" and floor == . and . >= $now - 300 and . <= $now + 30) and
-  (.changes | type == "array" and length >= 1 and length <= 3) and
+  (.changes | type == "array" and length >= 1 and length <= 8) and
   ((.changes | map(.port) | unique | length) == (.changes | length)) and
   all(.changes[];
     type == "object" and
-    (.port == "bitcoin_rpc" or .port == "monero_rpc" or .port == "monero_zmq") and
+    (.port == "bitcoin_rpc" or .port == "monero_rpc" or .port == "monero_zmq" or .port == "tari_grpc" or
+     .port == "litecoin_rpc" or .port == "dogecoin_rpc" or .port == "bitcoincash_rpc" or .port == "zcash_rpc") and
     (.enabled | type == "boolean") and
     (if .enabled then
       keys == ["bind_ip", "enabled", "host_port", "port"] and
@@ -243,9 +244,14 @@ while [ "$attempt" -lt 3 ]; do
     . as $config |
     type == "object" and
     all($changes[];
-      (if (.port | startswith("bitcoin")) then
+      (if (.port | startswith("bitcoin_rpc")) then
         (($config.bitcoin.enabled // true) == true and
           ((.enabled | not) or (effective_password($config.bitcoin.node_password; "BITCOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "tari_grpc" then ($config.tari.enabled == true)
+      elif .port == "litecoin_rpc" then ($config.litecoin.enabled == true and ((.enabled | not) or (effective_password($config.litecoin.node_password; "LITECOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "dogecoin_rpc" then ($config.dogecoin.enabled == true and ((.enabled | not) or (effective_password($config.dogecoin.node_password; "DOGECOIN_RPC_PASSWORD") | strong_password)))
+      elif .port == "bitcoincash_rpc" then ($config.bitcoincash.enabled == true and ((.enabled | not) or (effective_password($config.bitcoincash.node_password; "BITCOINCASH_RPC_PASSWORD") | strong_password)))
+      elif .port == "zcash_rpc" then ($config.zcash.enabled == true and ((.enabled | not) or (effective_password($config.zcash.node_password; "ZCASH_RPC_PASSWORD") | strong_password)))
       else
         ($config.monero.enabled == true and
           ((.enabled | not) or (effective_password($config.monero.node_password; "MONERO_RPC_PASSWORD") | strong_password)))
@@ -256,11 +262,21 @@ while [ "$attempt" -lt 3 ]; do
              ($config.bitcoin.rpc_expose != true or $config.bitcoin.rpc_bind_ip != .bind_ip or ($config.bitcoin.rpc_port // 8332) != .host_port)
            elif .port == "monero_rpc" then
              ($config.monero.rpc_expose != true or $config.monero.rpc_bind_ip != .bind_ip or ($config.monero.rpc_port // 18081) != .host_port)
+           elif .port == "tari_grpc" then ($config.tari.grpc_expose != true or $config.tari.grpc_bind_ip != .bind_ip or ($config.tari.grpc_port // 18142) != .host_port)
+           elif .port == "litecoin_rpc" then ($config.litecoin.rpc_expose != true or $config.litecoin.rpc_bind_ip != .bind_ip or ($config.litecoin.rpc_port // 9332) != .host_port)
+           elif .port == "dogecoin_rpc" then ($config.dogecoin.rpc_expose != true or $config.dogecoin.rpc_bind_ip != .bind_ip or ($config.dogecoin.rpc_port // 22555) != .host_port)
+           elif .port == "bitcoincash_rpc" then ($config.bitcoincash.rpc_expose != true or $config.bitcoincash.rpc_bind_ip != .bind_ip or ($config.bitcoincash.rpc_port // 8332) != .host_port)
+           elif .port == "zcash_rpc" then ($config.zcash.rpc_expose != true or $config.zcash.rpc_bind_ip != .bind_ip or ($config.zcash.rpc_port // 8232) != .host_port)
            else
              ($config.monero.zmq_expose != true or $config.monero.zmq_bind_ip != .bind_ip or ($config.monero.zmq_port // 18083) != .host_port)
            end
          elif .port == "bitcoin_rpc" then $config.bitcoin.rpc_expose == true
          elif .port == "monero_rpc" then $config.monero.rpc_expose == true
+         elif .port == "tari_grpc" then $config.tari.grpc_expose == true
+         elif .port == "litecoin_rpc" then $config.litecoin.rpc_expose == true
+         elif .port == "dogecoin_rpc" then $config.dogecoin.rpc_expose == true
+         elif .port == "bitcoincash_rpc" then $config.bitcoincash.rpc_expose == true
+         elif .port == "zcash_rpc" then $config.zcash.rpc_expose == true
          else $config.monero.zmq_expose == true end)))
   ' "$config_snapshot" >/dev/null 2>&1; then
     rm -rf "$config_snapshot" "$config_tmp" "$validate_dir" "$inflight_file"
@@ -277,9 +293,19 @@ while [ "$attempt" -lt 3 ]; do
       elif $change.port == "monero_rpc" then
         .monero.rpc_expose = $change.enabled |
         if $change.enabled then .monero.rpc_bind_ip = $change.bind_ip | .monero.rpc_port = $change.host_port else . end
-      else
+      elif $change.port == "monero_zmq" then
         .monero.zmq_expose = $change.enabled |
         if $change.enabled then .monero.zmq_bind_ip = $change.bind_ip | .monero.zmq_port = $change.host_port else . end
+      elif $change.port == "tari_grpc" then
+        .tari.grpc_expose = $change.enabled | if $change.enabled then .tari.grpc_bind_ip=$change.bind_ip | .tari.grpc_port=$change.host_port else . end
+      elif $change.port == "litecoin_rpc" then
+        .litecoin.rpc_expose = $change.enabled | if $change.enabled then .litecoin.rpc_bind_ip=$change.bind_ip | .litecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "dogecoin_rpc" then
+        .dogecoin.rpc_expose = $change.enabled | if $change.enabled then .dogecoin.rpc_bind_ip=$change.bind_ip | .dogecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "bitcoincash_rpc" then
+        .bitcoincash.rpc_expose = $change.enabled | if $change.enabled then .bitcoincash.rpc_bind_ip=$change.bind_ip | .bitcoincash.rpc_port=$change.host_port else . end
+      else
+        .zcash.rpc_expose = $change.enabled | if $change.enabled then .zcash.rpc_bind_ip=$change.bind_ip | .zcash.rpc_port=$change.host_port else . end
       end)
   ' "$config_snapshot" >"$config_tmp"
   cp "$config_tmp" "$validate_dir/config.json"

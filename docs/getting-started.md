@@ -10,11 +10,12 @@
   so your user can run `docker` without sudo.
 - **`jq`, `openssl`, and `curl`** — configuration and downloads.
 - **`iproute2`** — checks host port availability before LAN port changes.
-- Hardware per [Hardware Requirements](hardware.md) — the short version:
-  allow 30–60 GB SSD space for Bitcoin and 120–150 GiB for Monero.
-  The experimental steady budget is 1 CPU / 2 GiB per node, plus shared services
-  and host overhead. Bitcoin has passed a short capped trial; sustained
-  qualification for both daemons is pending. Initial sync is uncapped.
+- Hardware per [Hardware Requirements](hardware.md) — Bitcoin plans for
+  30–60 GB SSD space and Monero for 120–150 GiB. The other nodes need expandable
+  storage until their current full-sync totals are measured. Bitcoin and Monero
+  use an experimental 1 CPU / 2 GiB steady budget; Tari, Litecoin, Dogecoin,
+  Bitcoin Cash, and Zcash use 1 CPU / 4 GiB each. Shared services and host
+  overhead are additional. Initial sync is uncapped.
   For sync headroom, plan around 2 CPU cores and 4 GiB RAM per node; these are
   estimates, not minimum requirements or measured average usage. More resources
   can shorten validation; Tor and SSD performance also affect sync time.
@@ -34,8 +35,7 @@ locations:
 
 - configuration: `/etc/bitcoin-starter-stack/config.json`
 - generated credentials and backups: `/var/lib/bitcoin-starter-stack/`
-- Bitcoin chain data: `/var/lib/bitcoin-starter-stack/data/bitcoin/`
-- Monero chain data: `/var/lib/bitcoin-starter-stack/data/monero/`
+- chain data: `/var/lib/bitcoin-starter-stack/data/<node>/`
 
 APT installation does not start containers, run setup, or change an existing
 checkout. Run `sudo bitcoin-stack init` explicitly after installation. A new
@@ -56,7 +56,7 @@ sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
 
-The wizard lets you select Bitcoin, Monero, or both, downloads missing images with the host's Docker
+The wizard lets you select any combination of the supported nodes, downloads missing images with the host's Docker
 settings, and starts the stack when you accept its final default. Docker keeps
 image layers in its own managed storage. Neither package installation nor the
 wizard changes the Docker daemon or its proxy settings.
@@ -90,7 +90,7 @@ If you skip the wizard, read the generated dashboard login locally after first
 start with `sed -n 's/^DASHBOARD_PASSWORD=/Password: /p' .env`; the username is
 `admin`. The wizard instead prints its newly created login once at the end.
 
-The `tor`, `dashboard`, and optional `monero` images are published prebuilt on GHCR
+The stack's local support images are published prebuilt on GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
 (Raspberry Pi). `./stack pull` downloads them with the host's existing Docker
 settings. The running Bitcoin and dashboard containers remain isolated behind
@@ -112,7 +112,7 @@ A default source-install wizard run includes these choices:
 
 ```text
 Dashboard password (letters/numbers) [Enter = strong random]:
-Nodes to run — bitcoin, monero (experimental), or both [bitcoin]:
+Nodes to run (comma-separated: bitcoin, monero, tari, litecoin, dogecoin, bitcoincash, zcash) [bitcoin]:
 Dashboard bind address (loopback or private LAN) [127.0.0.1]:
 One-click upgrades from the dashboard (Upgrade button)? [y/N]
 Bitcoin data directory [./data/bitcoin]:
@@ -130,18 +130,20 @@ explicitly. The project does not currently publish an APT feed.
 
 Selecting Monero asks for its own data directory, optional restricted LAN RPC,
 and optional LAN ZMQ for P2Pool. Selecting only Monero skips Bitcoin questions.
-The wizard prints credentials only for selected nodes. See
+Every other selected chain asks for its data directory and optional private-LAN
+RPC or gRPC listener. The wizard prints credentials only for selected nodes. See
 [Pithead remote-node setup](nodes.md#monero-as-a-remote-node-for-pithead).
 
 Fresh package wizard installs select `resource_profile: compact` for each
 chosen node. A host timer waits for three spaced, healthy, current sync checks
-before applying 1 CPU and 2048 MiB, with no extra swap. Existing installs and
+before applying 1 CPU and 2048 MiB for Bitcoin/Monero or 4096 MiB for the other
+nodes, with no extra swap. Existing installs and
 source installs leave automatic resource limits off. The profile remains
 experimental until sustained capped operation is qualified; it is not a claim
 that a whole 2 GB VPS can host multiple nodes.
 
-The wizard writes `steady_cpus: 1` and `steady_mem_limit_mb: 2048` into each
-selected node's `config.json` section. To change a budget, edit
+The wizard writes `steady_cpus: 1` and the chain-specific memory budget into
+each selected node's `config.json` section. To change a budget, edit
 `/etc/bitcoin-starter-stack/config.json` and run `sudo bitcoin-stack apply`.
 Initial sync stays uncapped; the timer uses the edited values after its sync
 checks pass. See [resource caps](configuration.md#resource-caps).

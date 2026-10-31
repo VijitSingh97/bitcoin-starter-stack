@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	coinGeckoPriceURL     = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true"
+	coinGeckoPriceURL     = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,tari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true"
 	priceUserAgent        = "bitcoin-starter-stack-dashboard (+https://github.com/VijitSingh97/bitcoin-starter-stack)"
 	priceRefreshEvery     = 5 * time.Minute
 	priceStaleAfter       = 15 * time.Minute
@@ -21,7 +21,7 @@ const (
 )
 
 var priceCurrencies = []string{"usd", "eur", "gbp", "inr", "cad", "aud", "jpy", "rub", "cny"}
-var priceAssets = []string{"bitcoin", "monero"}
+var priceAssets = []string{"bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoin-cash", "zcash"}
 
 type PriceCache struct {
 	client       *http.Client
@@ -29,25 +29,21 @@ type PriceCache struct {
 	now          func() time.Time
 	refreshEvery time.Duration
 
-	mu                sync.RWMutex
-	prices            map[string]float64
-	updatedAt         int64
-	moneroPrices      map[string]float64
-	moneroUpdatedAt   int64
-	lastFetchFailed   bool
-	moneroFetchFailed bool
+	mu             sync.RWMutex
+	assetPrices    map[string]map[string]float64
+	assetUpdatedAt map[string]int64
+	assetFailed    map[string]bool
 }
 
 func NewPriceCache() *PriceCache {
 	return &PriceCache{
-		client:            newTorHTTPClient(torProxy),
-		url:               coinGeckoPriceURL,
-		now:               time.Now,
-		refreshEvery:      priceRefreshEvery,
-		prices:            make(map[string]float64),
-		moneroPrices:      make(map[string]float64),
-		lastFetchFailed:   true,
-		moneroFetchFailed: true,
+		client:         newTorHTTPClient(torProxy),
+		url:            coinGeckoPriceURL,
+		now:            time.Now,
+		refreshEvery:   priceRefreshEvery,
+		assetPrices:    make(map[string]map[string]float64),
+		assetUpdatedAt: make(map[string]int64),
+		assetFailed:    map[string]bool{"bitcoin": true, "monero": true, "tari": true, "litecoin": true, "dogecoin": true, "bitcoin-cash": true, "zcash": true},
 	}
 }
 
@@ -81,20 +77,13 @@ func (c *PriceCache) SnapshotAsset(asset string) map[string]any {
 		asset = "bitcoin"
 	}
 	c.mu.RLock()
-	assetPrices, updatedAt := c.prices, c.updatedAt
-	if asset == "monero" {
-		assetPrices, updatedAt = c.moneroPrices, c.moneroUpdatedAt
-	} else if asset != "bitcoin" {
-		assetPrices, updatedAt = nil, 0
-	}
+	assetPrices, updatedAt := c.assetPrices[asset], c.assetUpdatedAt[asset]
 	prices := make(map[string]float64, len(assetPrices))
 	for currency, price := range assetPrices {
 		prices[currency] = price
 	}
-	failed := c.lastFetchFailed
-	if asset == "monero" {
-		failed = c.moneroFetchFailed
-	} else if asset != "bitcoin" {
+	failed, known := c.assetFailed[asset]
+	if !known {
 		failed = true
 	}
 	c.mu.RUnlock()
@@ -173,22 +162,22 @@ func (c *PriceCache) refresh(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	c.prices, c.updatedAt = prices["bitcoin"], updatedAt["bitcoin"]
-	if prices["monero"] != nil {
-		c.moneroPrices, c.moneroUpdatedAt = prices["monero"], updatedAt["monero"]
-		c.moneroFetchFailed = false
-	} else {
-		c.moneroFetchFailed = true
+	for _, asset := range priceAssets {
+		if prices[asset] != nil {
+			c.assetPrices[asset], c.assetUpdatedAt[asset], c.assetFailed[asset] = prices[asset], updatedAt[asset], false
+		} else {
+			c.assetFailed[asset] = true
+		}
 	}
-	c.lastFetchFailed = false
 	c.mu.Unlock()
 	return nil
 }
 
 func (c *PriceCache) fail(err error) error {
 	c.mu.Lock()
-	c.lastFetchFailed = true
-	c.moneroFetchFailed = true
+	for _, asset := range priceAssets {
+		c.assetFailed[asset] = true
+	}
 	c.mu.Unlock()
 	return err
 }

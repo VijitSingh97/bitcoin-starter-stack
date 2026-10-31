@@ -49,7 +49,7 @@ compose() {
     local compose_args=()
     for compose_file in "${compose_files[@]}"; do
       case "$compose_file" in
-        docker-compose.yml | docker-compose.rpc.yml | docker-compose.monero-rpc.yml | docker-compose.monero-zmq.yml)
+        docker-compose.yml | docker-compose.rpc.yml | docker-compose.monero-rpc.yml | docker-compose.monero-zmq.yml | docker-compose.tari-grpc.yml | docker-compose.litecoin-rpc.yml | docker-compose.dogecoin-rpc.yml | docker-compose.bitcoincash-rpc.yml | docker-compose.zcash-rpc.yml)
           compose_args+=( -f "$stack_root/$compose_file" )
           ;;
         *)
@@ -67,7 +67,7 @@ compose() {
 guard_package_containers() {
   [ "$package_managed" = "1" ] || return 0
   local service config
-  for service in tor bitcoin monero dashboard; do
+  for service in tor bitcoin monero monero-wallet tari litecoin dogecoin bitcoincash zcash dashboard; do
     config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
     case ",$config," in
       *",$stack_root/docker-compose.yml,"*) ;;
@@ -155,14 +155,25 @@ init() {
   case "$w_password" in *[!a-zA-Z0-9]*) echo "Password must contain only letters and numbers."; return 1 ;; esac
   w_bitcoin_password=$(openssl rand -hex 24)
   w_monero_password=$(openssl rand -hex 24)
-  read -r -p "Nodes to run — bitcoin, monero (experimental), or both [bitcoin]: " w_nodes || true
+  w_litecoin_password=$(openssl rand -hex 24)
+  w_dogecoin_password=$(openssl rand -hex 24)
+  w_bitcoincash_password=$(openssl rand -hex 24)
+  w_zcash_password=$(openssl rand -hex 24)
+  read -r -p "Nodes to run (comma-separated: bitcoin, monero, tari, litecoin, dogecoin, bitcoincash, zcash) [bitcoin]: " w_nodes || true
   [ -n "$w_nodes" ] || w_nodes=bitcoin
-  case "$w_nodes" in
-    bitcoin) w_bitcoin_enabled=1; w_monero_enabled=0 ;;
-    monero) w_bitcoin_enabled=0; w_monero_enabled=1 ;;
-    both) w_bitcoin_enabled=1; w_monero_enabled=1 ;;
-    *) echo "Choose bitcoin, monero, or both."; return 1 ;;
-  esac
+  w_bitcoin_enabled=0; w_monero_enabled=0; w_tari_enabled=0; w_litecoin_enabled=0; w_dogecoin_enabled=0; w_bitcoincash_enabled=0; w_zcash_enabled=0
+  old_ifs=$IFS; IFS=,
+  for node in $w_nodes; do
+    node=$(printf '%s' "$node" | tr -d ' ')
+    case "$node" in
+      bitcoin) w_bitcoin_enabled=1 ;; monero) w_monero_enabled=1 ;; tari) w_tari_enabled=1 ;;
+      both) w_bitcoin_enabled=1; w_monero_enabled=1 ;;
+      litecoin) w_litecoin_enabled=1 ;; dogecoin) w_dogecoin_enabled=1 ;; bitcoincash) w_bitcoincash_enabled=1 ;;
+      zcash) w_zcash_enabled=1 ;;
+      *) IFS=$old_ifs; echo "Unknown node: $node"; return 1 ;;
+    esac
+  done
+  IFS=$old_ifs
   read -r -p "Dashboard bind address (loopback or private LAN) [$current_bind_ip]: " w_bind_ip
   [ -n "$w_bind_ip" ] || w_bind_ip=$current_bind_ip
   if [ "$package_managed" = "1" ]; then
@@ -219,16 +230,53 @@ init() {
     fi
   fi
 
+  for node_spec in "tari:Tari:grpc:18142" "litecoin:Litecoin:rpc:9332" "dogecoin:Dogecoin:rpc:22555" "bitcoincash:Bitcoin Cash:rpc:8332" "zcash:Zcash:rpc:8232"; do
+    IFS=: read -r node label kind default_port <<<"$node_spec"
+    enabled_var=w_${node}_enabled
+    enabled=${!enabled_var}
+    [ "$enabled" = 1 ] || continue
+    if [ -n "${BITCOIN_STACK_DATA_DIR:-}" ]; then default_node_data_dir=$BITCOIN_STACK_DATA_DIR/$node; else default_node_data_dir=./data/$node; fi
+    read -r -p "$label data directory [$default_node_data_dir]: " node_data_dir
+    [ -n "$node_data_dir" ] || node_data_dir=$default_node_data_dir
+    printf -v "w_${node}_data_dir" '%s' "$node_data_dir"
+    read -r -p "Expose $label ${kind^^} to trusted LAN apps? [y/N] " node_expose
+    printf -v "w_${node}_${kind}_expose" '%s' "$node_expose"
+    if yes "$node_expose"; then
+      read -r -p "Private LAN address assigned to this host [required]: " node_bind_ip
+      read -r -p "Host $label ${kind^^} port [$default_port]: " node_port
+      printf -v "w_${node}_${kind}_bind_ip" '%s' "$node_bind_ip"
+      printf -v "w_${node}_${kind}_port" '%s' "${node_port:-$default_port}"
+    fi
+  done
+
   cfg=$(jq -n '{}')
   cfg=$(jq --arg dashboard "$w_password" --arg bitcoin "$w_bitcoin_password" --arg monero "$w_monero_password" \
-    '.dashboard.password=$dashboard | .bitcoin.node_password=$bitcoin | .monero.node_password=$monero' <<<"$cfg")
+    --arg litecoin "$w_litecoin_password" --arg dogecoin "$w_dogecoin_password" --arg bitcoincash "$w_bitcoincash_password" --arg zcash "$w_zcash_password" '
+    .dashboard.password=$dashboard | .bitcoin.node_password=$bitcoin | .monero.node_password=$monero |
+    .litecoin.node_password=$litecoin | .dogecoin.node_password=$dogecoin | .bitcoincash.node_password=$bitcoincash |
+    .zcash.node_password=$zcash' <<<"$cfg")
   [ "$w_bitcoin_enabled" = "0" ] && cfg=$(jq '.bitcoin.enabled=false' <<<"$cfg")
   [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.enabled=true' <<<"$cfg")
+  [ "$w_tari_enabled" = "1" ] && cfg=$(jq '.tari.enabled=true' <<<"$cfg")
+  [ "$w_litecoin_enabled" = "1" ] && cfg=$(jq '.litecoin.enabled=true' <<<"$cfg")
+  [ "$w_dogecoin_enabled" = "1" ] && cfg=$(jq '.dogecoin.enabled=true' <<<"$cfg")
+  [ "$w_bitcoincash_enabled" = "1" ] && cfg=$(jq '.bitcoincash.enabled=true' <<<"$cfg")
+  [ "$w_zcash_enabled" = "1" ] && cfg=$(jq '.zcash.enabled=true' <<<"$cfg")
   [ "$w_bitcoin_enabled" = "1" ] && cfg=$(jq '.bitcoin.steady_cpus=1 | .bitcoin.steady_mem_limit_mb=2048' <<<"$cfg")
   [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.steady_cpus=1 | .monero.steady_mem_limit_mb=2048' <<<"$cfg")
+  for node in tari litecoin dogecoin bitcoincash zcash; do
+    enabled_var=w_${node}_enabled
+    enabled=${!enabled_var}
+    [ "$enabled" = 1 ] && cfg=$(jq --arg node "$node" '.[$node].steady_cpus=1 | .[$node].steady_mem_limit_mb=4096' <<<"$cfg")
+  done
   if [ "$package_managed" = "1" ]; then
     [ "$w_bitcoin_enabled" = "1" ] && cfg=$(jq '.bitcoin.resource_profile="compact"' <<<"$cfg")
     [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.resource_profile="compact"' <<<"$cfg")
+    for node in tari litecoin dogecoin bitcoincash zcash; do
+      enabled_var=w_${node}_enabled
+      enabled=${!enabled_var}
+      [ "$enabled" = 1 ] && cfg=$(jq --arg node "$node" '.[$node].resource_profile="compact"' <<<"$cfg")
+    done
   fi
   [ "$w_data_dir" != "$default_data_dir" ] && cfg=$(jq --arg v "$w_data_dir" '.bitcoin.data_dir=$v' <<<"$cfg")
   [ "$w_bind_ip" != "127.0.0.1" ] && cfg=$(jq --arg v "$w_bind_ip" '.dashboard.bind_ip=$v' <<<"$cfg")
@@ -257,12 +305,33 @@ init() {
       [ -n "$w_monero_zmq_port" ] && cfg=$(jq --argjson port "$w_monero_zmq_port" '.monero.zmq_port=$port' <<<"$cfg")
     fi
   fi
+  for node_spec in "tari:grpc" "litecoin:rpc" "dogecoin:rpc" "bitcoincash:rpc" "zcash:rpc"; do
+    IFS=: read -r node kind <<<"$node_spec"
+    enabled_var=w_${node}_enabled
+    enabled=${!enabled_var}
+    [ "$enabled" = 1 ] || continue
+    data_var=w_${node}_data_dir
+    node_data_dir=${!data_var}
+    cfg=$(jq --arg node "$node" --arg data "$node_data_dir" 'setpath([$node,"data_dir"];$data)' <<<"$cfg")
+    expose_var=w_${node}_${kind}_expose
+    node_expose=${!expose_var}
+    if yes "$node_expose"; then
+      bind_var=w_${node}_${kind}_bind_ip
+      port_var=w_${node}_${kind}_port
+      node_bind_ip=${!bind_var}
+      node_port=${!port_var}
+      cfg=$(jq --arg node "$node" --arg kind "$kind" --arg ip "$node_bind_ip" --argjson port "$node_port" '
+        setpath([$node,($kind+"_expose")];true) |
+        setpath([$node,($kind+"_bind_ip")];$ip) |
+        setpath([$node,($kind+"_port")];$port)' <<<"$cfg")
+    fi
+  done
 
   config_source=$(mktemp)
   printf '%s\n' "$cfg" | jq . >"$config_source"
   replace_config "$config_source"
   rm -f "$config_source"
-  [ "$package_managed" = "0" ] || ensure_port_control_timer
+  if [ "$package_managed" = "1" ]; then ensure_port_control_timer; ensure_node_control_timer; fi
   echo
   echo "Wrote private config.json (mode 600)."
   echo
@@ -284,12 +353,20 @@ init() {
   echo "  Dashboard — username: admin  password: $w_password"
   [ "$w_bitcoin_enabled" = "0" ] || echo "  Bitcoin RPC — username: admin  password: $w_bitcoin_password"
   [ "$w_monero_enabled" = "0" ] || echo "  Monero RPC — username: admin  password: $w_monero_password"
+  [ "$w_litecoin_enabled" = "0" ] || echo "  Litecoin RPC — username: admin  password: $w_litecoin_password"
+  [ "$w_dogecoin_enabled" = "0" ] || echo "  Dogecoin RPC — username: admin  password: $w_dogecoin_password"
+  [ "$w_bitcoincash_enabled" = "0" ] || echo "  Bitcoin Cash RPC — username: admin  password: $w_bitcoincash_password"
+  [ "$w_zcash_enabled" = "0" ] || echo "  Zcash RPC proxy — username: admin  password: $w_zcash_password"
+  [ "$w_tari_enabled" = "0" ] || echo "  Tari gRPC — no password; keep LAN exposure on a trusted network"
 }
 
 ensure_resource_profile_timer() {
   [ "$package_managed" = "1" ] || return 0
   unit=bitcoin-starter-stack-resource-profile.timer
-  if [ "$(env_get BITCOIN_RESOURCE_PROFILE)" = compact ] || [ "$(env_get MONERO_RESOURCE_PROFILE)" = compact ]; then
+  if [ "$(env_get BITCOIN_RESOURCE_PROFILE)" = compact ] || [ "$(env_get MONERO_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get TARI_RESOURCE_PROFILE)" = compact ] || [ "$(env_get LITECOIN_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get DOGECOIN_RESOURCE_PROFILE)" = compact ] || [ "$(env_get BITCOINCASH_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get ZCASH_RESOURCE_PROFILE)" = compact ]; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable --now "$unit" >/dev/null 2>&1 ||
       echo "WARN  could not enable automatic post-sync resource limits; run: sudo systemctl enable --now $unit"
@@ -306,11 +383,18 @@ ensure_port_control_timer() {
     echo "WARN  could not enable LAN port controls; run: sudo systemctl enable --now $unit"
 }
 
+ensure_node_control_timer() {
+  [ "$package_managed" = "1" ] || return 0
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now bitcoin-starter-stack-node-control.timer >/dev/null 2>&1 ||
+    echo "WARN  could not enable node controls; run: sudo systemctl enable --now bitcoin-starter-stack-node-control.timer"
+}
+
 offline_up() {
   guard_package_containers
   for arg in "$@"; do
     case "$arg" in
-      tor | bitcoin | monero | dashboard) ;;
+      tor | bitcoin | monero | monero-wallet | tari | litecoin | dogecoin | bitcoincash | zcash | dashboard) ;;
       *) echo "up accepts service names only; image downloads are separate: $stack_command pull."; return 1 ;;
     esac
   done
@@ -336,8 +420,11 @@ status() {
   compose ps
   bad=0
   services="tor dashboard"
-  [ "$(env_get BITCOIN_ENABLED)" = "0" ] || services="$services bitcoin"
-  [ "$(env_get MONERO_ENABLED)" = "1" ] && services="$services monero"
+  [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_ACTIVE)" != "0" ] && services="$services bitcoin"
+  [ "$(env_get MONERO_ENABLED)" = "1" ] && [ "$(env_get MONERO_ACTIVE)" != "0" ] && services="$services monero monero-wallet"
+  for node in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+    [ "$(env_get "${node}_ENABLED")" = 1 ] && [ "$(env_get "${node}_ACTIVE")" != 0 ] && services="$services $(printf '%s' "$node" | tr '[:upper:]' '[:lower:]')"
+  done
   for svc in $services; do
     st=$(docker inspect "$svc" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
     case "$st" in
@@ -377,14 +464,20 @@ doctor() {
   fi
 
   echo "== Disk"
-  if [ "$(env_get BITCOIN_ENABLED)" != "0" ]; then
+  if [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_ACTIVE)" != "0" ]; then
     data_dir=$(env_get BITCOIN_DATA_DIR)
     df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      Bitcoin: %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
   fi
-  if [ "$(env_get MONERO_ENABLED)" = "1" ]; then
+  if [ "$(env_get MONERO_ENABLED)" = "1" ] && [ "$(env_get MONERO_ACTIVE)" != "0" ]; then
     data_dir=$(env_get MONERO_DATA_DIR)
     df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      Monero: %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
   fi
+  for node in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+    [ "$(env_get "${node}_ENABLED")" = 1 ] || continue
+    data_dir=$(env_get "${node}_DATA_DIR")
+    label=$(printf '%s' "$node" | tr '[:upper:]' '[:lower:]')
+    df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk -v node="$label" '{printf "      %s: %s free of %s (%s used) at %s\n", node, $4, $2, $5, $6}'
+  done
 
   echo "== Containers"
   status || true
@@ -403,6 +496,16 @@ doctor() {
       echo "      Monero RPC unreachable (normal during startup; if it persists, check $stack_command logs monero)"
     fi
   fi
+  for node in tari litecoin dogecoin bitcoincash zcash; do
+    upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    [ "$(env_get "${upper}_ENABLED")" = 1 ] || continue
+    [ "$(env_get "${upper}_ACTIVE")" != 0 ] || continue
+    if docker inspect "$node" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null | grep -q '^running healthy$'; then
+      echo "      $node RPC reachable"
+    else
+      echo "      $node unavailable (normal during startup; if it persists, check $stack_command logs $node)"
+    fi
+  done
 
   echo "== Tor"
   docker logs tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
@@ -644,10 +747,12 @@ case "$cmd" in
     unlock_config
     ensure_resource_profile_timer
     ensure_port_control_timer
+    ensure_node_control_timer
     ensure_agent
     ;;
   init) init ;;
   down) guard_package_containers && compose down "$@" ;;
+  stop) guard_package_containers && compose stop "$@" ;;
   restart) guard_package_containers && compose restart "$@" ;;
   logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
   events) guard_package_containers && docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
@@ -658,6 +763,7 @@ case "$cmd" in
     unlock_config
     ensure_resource_profile_timer
     ensure_port_control_timer
+    ensure_node_control_timer
     ensure_agent
     ;;
   apply-port-settings)

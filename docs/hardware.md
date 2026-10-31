@@ -12,8 +12,10 @@ headroom budgets, not measured average consumption or hard minimums:
 |---|---|---|---|
 | Bitcoin initial sync | Plan for 2 cores; validation can keep available cores busy. | Allow 4 GiB for headroom with the default 128 MiB cache. | No container CPU or RAM cap. |
 | Monero initial sync | Plan for 2 cores; additional cores can help validation. | Allow 4 GiB for headroom. | No container CPU or RAM cap. |
+| Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash initial sync | Plan for 2 cores per syncing node. | Allow 4 GiB per node as a starting budget. | No container CPU or RAM cap. Sync one at a time on a small host. |
 | Bitcoin after sync | 1 core of capacity; usually idle between validation and RPC work. | 2 GiB container budget. | Fresh APT wizard installs apply the cap after healthy sync checks. |
 | Monero after sync | 1 core of capacity; wallet/RPC activity adds work. | 2 GiB container budget, still experimental. | Fresh APT wizard installs apply the cap after healthy sync checks. |
+| Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash after sync | 1 core per node. | 4 GiB container budget per node. | Fresh APT wizard installs apply the cap after healthy sync checks; sustained operation remains unqualified. |
 
 Smaller machines can work, with slower sync and less room for bursts. Uncapped
 sync can use more than the planning estimate; it does not reserve memory or
@@ -28,8 +30,9 @@ upstream guarantees. Bitcoin's
 [memory guide](https://github.com/bitcoin/bitcoin/blob/v32.1/doc/reduce-memory.md)
 explains why lowering caches saves RAM but can slow initial sync.
 
-The default post-sync caps are explicit, editable `steady_cpus: 1` and
-`steady_mem_limit_mb: 2048` values in each selected node's generated config.
+The default post-sync caps are explicit and editable. Bitcoin and Monero use
+`steady_cpus: 1` and `steady_mem_limit_mb: 2048`; the other supported nodes use
+`steady_cpus: 1` and `steady_mem_limit_mb: 4096`.
 See [resource caps](configuration.md#resource-caps) for changing them. A cap is
 a ceiling, not an allocation: actual usage can be lower. Source installs and
 existing profiles set to `off` do not enable automatic caps.
@@ -71,6 +74,15 @@ That target does not include chainstate, indexes, wallet data, logs, or headroom
 - **Pruned Monero:** about 105 GiB according to the
   [official documentation](https://docs.getmonero.org/interacting/remote-nodes/)
   as of October 5, 2026. Allow 120–150 GiB for working room and growth.
+- **Litecoin, Dogecoin, and Bitcoin Cash:** each keeps 10,000 MiB of block files
+  by default. Until a complete current sync is measured, allow a provisional
+  30–60 GB total on an expandable volume for each chain.
+- **Tari:** the default pruning horizon is 10,000 blocks. There is no current
+  measured total for this stack; use an expandable volume and measure the first
+  completed sync rather than treating the horizon as a byte estimate.
+- **Zcash / Zakura:** the pruned configuration retains 10,000 blocks.
+  The published snapshot was roughly 11 GB when checked; allow 30–60 GB until
+  this stack records a complete sync and compaction cycle.
 
 The dashboard shows chain size vs. disk capacity so you can watch the
 headroom shrink.

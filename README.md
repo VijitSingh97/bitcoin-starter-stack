@@ -1,6 +1,6 @@
 <div align="center">
 
-# Node Starter Stack
+# Node Manager
 
 ### A very lightweight dashboard for monitoring your new or existing nodes.
 
@@ -9,12 +9,15 @@
 ![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
 ![Runtime: Tor-only](https://img.shields.io/badge/Runtime-Tor--only-7D4698?logo=torproject&logoColor=white)
 
-Run [Bitcoin Core](https://bitcoincore.org/), [Monero](https://www.getmonero.org/),
-or both, with a small Go dashboard. Pick the gold Bitcoin tower or the orange
-Monero tower to open its status card. Running services use Tor for public
-internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
+Run Bitcoin, Monero, Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash with a
+small Go dashboard. Choose any combination and click a tower in your node set
+to see its status. Public runtime traffic goes through Tor; the dashboard and
+optional node APIs stay on your trusted LAN.
 
-<img src="./images/nodes.png" width="100%" alt="Node Starter Stack's gold Bitcoin tower and orange Monero tower; click either to open its status card" />
+The existing repository, package, commands, and data paths keep their current
+names for upgrade compatibility while the broader Node Manager takes shape.
+
+<img src="./images/nodes.png" width="100%" alt="Node Manager's clustered chain towers; click a tower to open its status panel" />
 
 </div>
 
@@ -22,14 +25,14 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
 
 ## What it does
 
-- 🪶 **Small dashboard, low overhead.** A single Go binary with no third-party
-  runtime dependencies. The full dashboard used about **8 MiB of working memory**
+- 🪶 **Small dashboard, low overhead.** A single Go binary; no Python runtime or JavaScript build toolchain is needed. The full dashboard used about **8 MiB of working memory**
   in our [mini-1 benchmark](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/c9cdd75/experiments/go-dashboard-results/mini-1-full-port-2026-10-27/README.md).
-  Node memory and chain storage are separate; this measurement predates Monero support.
-- 🟠 **Choose your nodes.** Bitcoin, Monero, or both. Bitcoin keeps a 10 GB recent-block
-  budget; allow **30–60 GB total**. Monero uses its pruned database; allow roughly
-  **120–150 GiB including growth room**. Both still validate the chain. See the
-  [node comparison and planned chains](docs/nodes.md).
+  Node memory and chain storage are separate; this historical measurement predates multi-chain support and the Tari gRPC client.
+- 🟠 **Choose your nodes.** Bitcoin Core, Monero, Tari, Litecoin, Dogecoin,
+  Bitcoin Cash Node, and Zcash through Zakura. Every chain uses pruned storage,
+  a separate data directory, and an editable resource budget. Start with one
+  chain on a small machine; the [per-node sizing guide](docs/nodes.md) separates
+  disk planning allowances from measured evidence.
 - 🧅 **Tor-only runtime networking.** P2P traffic goes through the Tor container.
   Node containers and the dashboard cannot route directly to the internet,
   and local DNS forwarding is disabled. Bitcoin uses onion peers; inbound connections use an onion
@@ -37,9 +40,9 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
   low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
   add a password and an onion address for remote access. RPC is private by default,
-  with optional authenticated access for wallets on your LAN.
+  with optional authenticated access where the node supports it. Tari mining gRPC and Monero ZMQ assume a trusted LAN.
 - 🔑 **Separate generated logins.** Fresh installs generate different passwords for
-  the dashboard and each node's RPC. The username defaults to `admin`; the wizard
+  the dashboard and each authenticated node endpoint. The username defaults to `admin`; the wizard
   prints the selected services' credentials once. Existing passwords are preserved. Config
   renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
@@ -51,8 +54,8 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
 - ⚙️ **Settings that stick.** Configure global Appearance, Telegram, and Healthchecks
-  from the gear menu, with collapsible Bitcoin and Monero settings for each node's
-  block alerts and LAN ports. Use localhost, your private LAN, or the onion dashboard.
+  from the gear menu, with collapsible settings for each node's
+  block alerts and LAN ports. Use localhost, your private LAN, or a password-protected onion dashboard.
   Saved values are visible in the settings panel, and a separate JSON override survives
   reboots and upgrades.
 - 👀 **Bitcoin balances from your own node.** Import an address, `xpub`, `zpub`, or public
@@ -65,10 +68,17 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
   password-protected Monero card. No private spend key or seed is accepted, and the
   dashboard cannot sign or send. Optional signed key images make spent/current balance
   tracking accurate; without them the amount is clearly labeled received-only.
-- 🔌 **Monero remote node for Pithead.** Independently enable restricted, authenticated
-  Monero RPC and the optional ZMQ publisher on your private LAN.
-- 💱 **BTC and XMR in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
+- 🔌 **Remote nodes for Pithead.** Independently enable Monero restricted RPC/ZMQ
+  or Tari mining gRPC on your private LAN. Tari uses an explicit mining-method
+  allowlist and needs no wallet, miner, or payout key on this server.
+- 💱 **Coin prices in your currency.** USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, and CNY.
   CoinGecko quotes are fetched through Tor, cached, and labeled when stale.
+- ⏸️ **Pause a node without losing its data.** Type `deactivate` in the confirmation
+  dialog to stop just that node and its wallet service. Its tower turns grey;
+  activate it later to continue from the stored chain.
+- 🛠️ **Reviewed dependency updates.** Dependabot watches image digests and libraries;
+  a developer-bot workflow proposes node-binary upgrades after verifying signed
+  upstream checksums. Updates arrive as pull requests.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
   applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
   with a button from the dashboard; the stack runs the host-side agent for you.
@@ -79,19 +89,21 @@ internet traffic; the dashboard and optional node RPC stay on your trusted LAN.
 ## 🚀 Fresh install
 
 You need Ubuntu Server 24.04, Docker Engine with Compose 2.33.1 or newer,
-`jq`, `openssl`, `curl`, and an SSD. Allow 30–60 GB for Bitcoin and about
-120–150 GiB for Monero. Our steady-operation target is **1 CPU and 2 GB RAM per
-node**, plus shared Docker, Tor, dashboard, and operating-system overhead.
-This is a test target, not a proven minimum: Bitcoin has passed a short capped
-trial, and Monero still needs a full capped stability test. Initial sync may use
-all available CPU and RAM. A host with only 2 GB total cannot give a node a full
-2 GB while also providing room for the operating system. See
-[Hardware Requirements](docs/hardware.md).
+`jq`, `openssl`, `curl`, and an SSD. Pick the nodes your machine has room for;
+see [disk and resource planning for every chain](docs/nodes.md#storage-and-resource-planning).
+The post-sync compact budgets are **1 CPU / 2 GiB per Bitcoin or Monero node**,
+and **1 CPU / 4 GiB per Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash node**.
+Tor, the dashboard, Docker, the operating system, and Monero's optional view-only
+wallet service need additional room. Initial sync is uncapped, so sync one chain
+at a time on small hardware. These are editable container ceilings, not proven
+minimum VPS specifications; complete capped stability trials remain pending.
+See [Hardware Requirements](docs/hardware.md).
 
 | Per node | Initial sync: planning estimate | After sync: default container cap |
 |---|---|---|
 | Bitcoin | Allow 2 CPU cores and 4 GiB RAM for headroom; more cores can speed up validation. | 1 CPU core and 2 GiB RAM |
 | Monero | Allow 2 CPU cores and 4 GiB RAM for headroom; disk and Tor speed also matter. | 1 CPU core and 2 GiB RAM, experimental |
+| Tari, Litecoin, Dogecoin, Bitcoin Cash, Zcash | Allow 2 CPU cores and 4 GiB RAM per node as an initial planning budget. | 1 CPU core and 4 GiB RAM per node, unqualified |
 
 These are planning budgets, not measured average usage or hard minimums. Sync
 is uncapped by default; a smaller host can work but may take longer. Each node's
@@ -268,11 +280,12 @@ flowchart LR
     You(["👤 You · Browser"])
     Net(["🌐 Tor Network"])
 
-    subgraph stack ["🐳 Node Starter Stack"]
+    subgraph stack ["🐳 Node Manager"]
         Dashboard["📊 Dashboard<br/>:80"]
         Bitcoin["🟠 Bitcoin Core"]
         Monero["🟠 Monero"]
         MoneroWallet["👁️ Monero view-only wallet"]
+        OtherNodes["Tari · Litecoin · Dogecoin<br/>Bitcoin Cash · Zcash"]
         Tor["🧅 Tor"]
     end
 
@@ -282,12 +295,15 @@ flowchart LR
     Dashboard -.->|Internal Digest RPC| Monero
     Dashboard -.->|Internal authenticated RPC| MoneroWallet
     MoneroWallet -.->|Internal Digest RPC| Monero
+    Dashboard -.->|Internal node APIs| OtherNodes
     Bitcoin ==>|SOCKS5| Tor
     Monero ==>|SOCKS5| Tor
+    OtherNodes ==>|SOCKS / private Tor bridges| Tor
     Tor <==> Net
 ```
 
-Bitcoin alone uses three containers, Monero alone uses four, and both use five.
+Shared Tor and dashboard services add two containers to the selected daemons.
+Monero's optional view-only wallet service adds one more.
 Nodes and the Go dashboard share an internal network;
 only Tor joins an external network. The Tor container also forwards the private
 LAN dashboard port to its fixed internal destination.
@@ -299,7 +315,7 @@ covers downloads, DNS, and the limits of the guarantee.
 | Guide | What's inside |
 |---|---|
 | [Getting Started](docs/getting-started.md) | Prerequisites, install, first start, what to expect during sync. |
-| [Nodes and roadmap](docs/nodes.md) | Bitcoin/Monero setup, Pithead remote-node settings, and other chain candidates. |
+| [Supported nodes](docs/nodes.md) | All seven chains, storage and resource budgets, and Pithead remote-node settings. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
 | [Watch-only](docs/watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |

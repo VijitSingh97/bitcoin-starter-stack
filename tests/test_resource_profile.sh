@@ -30,11 +30,22 @@ if [ "$1" = compose ]; then
       case "$2" in
         bitcoin) [ "${FAKE_BITCOIN_RUNNING:-1}" = 1 ] && printf '%s\n' "${FAKE_BITCOIN_ID:-btc-id}" ;;
         monero) [ "${FAKE_MONERO_RUNNING:-1}" = 1 ] && printf '%s\n' "${FAKE_MONERO_ID:-xmr-id}" ;;
+        litecoin) printf '%s\n' "${FAKE_LITECOIN_ID:-ltc-id}" ;;
+        dogecoin) printf '%s\n' doge-id ;;
+        bitcoincash) printf '%s\n' bch-id ;;
+        tari) printf '%s\n' tari-id ;;
+        zcash) printf '%s\n' zcash-id ;;
+        dashboard) printf '%s\n' dashboard-id ;;
       esac
       ;;
     exec)
       [ "$1" = -T ]
-      case "$2" in
+      shift
+      if [ "$1" = -u ]; then
+        [ "$2" = 10001:1000 ]
+        shift 2
+      fi
+      case "$1" in
         bitcoin)
           if [ "${FAKE_BITCOIN_RPC_FAIL:-0}" = 1 ]; then exit 1; fi
           if [ "${FAKE_BITCOIN_SYNCED:-0}" = 1 ]; then
@@ -51,6 +62,18 @@ if [ "$1" = compose ]; then
           else
             printf '%s\n' '{"result":{"status":"OK","synchronized":false,"busy_syncing":true,"height":50,"target_height":100}}'
             printf '%s\n' "{\"result\":{\"status\":\"OK\",\"block_header\":{\"timestamp\":${RESOURCE_NOW_EPOCH}}}}"
+          fi
+          ;;
+        litecoin | dogecoin | bitcoincash)
+          printf '%s\n' "{\"initialblockdownload\":false,\"blocks\":100,\"headers\":100,\"mediantime\":${RESOURCE_NOW_EPOCH},\"warnings\":[] }"
+          ;;
+        zcash)
+          if printf '%s' "$*" | grep -q getblockheader; then
+            printf '%s\n' "{\"result\":{\"time\":${RESOURCE_NOW_EPOCH}},\"error\":null}"
+          elif [ "${FAKE_ZCASH_SYNCED:-0}" = 1 ]; then
+            printf '%s\n' '{"result":{"blocks":100,"headers":100,"estimatedheight":100,"verificationprogress":1.0,"bestblockhash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","pruned":true},"error":null}'
+          else
+            printf '%s\n' '{"result":{"blocks":50,"headers":100,"estimatedheight":100,"verificationprogress":0.5,"bestblockhash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","pruned":true},"error":null}'
           fi
           ;;
       esac
@@ -93,6 +116,7 @@ case "$1" in
     case "$id" in
       btc-*) printf '%s\n' "${FAKE_BITCOIN_MEMORY:-700MiB} / 8GiB" ;;
       xmr-*) printf '%s\n' "${FAKE_MONERO_MEMORY:-600MiB} / 8GiB" ;;
+      ltc-* | doge-* | bch-* | tari-* | zcash-*) printf '%s\n' "600MiB / 8GiB" ;;
     esac
     ;;
   update)
@@ -104,6 +128,9 @@ case "$1" in
       nanos=$(awk -v value="$cpus" 'BEGIN { printf "%.0f\n", value * 1000000000 }')
       printf '%s %s %s\n' "$nanos" "$((memory * 1024 * 1024))" "$((swap * 1024 * 1024))" >"$FAKE_CAPS/$id"
     fi
+    ;;
+  exec)
+    [ "${FAKE_TARI_SYNCED:-0}" = 1 ]
     ;;
 esac
 EOF
@@ -123,6 +150,21 @@ BITCOIN_STEADY_CPUS=1
 BITCOIN_STEADY_MEM_LIMIT_MB=2048
 MONERO_STEADY_CPUS=1
 MONERO_STEADY_MEM_LIMIT_MB=2048
+TARI_RESOURCE_PROFILE=off
+TARI_STEADY_CPUS=1
+TARI_STEADY_MEM_LIMIT_MB=4096
+LITECOIN_RESOURCE_PROFILE=off
+LITECOIN_STEADY_CPUS=1
+LITECOIN_STEADY_MEM_LIMIT_MB=4096
+DOGECOIN_RESOURCE_PROFILE=off
+DOGECOIN_STEADY_CPUS=1
+DOGECOIN_STEADY_MEM_LIMIT_MB=4096
+BITCOINCASH_RESOURCE_PROFILE=off
+BITCOINCASH_STEADY_CPUS=1
+BITCOINCASH_STEADY_MEM_LIMIT_MB=4096
+ZCASH_RESOURCE_PROFILE=off
+ZCASH_STEADY_CPUS=1
+ZCASH_STEADY_MEM_LIMIT_MB=4096
 EOF
   export BITCOIN_STACK_ROOT=$case_root/root
   export BITCOIN_STACK_STATE_DIR=$case_root/state
@@ -130,6 +172,8 @@ EOF
   export FAKE_BITCOIN_ID=btc-id FAKE_MONERO_ID=xmr-id
   export FAKE_BITCOIN_RUNNING=1 FAKE_MONERO_RUNNING=1
   export FAKE_BITCOIN_SYNCED=0 FAKE_MONERO_SYNCED=0
+  export FAKE_TARI_SYNCED=0
+  export FAKE_ZCASH_SYNCED=0
   export FAKE_BITCOIN_HEALTH=healthy FAKE_MONERO_HEALTH=healthy
   export FAKE_BITCOIN_MEMORY=700MiB FAKE_MONERO_MEMORY=600MiB
   export FAKE_BITCOIN_RPC_FAIL=0 FAKE_MONERO_RPC_FAIL=0 FAKE_UPDATE_FAIL=0
@@ -173,6 +217,35 @@ grep -q '^update --cpus 1 --memory 2048m --memory-swap 2048m btc-id$' "$log" || 
 updates=$(grep -c '^update ' "$log")
 tick_profile
 [ "$(grep -c '^update ' "$log")" = "$updates" ] || fail "an already capped Bitcoin container was updated again"
+
+new_case additional-nodes
+perl -pi -e 's/LITECOIN_RESOURCE_PROFILE=off/LITECOIN_RESOURCE_PROFILE=compact/' "$case_root/state/.env"
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 1 --memory 4096m --memory-swap 4096m ltc-id$' "$log" || fail "Litecoin compact cap is wrong"
+grep -q 'litecoin-cli -datadir=/data -conf=/tmp/litecoin.conf getblockchaininfo' "$log" || fail "Litecoin sync check missed its private config"
+
+new_case tari
+perl -pi -e 's/TARI_RESOURCE_PROFILE=off/TARI_RESOURCE_PROFILE=compact/' "$case_root/state/.env"
+export FAKE_TARI_SYNCED=1
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 1 --memory 4096m --memory-swap 4096m tari-id$' "$log" || {
+  cat "$log"
+  cat "$case_root/state/resource-profile/tari" 2>/dev/null || true
+  fail "Tari compact cap is wrong"
+}
+grep -q 'stat -c %Y' "$log" || fail "Tari readiness does not require a fresh marker"
+grep -q 'stat -c %u' "$log" || fail "Tari readiness does not verify marker ownership"
+
+new_case zcash
+perl -pi -e 's/ZCASH_RESOURCE_PROFILE=off/ZCASH_RESOURCE_PROFILE=compact/' "$case_root/state/.env"
+tick_profile; tick_profile; tick_profile
+! grep -q '^update ' "$log" || fail "syncing Zcash was capped"
+export FAKE_ZCASH_SYNCED=1
+tick_profile; tick_profile; tick_profile
+grep -q '^update --cpus 1 --memory 4096m --memory-swap 4096m zcash-id$' "$log" || fail "Zcash compact cap is wrong"
+grep -q 'exec -T -u 10001:1000 zcash sh -c' "$log" || fail "Zcash readiness did not use the native cookie owner"
+grep -q '/data/.cookie' "$log" || fail "Zcash readiness did not read the native RPC cookie"
+grep -q -- '--user' "$log" || fail "Zcash readiness did not authenticate native RPC"
 
 new_case legacy-defaults
 perl -ni -e 'print unless /STEADY_/' "$case_root/state/.env"

@@ -31,29 +31,39 @@ var (
 )
 
 type notificationSettings struct {
-	TelegramEnabled     bool   `json:"telegram_enabled"`
-	TelegramBotToken    string `json:"telegram_bot_token"`
-	TelegramChatID      string `json:"telegram_chat_id"`
-	HealthchecksEnabled bool   `json:"healthchecks_enabled"`
-	HealthchecksURL     string `json:"healthchecks_url"`
-	AlertNewBlock       bool   `json:"alert_new_block"`
-	AlertNewBlockMonero bool   `json:"alert_new_block_monero"`
-	TowerLabels         bool   `json:"tower_labels"`
-	DefaultCurrency     string `json:"default_currency"`
+	TelegramEnabled          bool   `json:"telegram_enabled"`
+	TelegramBotToken         string `json:"telegram_bot_token"`
+	TelegramChatID           string `json:"telegram_chat_id"`
+	HealthchecksEnabled      bool   `json:"healthchecks_enabled"`
+	HealthchecksURL          string `json:"healthchecks_url"`
+	AlertNewBlock            bool   `json:"alert_new_block"`
+	AlertNewBlockMonero      bool   `json:"alert_new_block_monero"`
+	AlertNewBlockTari        bool   `json:"alert_new_block_tari"`
+	AlertNewBlockLitecoin    bool   `json:"alert_new_block_litecoin"`
+	AlertNewBlockDogecoin    bool   `json:"alert_new_block_dogecoin"`
+	AlertNewBlockBitcoinCash bool   `json:"alert_new_block_bitcoincash"`
+	AlertNewBlockZcash       bool   `json:"alert_new_block_zcash"`
+	TowerLabels              bool   `json:"tower_labels"`
+	DefaultCurrency          string `json:"default_currency"`
 }
 
 type settingsUpdate struct {
-	Reset               *bool   `json:"reset,omitempty"`
-	TelegramEnabled     *bool   `json:"telegram_enabled,omitempty"`
-	TelegramBotToken    *string `json:"telegram_bot_token,omitempty"`
-	TelegramChatID      *string `json:"telegram_chat_id,omitempty"`
-	HealthchecksEnabled *bool   `json:"healthchecks_enabled,omitempty"`
-	HealthchecksURL     *string `json:"healthchecks_url,omitempty"`
-	AlertNewBlock       *bool   `json:"alert_new_block,omitempty"`
-	AlertNewBlockMonero *bool   `json:"alert_new_block_monero,omitempty"`
-	TowerLabels         *bool   `json:"tower_labels,omitempty"`
-	DefaultCurrency     *string `json:"default_currency,omitempty"`
-	present             map[string]bool
+	Reset                    *bool   `json:"reset,omitempty"`
+	TelegramEnabled          *bool   `json:"telegram_enabled,omitempty"`
+	TelegramBotToken         *string `json:"telegram_bot_token,omitempty"`
+	TelegramChatID           *string `json:"telegram_chat_id,omitempty"`
+	HealthchecksEnabled      *bool   `json:"healthchecks_enabled,omitempty"`
+	HealthchecksURL          *string `json:"healthchecks_url,omitempty"`
+	AlertNewBlock            *bool   `json:"alert_new_block,omitempty"`
+	AlertNewBlockMonero      *bool   `json:"alert_new_block_monero,omitempty"`
+	AlertNewBlockTari        *bool   `json:"alert_new_block_tari,omitempty"`
+	AlertNewBlockLitecoin    *bool   `json:"alert_new_block_litecoin,omitempty"`
+	AlertNewBlockDogecoin    *bool   `json:"alert_new_block_dogecoin,omitempty"`
+	AlertNewBlockBitcoinCash *bool   `json:"alert_new_block_bitcoincash,omitempty"`
+	AlertNewBlockZcash       *bool   `json:"alert_new_block_zcash,omitempty"`
+	TowerLabels              *bool   `json:"tower_labels,omitempty"`
+	DefaultCurrency          *string `json:"default_currency,omitempty"`
+	present                  map[string]bool
 }
 
 func notificationSettingsFromEnv() notificationSettings {
@@ -61,14 +71,19 @@ func notificationSettingsFromEnv() notificationSettings {
 	chatID := strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID"))
 	healthchecks := strings.TrimRight(strings.TrimSpace(os.Getenv("HEALTHCHECKS_URL")), "/")
 	return notificationSettings{
-		TelegramEnabled:     token != "" && chatID != "",
-		TelegramBotToken:    token,
-		TelegramChatID:      chatID,
-		HealthchecksEnabled: healthchecks != "",
-		HealthchecksURL:     healthchecks,
-		AlertNewBlock:       enabled(os.Getenv("ALERT_NEW_BLOCK")),
-		AlertNewBlockMonero: enabled(os.Getenv("ALERT_NEW_BLOCK_MONERO")),
-		DefaultCurrency:     defaultPriceCurrency,
+		TelegramEnabled:          token != "" && chatID != "",
+		TelegramBotToken:         token,
+		TelegramChatID:           chatID,
+		HealthchecksEnabled:      healthchecks != "",
+		HealthchecksURL:          healthchecks,
+		AlertNewBlock:            enabled(os.Getenv("ALERT_NEW_BLOCK")),
+		AlertNewBlockMonero:      enabled(os.Getenv("ALERT_NEW_BLOCK_MONERO")),
+		AlertNewBlockTari:        enabled(os.Getenv("ALERT_NEW_BLOCK_TARI")),
+		AlertNewBlockLitecoin:    enabled(os.Getenv("ALERT_NEW_BLOCK_LITECOIN")),
+		AlertNewBlockDogecoin:    enabled(os.Getenv("ALERT_NEW_BLOCK_DOGECOIN")),
+		AlertNewBlockBitcoinCash: enabled(os.Getenv("ALERT_NEW_BLOCK_BITCOINCASH")),
+		AlertNewBlockZcash:       enabled(os.Getenv("ALERT_NEW_BLOCK_ZCASH")),
+		DefaultCurrency:          defaultPriceCurrency,
 	}
 }
 
@@ -202,6 +217,21 @@ func (update settingsUpdate) apply(current notificationSettings) (notificationSe
 	if update.AlertNewBlockMonero != nil {
 		next.AlertNewBlockMonero = *update.AlertNewBlockMonero
 	}
+	if update.AlertNewBlockTari != nil {
+		next.AlertNewBlockTari = *update.AlertNewBlockTari
+	}
+	if update.AlertNewBlockLitecoin != nil {
+		next.AlertNewBlockLitecoin = *update.AlertNewBlockLitecoin
+	}
+	if update.AlertNewBlockDogecoin != nil {
+		next.AlertNewBlockDogecoin = *update.AlertNewBlockDogecoin
+	}
+	if update.AlertNewBlockBitcoinCash != nil {
+		next.AlertNewBlockBitcoinCash = *update.AlertNewBlockBitcoinCash
+	}
+	if update.AlertNewBlockZcash != nil {
+		next.AlertNewBlockZcash = *update.AlertNewBlockZcash
+	}
 	if update.TowerLabels != nil {
 		next.TowerLabels = *update.TowerLabels
 	}
@@ -243,20 +273,30 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 		return nil, ErrSettingsUnavailable
 	}
 	return map[string]any{
-		"telegram_enabled":        m.settings.TelegramEnabled,
-		"telegram_bot_token":      m.settings.TelegramBotToken,
-		"telegram_chat_id":        m.settings.TelegramChatID,
-		"healthchecks_enabled":    m.settings.HealthchecksEnabled,
-		"healthchecks_url":        m.settings.HealthchecksURL,
-		"alert_new_block":         m.settings.AlertNewBlock,
-		"alert_new_block_bitcoin": m.settings.AlertNewBlock,
-		"alert_new_block_monero":  m.settings.AlertNewBlockMonero,
-		"bitcoin_enabled":         m.bitcoinEnabled,
-		"monero_enabled":          m.moneroEnabled,
-		"tower_labels":            m.settings.TowerLabels,
-		"default_currency":        m.settings.DefaultCurrency,
-		"overridden":              m.settingsOverridden,
-		"can_configure":           canConfigure,
+		"telegram_enabled":            m.settings.TelegramEnabled,
+		"telegram_bot_token":          m.settings.TelegramBotToken,
+		"telegram_chat_id":            m.settings.TelegramChatID,
+		"healthchecks_enabled":        m.settings.HealthchecksEnabled,
+		"healthchecks_url":            m.settings.HealthchecksURL,
+		"alert_new_block":             m.settings.AlertNewBlock,
+		"alert_new_block_bitcoin":     m.settings.AlertNewBlock,
+		"alert_new_block_monero":      m.settings.AlertNewBlockMonero,
+		"alert_new_block_tari":        m.settings.AlertNewBlockTari,
+		"alert_new_block_litecoin":    m.settings.AlertNewBlockLitecoin,
+		"alert_new_block_dogecoin":    m.settings.AlertNewBlockDogecoin,
+		"alert_new_block_bitcoincash": m.settings.AlertNewBlockBitcoinCash,
+		"alert_new_block_zcash":       m.settings.AlertNewBlockZcash,
+		"bitcoin_enabled":             m.bitcoinEnabled,
+		"monero_enabled":              m.moneroEnabled,
+		"tari_enabled":                m.extraEnabled[nodeTari],
+		"litecoin_enabled":            m.extraEnabled[nodeLitecoin],
+		"dogecoin_enabled":            m.extraEnabled[nodeDogecoin],
+		"bitcoincash_enabled":         m.extraEnabled[nodeBitcoinCash],
+		"zcash_enabled":               m.extraEnabled[nodeZcash],
+		"tower_labels":                m.settings.TowerLabels,
+		"default_currency":            m.settings.DefaultCurrency,
+		"overridden":                  m.settingsOverridden,
+		"can_configure":               canConfigure,
 	}, nil
 }
 
@@ -350,18 +390,7 @@ func passwordlessSettingsHostAllowed(authority string) bool {
 	if !validSettingsDNSName(host) {
 		return false
 	}
-	if host == "localhost" || !strings.Contains(host, ".") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".home.arpa") {
-		return true
-	}
-	if len(host) != 62 || !strings.HasSuffix(host, ".onion") {
-		return false
-	}
-	for _, character := range strings.TrimSuffix(host, ".onion") {
-		if (character < 'a' || character > 'z') && (character < '2' || character > '7') {
-			return false
-		}
-	}
-	return true
+	return host == "localhost" || !strings.Contains(host, ".") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".home.arpa")
 }
 
 func (a *app) rejectUnsafeSettingsHost(w http.ResponseWriter, r *http.Request) bool {

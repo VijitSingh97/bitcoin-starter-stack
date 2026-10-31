@@ -28,9 +28,26 @@ func priceCacheForTest(now time.Time, handler roundTripFunc) *PriceCache {
 	return cache
 }
 
+func allAssetPriceResponse(t *testing.T, updatedAt int64) string {
+	t.Helper()
+	payload := make(map[string]map[string]any, len(priceAssets))
+	for assetIndex, asset := range priceAssets {
+		quote := map[string]any{"last_updated_at": updatedAt}
+		for currencyIndex, currency := range priceCurrencies {
+			quote[currency] = float64((assetIndex + 1) * (currencyIndex + 1))
+		}
+		payload[asset] = quote
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestNewPriceCacheUsesFixedCoinGeckoURLAndTorClient(t *testing.T) {
 	cache := NewPriceCache()
-	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
+	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,tari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
 		t.Fatalf("provider URL = %q", cache.url)
 	}
 	if cache.client == nil || cache.client.Transport == nil || cache.client.Timeout != 30*time.Second {
@@ -85,6 +102,22 @@ func TestPriceCacheRefreshAndSnapshot(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("Snapshot made provider requests: calls = %d", calls.Load())
+	}
+}
+
+func TestPriceCachePublishesEveryConfiguredAsset(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, allAssetPriceResponse(t, now.Unix())), nil
+	})
+	if err := cache.refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range priceAssets {
+		snapshot := cache.SnapshotAsset(asset)
+		if snapshot["available"] != true || snapshot["stale"] != false || len(snapshot["prices"].(map[string]float64)) != len(priceCurrencies) {
+			t.Fatalf("%s snapshot = %#v", asset, snapshot)
+		}
 	}
 }
 

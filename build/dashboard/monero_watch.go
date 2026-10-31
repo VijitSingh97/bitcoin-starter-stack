@@ -346,14 +346,16 @@ func (s *MoneroWatchStore) ImportKeyImages(ctx context.Context, id string, uploa
 	return nil
 }
 
-func (s *MoneroWatchStore) run(ctx context.Context) {
+func (s *MoneroWatchStore) run(ctx context.Context, active func() bool) {
 	if !s.enabled || s.Err() != nil {
 		return
 	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for _, wallet := range s.List() {
-		s.Queue(wallet.ID)
+	if active() {
+		for _, wallet := range s.List() {
+			s.Queue(wallet.ID)
+		}
 	}
 	index := 0
 	for {
@@ -361,10 +363,15 @@ func (s *MoneroWatchStore) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id := <-s.queue:
-			if wallet, ok := s.walletByID(id); ok {
-				s.refresh(ctx, wallet)
+			if active() {
+				if wallet, ok := s.walletByID(id); ok {
+					s.refresh(ctx, wallet)
+				}
 			}
 		case <-ticker.C:
+			if !active() {
+				continue
+			}
 			wallets := s.List()
 			if len(wallets) > 0 {
 				if index >= len(wallets) {

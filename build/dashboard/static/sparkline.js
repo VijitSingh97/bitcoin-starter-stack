@@ -37,12 +37,12 @@ if (typeof document !== "undefined") {
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.strokeStyle = accent();
+    ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue("--accent").trim() || accent();
     ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.stroke();
     const last = pts[pts.length - 1]; // dot on the latest value
-    ctx.fillStyle = accent();
+    ctx.fillStyle = getComputedStyle(canvas).getPropertyValue("--accent").trim() || accent();
     ctx.beginPath();
     ctx.arc(last.x, last.y, 2, 0, Math.PI * 2);
     ctx.fill();
@@ -51,14 +51,18 @@ if (typeof document !== "undefined") {
   const charts = [
     { id: "spark-fee", url: "/api/fees", key: "fee" },
     { id: "spark-monero-fee", url: "/api/monero/fees", key: "fee_xmr_per_kb" },
+    ...["tari","litecoin","dogecoin","bitcoincash","zcash"].map(node=>({id:`spark-${node}-fee`,url:`/api/${node}/fees`,key:"fee",node})),
   ];
   const cache = new Map();
+  const fetched=new Set();
   const render = () => {
     for (const chart of charts) draw(document.getElementById(chart.id), cache.get(chart.id) || []);
   };
 
   async function refresh(chart) {
     if (!document.getElementById(chart.id)) return;
+    if(chart.node && document.querySelector(`[data-select-node="${chart.node}"]`)?.hidden) return;
+    fetched.add(chart.id);
     try {
       const res = await fetch(chart.url);
       if (!res.ok) return;
@@ -71,6 +75,7 @@ if (typeof document !== "undefined") {
 
   // redraw into the fresh canvas after refresh.js swaps #live, without refetching
   window.addEventListener("live-updated", render);
+  window.addEventListener("node-status-updated", event=>{for(const chart of charts) if(chart.node===event.detail?.node && !fetched.has(chart.id)) refresh(chart);render();});
   for (const chart of charts) refresh(chart);
   setInterval(() => charts.forEach(refresh), 60000);
 }

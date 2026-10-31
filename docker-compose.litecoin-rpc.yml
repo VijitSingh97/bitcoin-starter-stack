@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${LITECOIN_RPC_BIND_IP:?set litecoin.rpc_bind_ip in config.json}:${LITECOIN_RPC_PORT:-9332}:9332"

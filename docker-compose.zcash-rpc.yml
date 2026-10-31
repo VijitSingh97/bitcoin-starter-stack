@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${ZCASH_RPC_BIND_IP:?set zcash.rpc_bind_ip in config.json}:${ZCASH_RPC_PORT:-8232}:18232"

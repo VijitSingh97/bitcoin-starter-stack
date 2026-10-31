@@ -3,7 +3,7 @@
 | Guide | What's inside |
 |---|---|
 | [Getting Started](getting-started.md) | Prerequisites, install, first start, and what to expect during the initial sync. |
-| [Nodes and roadmap](nodes.md) | Bitcoin/Monero setup, Pithead remote-node access, and other chain candidates. |
+| [Supported nodes](nodes.md) | All seven chains, disk and resource budgets, LAN endpoints, and Pithead remote-node access. |
 | [Hardware Requirements](hardware.md) | CPU, RAM, and disk sizing — with real numbers from a reference deployment. |
 | [Configuration](configuration.md) | Every `config.json` key, applying changes, and reusing an existing node's data. |
 | [Watch-only](watch-only.md) | Show `xpub`/descriptor balances on the dashboard, read off your own node. |

@@ -1,4 +1,5 @@
-const NODES = new Set(["bitcoin", "monero"]);
+export const NODE_IDS = ["bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
+const NODES = new Set(NODE_IDS);
 
 export function normalizeNode(node) {
   return NODES.has(node) ? node : "";
@@ -92,6 +93,40 @@ export function moneroView(data) {
   };
 }
 
+export function genericNodeView(data, label = "Node") {
+  if (!data || data.enabled === false) return { state: "Not configured", badge: "Disabled", details: false };
+  if (data.available !== true) return { state: `Connecting to ${label}...`, badge: "Connecting", details: false };
+  const height = Math.max(0, Math.floor(Number(data.height) || 0));
+  const target = Math.max(height, Math.floor(Number(data.target_height) || 0));
+  const progress = Math.max(0, Math.min(100, Number(data.sync_percent) || 0));
+  const diskTotal = Number(data.disk_total_bytes);
+  const diskFree = Number(data.disk_free_bytes);
+  const diskAvailable = data.disk_available === true && Number.isFinite(diskTotal) && diskTotal > 0 && Number.isFinite(diskFree) && diskFree >= 0;
+  const incoming = Math.max(0, Math.floor(Number(data.incoming_connections) || 0));
+  const outgoing = Math.max(0, Math.floor(Number(data.outgoing_connections) || 0));
+  const connections = Math.max(0, Math.floor(Number(data.connections) || incoming + outgoing));
+  return {
+    state: data.synced ? "Synced" : `Synchronizing the ${label} blockchain...`,
+    badge: data.pruned_available === false ? "Pruning unknown" : data.pruned ? "Pruned" : "Full",
+    details: true,
+    version: String(data.version || "—"),
+    uptime: data.uptime_available ? formatUptime(data.uptime_seconds) : "—",
+    connections: data.connections_available === false ? "—" : incoming || outgoing ? `${incoming} in · ${outgoing} out` : String(connections),
+    blocks: `${height} / ${target}`,
+    progress,
+    size: data.database_size_available ? formatBytes(data.database_size_bytes) : "—",
+    diskCapacity: diskAvailable ? formatBytes(diskTotal) : "—",
+    diskUsage: diskAvailable ? `${Math.max(0, Math.min(100, (diskTotal - diskFree) / diskTotal * 100)).toFixed(2)}%` : "—",
+    diskFree: diskAvailable ? formatBytes(diskFree) : "—",
+    diskLow: diskAvailable && diskFree < 50 * 1024 ** 3,
+    mempool: data.mempool_txs_available ? `${Math.max(0, Math.floor(Number(data.mempool_txs) || 0))} tx${data.mempool_bytes_available ? ` · ${formatCompactBytes(data.mempool_bytes)}` : ""}` : "—",
+    lastBlock: data.latest_block_available ? `${Number(data.latest_block_age_seconds) < 60 ? "<1m" : formatUptime(data.latest_block_age_seconds)} ago` : "—",
+    rpcExposure: data.rpc_exposure_enabled ? `${String(data.rpc_endpoint || "—")} · LAN` : "Disabled",
+    nextBlock: height ? height + 1 : "",
+    updated: formatUpdated(data.updated_at),
+  };
+}
+
 export function applySelection(doc, node, focus = true) {
   const selected = normalizeNode(node);
   doc.body.dataset.node = selected;
@@ -106,7 +141,7 @@ export function applySelection(doc, node, focus = true) {
   if (!focus) return selected;
   const target = selected
     ? doc.querySelector(`[data-node-panel="${selected}"] [data-close-node]`)
-    : doc.querySelector("[data-select-node].node-choice-bitcoin");
+    : doc.querySelector("[data-select-node]:not([hidden])");
   target?.focus();
   return selected;
 }
@@ -204,6 +239,9 @@ if (typeof document !== "undefined") {
   }
 
   applySelection(document, "", false);
+  window.addEventListener("node-power-updated", (event) => {
+    if (event.detail?.id === "monero" && event.detail?.active === true) refreshMonero();
+  });
   refreshMonero();
   setInterval(refreshMonero, 30000);
 }

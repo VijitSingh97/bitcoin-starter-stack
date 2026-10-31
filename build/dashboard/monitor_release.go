@@ -44,6 +44,15 @@ func (m *Monitor) loadState() {
 		m.state.notifiedStack = state.NotifiedStack
 		applyPersistedNodeState(&m.state, state.Bitcoin)
 		applyPersistedNodeState(&m.moneroState, state.Monero)
+		for id, saved := range state.Nodes {
+			if normalizeNodeID(id) == "" || id == nodeBitcoin || id == nodeMonero {
+				continue
+			}
+			if m.extraStates[id] == nil {
+				m.extraStates[id] = &monitorState{}
+			}
+			applyPersistedNodeState(m.extraStates[id], saved)
+		}
 	}
 }
 
@@ -55,10 +64,15 @@ func (m *Monitor) saveState() {
 }
 
 func (m *Monitor) persistedState() persistedMonitorState {
+	nodes := make(map[string]persistedNodeState, len(m.extraStates))
+	for id, state := range m.extraStates {
+		nodes[id] = persistedNodeFromState(*state)
+	}
 	return persistedMonitorState{
 		NotifiedStack: m.state.notifiedStack,
 		Bitcoin:       persistedNodeFromState(m.state),
 		Monero:        persistedNodeFromState(m.moneroState),
+		Nodes:         nodes,
 	}
 }
 

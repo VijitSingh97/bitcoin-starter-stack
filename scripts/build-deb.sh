@@ -26,16 +26,21 @@ install -m 755 scripts/bitcoin-stack "$package/usr/bin/bitcoin-stack"
 install -m 755 stack configure.sh "$root/"
 install -m 755 scripts/node-resource-profile "$root/node-resource-profile"
 install -m 755 scripts/node-port-control "$root/node-port-control"
+install -m 755 scripts/node-control "$root/node-control"
 install -d "$package/usr/lib/systemd/system"
 install -m 644 packaging/systemd/bitcoin-starter-stack-resource-profile.service packaging/systemd/bitcoin-starter-stack-resource-profile.timer \
   packaging/systemd/bitcoin-starter-stack-port-control.service packaging/systemd/bitcoin-starter-stack-port-control.timer \
+  packaging/systemd/bitcoin-starter-stack-node-control.service packaging/systemd/bitcoin-starter-stack-node-control.timer \
   "$package/usr/lib/systemd/system/"
-install -m 644 docker-compose.yml docker-compose.rpc.yml docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml VERSION .dockerignore "$root/"
+install -m 644 docker-compose.yml docker-compose.rpc.yml docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml \
+  docker-compose.tari-grpc.yml docker-compose.litecoin-rpc.yml docker-compose.dogecoin-rpc.yml docker-compose.bitcoincash-rpc.yml \
+  docker-compose.zcash-rpc.yml VERSION .dockerignore "$root/"
 printf '%s\n' "$version" >"$root/VERSION"
 cp -R build "$root/"
 rm -rf "$root/build/dashboard/tests" "$root/build/dashboard/parity" \
   "$root/build/dashboard/.pytest_cache" "$root/build/dashboard/__pycache__"
 find "$root/build/dashboard" -name '*_test.go' -delete
+find "$root/build/dashboard" -name '*.proto' -delete
 find "$root/build/dashboard/static" -name '*.test.mjs' -delete
 find "$root/build/dashboard" -name '*.pyc' -delete
 rm -f "$root/build/dashboard/.coverage" "$root/build/dashboard/.coveragerc" \

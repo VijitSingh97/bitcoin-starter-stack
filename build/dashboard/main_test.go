@@ -374,9 +374,9 @@ func TestMetricsAndReadAPIs(t *testing.T) {
 		t.Fatalf("fees = %d %q", fees.Code, fees.Body.String())
 	}
 	a.prices.mu.Lock()
-	a.prices.prices = map[string]float64{"usd": 70000}
-	a.prices.updatedAt = 1_800_000_000
-	a.prices.lastFetchFailed = false
+	a.prices.assetPrices["bitcoin"] = map[string]float64{"usd": 70000}
+	a.prices.assetUpdatedAt["bitcoin"] = 1_800_000_000
+	a.prices.assetFailed["bitcoin"] = false
 	a.prices.mu.Unlock()
 	a.prices.now = func() time.Time { return time.Unix(1_800_000_000, 0) }
 	priceCalls := 0
@@ -462,8 +462,10 @@ func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
 	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "Not configured") || strings.Contains(index.Body.String(), "Bitcoin Node Initializing") || strings.Contains(index.Body.String(), "/static/watch.js") {
 		t.Fatalf("disabled index = %d %q", index.Code, index.Body.String())
 	}
-	if !strings.Contains(index.Body.String(), `id="monero-panel"`) || !strings.Contains(index.Body.String(), `/static/nodes.js`) || !strings.Contains(index.Body.String(), `/static/prices.js`) {
-		t.Fatal("Bitcoin-disabled page omitted the independent Monero panel")
+	for _, marker := range []string{`id="monero-panel"`, `id="tari-panel"`, `id="litecoin-panel"`, `id="dogecoin-panel"`, `id="bitcoincash-panel"`, `id="zcash-panel"`, `id="settings-dialog"`, `/static/nodes.js`, `/static/prices.js`, `/static/settings.js`} {
+		if !strings.Contains(index.Body.String(), marker) {
+			t.Fatalf("Bitcoin-disabled page omitted shared dashboard marker %q", marker)
+		}
 	}
 	metrics := request(t, handler, http.MethodGet, "/metrics", "")
 	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "bitcoin_node_enabled 0") || !strings.Contains(metrics.Body.String(), "bitcoin_node_up 0") {
@@ -494,6 +496,19 @@ func TestBitcoinDisabledDoesNotReachRPCOrStartBitcoinWorkers(t *testing.T) {
 	}
 	if fixture.count() != 0 {
 		t.Fatalf("disabled Bitcoin made %d RPC requests", fixture.count())
+	}
+}
+
+func TestBitcoinUnavailablePageKeepsSharedPanelsAndSettings(t *testing.T) {
+	_, handler := testApp(t, &rpcFixture{invalid: true}, "")
+	response := request(t, handler, http.MethodGet, "/", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Bitcoin Node Initializing") {
+		t.Fatalf("unavailable Bitcoin page = %d %q", response.Code, response.Body.String())
+	}
+	for _, marker := range []string{`id="monero-panel"`, `id="tari-panel"`, `id="litecoin-panel"`, `id="dogecoin-panel"`, `id="bitcoincash-panel"`, `id="zcash-panel"`, `id="settings-dialog"`} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Fatalf("unavailable Bitcoin page omitted shared dashboard marker %q", marker)
+		}
 	}
 }
 

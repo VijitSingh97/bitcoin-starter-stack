@@ -46,23 +46,39 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/docker-compose.rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.monero-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.tari-grpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.litecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.dogecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.bitcoincash-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.zcash-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
   ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/tari/config.toml \
+  ./usr/lib/bitcoin-starter-stack/build/litecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/dogecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/zakurad.toml \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
   ./usr/lib/bitcoin-starter-stack/node-resource-profile \
   ./usr/lib/bitcoin-starter-stack/node-port-control \
+  ./usr/lib/bitcoin-starter-stack/node-control \
   ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \
   ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.timer \
   ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.service \
   ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.timer \
   ./usr/share/doc/bitcoin-starter-stack/README.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/nodes.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/privacy.md; do
   grep -q " $required$" "$tmp/contents" || fail "package is missing $required"
 done
-if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
+if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|\.proto$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
   fail "package contains development-only files"
 fi
 if grep -Eq ' \./(etc|var)/' "$tmp/contents"; then

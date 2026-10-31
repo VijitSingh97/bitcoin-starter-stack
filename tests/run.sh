@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if command -v shellcheck >/dev/null; then
-  shellcheck configure.sh stack build/tor/entrypoint.sh build/monero/*.sh scripts/*.sh tests/*.sh
+  shellcheck configure.sh stack build/*/*.sh scripts/*.sh scripts/node-control scripts/node-port-control scripts/node-resource-profile tests/*.sh
   echo "PASS: shellcheck"
 else
   echo "SKIP: shellcheck (not installed)"
@@ -16,6 +16,8 @@ tests/test_release.sh
 tests/test_package.sh
 tests/test_resource_profile.sh
 tests/test_port_control.sh
+tests/test_node_control.sh
+tests/test_zcash.sh
 tests/test_apt.sh
 tests/test_compose.sh
 tests/test_e2e.sh

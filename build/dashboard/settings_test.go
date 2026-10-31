@@ -37,10 +37,9 @@ func settingsRequestHost(handler http.Handler, method, password, body string, cs
 }
 
 func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
-	onion := strings.Repeat("a", 56) + ".onion"
 	for _, host := range []string{
 		"localhost", "localhost:80", "mini-1", "mini-1.local", "mini-1.local:80", "node.home.arpa",
-		"127.0.0.1", "192.168.1.117", "192.168.1.117:80", "10.0.0.2", "172.16.0.2", "[::1]:80", "[fd00::1]", onion,
+		"127.0.0.1", "192.168.1.117", "192.168.1.117:80", "10.0.0.2", "172.16.0.2", "[::1]:80", "[fd00::1]",
 	} {
 		if !passwordlessSettingsHostAllowed(host) {
 			t.Errorf("host %q rejected", host)
@@ -51,10 +50,33 @@ func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
 		"134744072", "0x08080808", "01002004010",
 		"user@localhost", "localhost/path", "localhost?query", "localhost?", "localhost#", "localhost:", "localhost:65536",
 		"-node.local", "node..local", "short.onion", "[::1", "[::1]:",
+		strings.Repeat("a", 56) + ".onion",
 	} {
 		if passwordlessSettingsHostAllowed(host) {
 			t.Errorf("host %q allowed", host)
 		}
+	}
+}
+
+func TestSettingsOnionHostRequiresConfiguredPassword(t *testing.T) {
+	onion := strings.Repeat("a", 56) + ".onion"
+	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
+	passwordless, passwordlessHandler := testApp(t, &rpcFixture{}, "")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		got := settingsRequestHost(passwordlessHandler, method, "", body, true, onion)
+		if got.Code != http.StatusForbidden {
+			t.Fatalf("passwordless onion %s = %d: %s", method, got.Code, got.Body.String())
+		}
+	}
+	if passwordless.monitor.settingsOverridden {
+		t.Fatal("rejected onion request changed settings")
+	}
+	_, protectedHandler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	if got := settingsRequestHost(protectedHandler, http.MethodGet, "dashboard-secret", "", false, onion); got.Code != http.StatusOK {
+		t.Fatalf("authenticated onion GET = %d: %s", got.Code, got.Body.String())
+	}
+	if got := settingsRequestHost(protectedHandler, http.MethodPost, "dashboard-secret", body, true, onion); got.Code != http.StatusOK {
+		t.Fatalf("authenticated onion POST = %d: %s", got.Code, got.Body.String())
 	}
 }
 

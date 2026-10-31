@@ -1,3 +1,7 @@
+const extraNodes = ["tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
+const allNodes = ["bitcoin", "monero", ...extraNodes];
+const allPortIDs = ["bitcoin_rpc", "monero_rpc", "monero_zmq", "tari_grpc", "litecoin_rpc", "dogecoin_rpc", "bitcoincash_rpc", "zcash_rpc"];
+
 export function notificationPayload(values) {
   const payload = {
     telegram_enabled: !!values.telegram_enabled,
@@ -8,6 +12,7 @@ export function notificationPayload(values) {
     tower_labels: !!values.tower_labels,
     default_currency: normalizeDefaultCurrency(values.default_currency),
   };
+  for (const node of extraNodes) payload[`alert_new_block_${node}`] = !!values[`alert_new_block_${node}`];
   const token = String(values.telegram_bot_token || "").trim();
   const url = String(values.healthchecks_url || "").trim();
   if (payload.telegram_enabled && token) payload.telegram_bot_token = token;
@@ -21,6 +26,7 @@ export function configurationAccess(data) {
 
 export function notificationChanged(saved, payload) {
   const fields = ["telegram_enabled", "telegram_chat_id", "healthchecks_enabled", "alert_new_block_monero", "tower_labels"];
+  if (extraNodes.some(node => payload[`alert_new_block_${node}`] !== !!saved?.[`alert_new_block_${node}`])) return true;
   if (fields.some((field) => payload[field] !== saved?.[field])) return true;
   if (payload.default_currency !== normalizeDefaultCurrency(saved?.default_currency)) return true;
   if (payload.alert_new_block !== (saved?.alert_new_block_bitcoin ?? saved?.alert_new_block)) return true;
@@ -29,11 +35,11 @@ export function notificationChanged(saved, payload) {
 }
 
 export function configuredNodeVisibility(data) {
-  return { bitcoin: data?.bitcoin_enabled === true, monero: data?.monero_enabled === true };
+  return Object.fromEntries(allNodes.map(node => [node, data?.[`${node}_enabled`] === true]));
 }
 
 export function portControlModel(data) {
-  const portIDs = ["bitcoin_rpc", "monero_rpc", "monero_zmq"];
+  const portIDs = allPortIDs;
   const ports = {};
   for (const port of Array.isArray(data?.ports) ? data.ports : []) {
     if (!portIDs.includes(port?.id)) continue;
@@ -62,7 +68,7 @@ export function portControlModel(data) {
 
 export function portChanges(ports, draft) {
   const changes = [];
-  for (const id of ["bitcoin_rpc", "monero_rpc", "monero_zmq"]) {
+  for (const id of allPortIDs) {
     const before = ports?.[id];
     const after = draft?.[id];
     if (!before || !after) continue;
@@ -88,7 +94,7 @@ export function portCollision(changes, draft, ports) {
 }
 
 export function portStatusMessage(view) {
-  const labels = { bitcoin_rpc: "Bitcoin RPC", monero_rpc: "Monero RPC", monero_zmq: "Monero ZMQ" };
+  const labels = { bitcoin_rpc: "Bitcoin RPC", monero_rpc: "Monero RPC", monero_zmq: "Monero ZMQ", tari_grpc: "Tari gRPC", litecoin_rpc: "Litecoin RPC", dogecoin_rpc: "Dogecoin RPC", bitcoincash_rpc: "Bitcoin Cash RPC", zcash_rpc: "Zcash RPC" };
   if (view?.error_code === "port_in_use" && labels[view.port]) return `Selected port for ${labels[view.port]} is already in use.`;
   return String(view?.message || "");
 }
@@ -142,6 +148,7 @@ if (typeof document !== "undefined") {
   const healthchecksEnabled = byId("healthchecks-enabled");
   const bitcoinNewBlock = byId("bitcoin-new-block");
   const moneroNewBlock = byId("monero-new-block");
+  const extraNewBlock = Object.fromEntries(extraNodes.map(node => [node, byId(`${node}-new-block`)]));
   const towerLabels = byId("tower-labels");
   const defaultCurrency = byId("default-currency");
   const save = byId("save");
@@ -163,6 +170,7 @@ if (typeof document !== "undefined") {
     bitcoin_rpc: byId("port-bitcoin-rpc"),
     monero_rpc: byId("port-monero-rpc"),
     monero_zmq: byId("port-monero-zmq"),
+    ...Object.fromEntries(extraNodes.map(node => [`${node}_${node === "tari" ? "grpc" : "rpc"}`, byId(`port-${node}-${node === "tari" ? "grpc" : "rpc"}`)])),
   };
 
   const portDraft = () => Object.fromEntries(Object.entries(portRows).map(([id, row]) => [id, {
@@ -252,9 +260,9 @@ if (typeof document !== "undefined") {
     bitcoinNewBlock.checked = !!(data.alert_new_block_bitcoin ?? data.alert_new_block);
     moneroNewBlock.checked = !!data.alert_new_block_monero;
     const nodes = configuredNodeVisibility(data);
-    byId("bitcoin-alerts").hidden = !nodes.bitcoin;
-    byId("monero-alerts").hidden = !nodes.monero;
-    byId("node-alerts").hidden = !nodes.bitcoin && !nodes.monero;
+    for (const node of allNodes) byId(`${node}-alerts`).hidden = !nodes[node];
+    for (const [node,input] of Object.entries(extraNewBlock)) { input.checked = !!data[`alert_new_block_${node}`]; input.disabled = !allowed; }
+    byId("node-alerts").hidden = !Object.values(nodes).some(Boolean);
     renderPortControl(data.port_control);
     towerLabels.checked = !!data.tower_labels;
     defaultCurrency.value = normalizeDefaultCurrency(data.default_currency);
@@ -327,6 +335,7 @@ if (typeof document !== "undefined") {
     telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = defaultCurrency.disabled = true;
     updateInputs();
     updatePortPlan();
+    for (const input of Object.values(extraNewBlock)) input.disabled = true;
     status.textContent = "Loading…";
     try {
       render(await request());
@@ -351,6 +360,7 @@ if (typeof document !== "undefined") {
     healthchecks_url: url.value,
     alert_new_block_bitcoin: bitcoinNewBlock.checked,
     alert_new_block_monero: moneroNewBlock.checked,
+    ...Object.fromEntries(Object.entries(extraNewBlock).map(([node,input]) => [`alert_new_block_${node}`,input.checked])),
     tower_labels: towerLabels.checked,
     default_currency: defaultCurrency.value,
   });

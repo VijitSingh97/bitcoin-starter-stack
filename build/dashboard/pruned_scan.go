@@ -69,6 +69,12 @@ func (s *prunedScanner) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case entry := <-s.jobs:
+			if !s.app.nodeWorkerRunnable(nodeBitcoin, true) {
+				s.mu.Lock()
+				delete(s.queued, watchKeyID(entry.Key))
+				s.mu.Unlock()
+				continue
+			}
 			triggered := []WatchEntry{entry}
 			s.mu.Lock()
 			s.running = true
@@ -94,7 +100,7 @@ func (s *prunedScanner) run(ctx context.Context) {
 }
 
 func (s *prunedScanner) enqueue(entry WatchEntry, force bool) bool {
-	if !s.app.watch.Contains(entry) || s.app.watch.ScanErr() != nil {
+	if !s.app.nodeWorkerRunnable(nodeBitcoin, true) || !s.app.watch.Contains(entry) || s.app.watch.ScanErr() != nil {
 		return false
 	}
 	identity := watchKeyID(entry.Key)
@@ -128,7 +134,7 @@ func scanRetryDelay(failures int) time.Duration {
 }
 
 func (s *prunedScanner) refresh(entries []WatchEntry, chain blockchainInfo) {
-	if !chain.Pruned || chain.InitialBlockDownload || chain.BestBlockHash == "" || s.app.watch.ScanErr() != nil {
+	if !s.app.nodeWorkerRunnable(nodeBitcoin, true) || !chain.Pruned || chain.InitialBlockDownload || chain.BestBlockHash == "" || s.app.watch.ScanErr() != nil {
 		return
 	}
 	for _, entry := range entries {
@@ -145,6 +151,9 @@ func (s *prunedScanner) refresh(entries []WatchEntry, chain blockchainInfo) {
 }
 
 func (s *prunedScanner) scanBatch(parent context.Context) {
+	if !s.app.nodeWorkerRunnable(nodeBitcoin, true) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(parent, prunedScanTimeout)
 	defer cancel()
 	entries, pending := s.app.watch.snapshot()
@@ -271,6 +280,9 @@ func (s *prunedScanner) scanBatch(parent context.Context) {
 }
 
 func (s *prunedScanner) rpcCall(ctx context.Context, method string, params []any, out any) error {
+	if !s.app.nodeWorkerRunnable(nodeBitcoin, true) {
+		return context.Canceled
+	}
 	rpc := *s.app.rpc
 	client := *s.app.rpc.client
 	client.Timeout = 0

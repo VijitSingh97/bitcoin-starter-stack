@@ -17,6 +17,7 @@ docs/releasing.md export-ignore
 build/dashboard/tests export-ignore
 build/dashboard/parity export-ignore
 build/dashboard/*_test.go export-ignore
+build/dashboard/*.proto export-ignore
 build/dashboard/static/*.test.mjs export-ignore
 build/dashboard/package.json export-ignore
 AGENTS.md export-ignore

@@ -1,0 +1,167 @@
+#!/bin/sh
+set -eu
+stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+state_root=${BITCOIN_STACK_STATE_DIR:-$stack_root}
+config_root=${BITCOIN_STACK_CONFIG_DIR:-$state_root}
+env_file=$state_root/.env
+config_file=$config_root/config.json
+docker_bin=${DOCKER_BIN:-docker}
+now=${NODE_CONTROL_NOW_EPOCH:-$(date +%s)}
+[ -r "$env_file" ] || exit 0
+mkdir -p "$state_root/node-control"
+chmod 700 "$state_root/node-control"
+exec 9>"$state_root/node-control/.lock"
+flock -n 9 || exit 0
+dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
+[ -n "$dashboard_id" ] || exit 0
+config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
+case ",$config_files," in *",$stack_root/docker-compose.yml,"*) ;; *) exit 0 ;; esac
+dashboard_exec() { "$docker_bin" exec -u 1000 dashboard "$@"; }
+write_status() {
+  jq -nc --arg id "$1" --arg node "$2" --argjson active "$3" --arg state "$4" --arg message "$5" --arg error_code "${6:-}" \
+    '{id:$id,node:$node,active:$active,state:$state,message:$message} | if $error_code=="" then . else .error_code=$error_code end' |
+    $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
+}
+clear_request() { dashboard_exec rm -f /state/node-control.processing >/dev/null 2>&1 || true; }
+password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$env_file" | tail -n 1)
+if [ -z "$password" ]; then
+  dashboard_exec rm -f /state/node-control.capability >/dev/null 2>&1 || true
+  exit 0
+fi
+dashboard_exec sh -c 'umask 077; printf "ready\n" > /state/.node-control.capability.tmp; mv /state/.node-control.capability.tmp /state/node-control.capability' >/dev/null
+if ! dashboard_exec test -f /state/node-control.processing >/dev/null 2>&1; then
+  dashboard_exec test -f /state/node-control.request >/dev/null 2>&1 || exit 0
+  dashboard_exec mv /state/node-control.request /state/node-control.processing >/dev/null 2>&1 || exit 0
+fi
+size=$(dashboard_exec sh -c 'wc -c < /state/node-control.processing' 2>/dev/null | tr -d ' ' || true)
+case "$size" in '' | *[!0-9]*) size=2049 ;; esac
+if [ "$size" -gt 2048 ]; then
+  write_status "" "" false rejected "Invalid request." invalid_request
+  clear_request
+  exit 0
+fi
+request=$(dashboard_exec cat /state/node-control.processing 2>/dev/null || true)
+if ! printf '%s' "$request" | jq -e --argjson now "$now" '
+  type=="object" and keys==["active","confirmation","id","node","requested_at"] and
+  (.id|type=="string" and test("^[0-9a-f]{32}$")) and
+  (.node=="bitcoin" or .node=="monero" or .node=="tari" or .node=="litecoin" or .node=="dogecoin" or .node=="bitcoincash" or .node=="zcash") and
+  (.active|type=="boolean") and (.confirmation|type=="string") and
+  (if .active then .confirmation=="" else .confirmation=="deactivate" end) and
+  (.requested_at|type=="number" and floor==. and . >= $now-300 and . <= $now+30)
+' >/dev/null 2>&1; then
+  write_status "" "" false rejected "Invalid request." invalid_request
+  clear_request
+  exit 0
+fi
+id=$(printf '%s' "$request" | jq -r .id)
+node=$(printf '%s' "$request" | jq -r .node)
+active=$(printf '%s' "$request" | jq -r .active)
+seen_file=$state_root/node-control/seen
+if [ -r "$seen_file" ] && grep -Fxq "$id" "$seen_file"; then
+  write_status "$id" "$node" "$active" rejected "Request already processed." replayed
+  clear_request
+  exit 0
+fi
+remember_seen() {
+  printf '%s\n' "$id" >>"$seen_file"
+  seen_tmp=$(mktemp "$state_root/node-control/.seen.XXXXXX")
+  tail -n 256 "$seen_file" >"$seen_tmp"
+  chmod 600 "$seen_tmp"
+  mv "$seen_tmp" "$seen_file"
+}
+mkdir -p "$config_root"
+exec 8>"$state_root/.config.lock"
+flock 8
+current='{}'
+[ -f "$config_file" ] && current=$(cat "$config_file")
+if [ "$(printf '%s' "$current" | jq -r --arg node "$node" '.[$node].enabled // (if $node=="bitcoin" then true else false end)')" != true ]; then
+  write_status "$id" "$node" "$active" rejected "Node is not configured." node_not_configured
+  remember_seen
+  clear_request
+  exit 0
+fi
+old_active=$(printf '%s' "$current" | jq -r --arg node "$node" 'if (.[$node] // {} | has("active")) then .[$node].active else true end')
+if [ "$old_active" = "$active" ]; then
+  write_status "$id" "$node" "$active" rejected "Node is already in that state." unchanged
+  remember_seen
+  clear_request
+  exit 0
+fi
+next=$(mktemp "$config_root/.config.node-control.XXXXXX")
+printf '%s' "$current" | jq --arg node "$node" --argjson active "$active" '.[$node].active=$active' >"$next"
+validate=$(mktemp -d "$state_root/node-control/.validate.XXXXXX")
+cp "$next" "$validate/config.json"
+if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate" BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+  rm -rf "$next" "$validate"
+  write_status "$id" "$node" "$active" rejected "Node state is invalid." validation_failed
+  remember_seen
+  clear_request
+  exit 0
+fi
+rm -rf "$validate"
+backup=$(mktemp "$state_root/node-control/.config.backup.XXXXXX")
+printf '%s' "$current" >"$backup"
+chmod 600 "$next" "$backup"
+mv "$next" "$config_file"
+restore_services() {
+  if [ "$old_active" = true ]; then
+    if [ "$node" = monero ]; then
+      "$stack_root/stack" up monero monero-wallet >/dev/null 2>&1
+    else
+      "$stack_root/stack" up "$node" >/dev/null 2>&1
+    fi
+  elif [ "$node" = monero ]; then
+    "$stack_root/stack" stop monero-wallet monero >/dev/null 2>&1
+  else
+    "$stack_root/stack" stop "$node" >/dev/null 2>&1
+  fi
+}
+rollback() {
+  attempted_services=$1
+  rollback_failed=0
+  mv "$backup" "$config_file" || rollback_failed=1
+  if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+    rollback_failed=1
+  fi
+  if [ "$attempted_services" = 1 ] && ! restore_services; then
+    rollback_failed=1
+  fi
+  if [ "$rollback_failed" = 1 ]; then
+    write_status "$id" "$node" "$active" failed "Node state failed and its prior state could not be fully restored." rollback_failed
+  else
+    write_status "$id" "$node" "$active" failed "Node state could not be applied; prior state restored." apply_failed
+  fi
+  remember_seen
+  clear_request
+  exit 0
+}
+if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null; then
+  rollback 0
+fi
+set -- "$node"
+[ "$node" = monero ] && set -- monero-wallet monero
+if [ "$active" = true ]; then action="up"; [ "$node" = monero ] && set -- monero monero-wallet
+else action="stop"; fi
+if ! "$stack_root/stack" $action "$@" >/dev/null 2>&1; then
+  rollback 1
+fi
+if ! runtime=$(jq -c '
+  {
+    bitcoin:{enabled:(if (.bitcoin//{}|has("enabled")) then .bitcoin.enabled else true end),active:(if (.bitcoin//{}|has("active")) then .bitcoin.active else true end)},
+    monero:{enabled:(.monero.enabled==true),active:(if (.monero//{}|has("active")) then .monero.active else true end)},
+    tari:{enabled:(.tari.enabled==true),active:(if (.tari//{}|has("active")) then .tari.active else true end)},
+    litecoin:{enabled:(.litecoin.enabled==true),active:(if (.litecoin//{}|has("active")) then .litecoin.active else true end)},
+    dogecoin:{enabled:(.dogecoin.enabled==true),active:(if (.dogecoin//{}|has("active")) then .dogecoin.active else true end)},
+    bitcoincash:{enabled:(.bitcoincash.enabled==true),active:(if (.bitcoincash//{}|has("active")) then .bitcoincash.active else true end)},
+    zcash:{enabled:(.zcash.enabled==true),active:(if (.zcash//{}|has("active")) then .zcash.active else true end)}
+  } | with_entries(select(.value.enabled) | .value=.value.active)
+' "$config_file"); then
+  rollback 1
+fi
+if ! printf '%s\n' "$runtime" | $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null; then
+  rollback 1
+fi
+rm -f "$backup"
+write_status "$id" "$node" "$active" applied "Node state applied."
+remember_seen
+clear_request

@@ -181,9 +181,9 @@ docker exec tor cat /var/lib/tor/dashboard_onion/hostname
 ```
 
 Open that `.onion` in [Tor Browser](https://www.torproject.org/). The address
-is unguessable (an ed25519 key), but treat it as a secret and **set
-`dashboard.password`** — `configure.sh` warns if you enable the onion without
-one. The onion adds no host port; the ordinary dashboard port keeps its
+is unguessable (an ed25519 key), but treat it as a secret. A non-empty
+`dashboard.password` is required; `configure.sh` rejects onion publication
+without one. The onion adds no host port; the ordinary dashboard port keeps its
 configured loopback or private-LAN bind.
 
 > NOTE: The onion keys live in the `tor_data` volume. Recreating it (e.g.

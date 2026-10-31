@@ -69,7 +69,7 @@ func TestRunMoneroFeesSamplesNormalPriorityAndStops(t *testing.T) {
 		called <- struct{}{}
 	}))
 	defer server.Close()
-	a := &app{cfg: config{moneroRPCURL: server.URL}, moneroFees: NewMoneroFeeHistory(t.TempDir())}
+	a := &app{cfg: config{moneroEnabled: true, moneroRPCURL: server.URL, stateDir: t.TempDir()}, moneroFees: NewMoneroFeeHistory(t.TempDir())}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
@@ -93,6 +93,21 @@ func TestRunMoneroFeesSamplesNormalPriorityAndStops(t *testing.T) {
 	}
 	if got := a.moneroFees.snapshot(); !reflect.DeepEqual(got, []float64{0.00008}) {
 		t.Fatalf("fee history = %#v", got)
+	}
+}
+
+func TestMoneroFeeWorkerPausesDuringNodeTransition(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"status": "OK", "fees": []uint64{20_000, 80_000, 320_000, 4_000_000}}})
+	}))
+	defer server.Close()
+	a := &app{cfg: config{moneroEnabled: true, moneroRPCURL: server.URL, stateDir: t.TempDir()}, moneroFees: NewMoneroFeeHistory(t.TempDir())}
+	writePendingNodeTransition(t, a, nodeMonero)
+	a.sampleMoneroFee(t.Context())
+	if calls != 0 || len(a.moneroFees.snapshot()) != 0 {
+		t.Fatalf("pending Monero transition sampled fees: calls=%d history=%v", calls, a.moneroFees.snapshot())
 	}
 }
 

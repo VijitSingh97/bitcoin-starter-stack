@@ -86,23 +86,28 @@ type pageData struct {
 }
 
 type app struct {
-	cfg           config
-	rpc           *rpcClient
-	template      *template.Template
-	static        http.Handler
-	feesMu        sync.RWMutex
-	fees          []float64
-	syncMu        sync.RWMutex
-	lastSync      *syncSnapshot
-	log           *log.Logger
-	watch         *WatchStore
-	monitor       *Monitor
-	prices        *PriceCache
-	scanner       *prunedScanner
-	moneroWatch   *MoneroWatchStore
-	moneroFees    *MoneroFeeHistory
-	portControlMu sync.Mutex
-	ctx           context.Context
+	cfg              config
+	rpc              *rpcClient
+	template         *template.Template
+	static           http.Handler
+	feesMu           sync.RWMutex
+	fees             []float64
+	additionalFeesMu sync.RWMutex
+	additionalFees   map[string][]float64
+	nodeHealthMu     sync.RWMutex
+	nodeHealth       map[string]nodeHealthSnapshot
+	syncMu           sync.RWMutex
+	lastSync         *syncSnapshot
+	log              *log.Logger
+	watch            *WatchStore
+	monitor          *Monitor
+	prices           *PriceCache
+	scanner          *prunedScanner
+	moneroWatch      *MoneroWatchStore
+	moneroFees       *MoneroFeeHistory
+	portControlMu    sync.Mutex
+	nodeControlMu    sync.Mutex
+	ctx              context.Context
 }
 
 type syncSnapshot struct {
@@ -117,7 +122,7 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	if err != nil {
 		return nil, err
 	}
-	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger}
+	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger, additionalFees: make(map[string][]float64), nodeHealth: make(map[string]nodeHealthSnapshot)}
 	a.watch = NewWatchStore(cfg.stateDir)
 	if a.watch.ScanErr() != nil {
 		a.log.Print("watch balance cache unavailable; pruned balance scans disabled until the cache is repaired and the dashboard restarts")
@@ -125,6 +130,8 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	a.scanner = newPrunedScanner(a)
 	a.monitor = NewMonitor(cfg.version, cfg.dataDir, cfg.stateDir)
 	a.monitor.configureNodes(!cfg.bitcoinDisabled, cfg.moneroEnabled, cfg.moneroDataDir)
+	a.monitor.configureAdditionalNodes(cfg.nodes)
+	a.monitor.transitioning = a.nodeTransitioning
 	if a.monitor.settingsErr != nil {
 		a.log.Print("notification settings unavailable; alerts disabled until the state file is repaired and the dashboard restarts")
 	}

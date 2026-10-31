@@ -27,6 +27,14 @@ export MONERO_RPC_PASSWORD=moneropassword
 export MONERO_WALLET_RPC_USER=walletuser
 export MONERO_WALLET_RPC_PASSWORD=walletpassword
 export MONERO_WALLET_PASSWORD=walletfilepassword
+export LITECOIN_RPC_USER=litecoinuser
+export LITECOIN_RPC_PASSWORD=litecoinpassword
+export DOGECOIN_RPC_USER=dogecoinuser
+export DOGECOIN_RPC_PASSWORD=dogecoinpassword
+export BITCOINCASH_RPC_USER=bitcoincashuser
+export BITCOINCASH_RPC_PASSWORD=bitcoincashpassword
+export ZCASH_RPC_USER=zcashuser
+export ZCASH_RPC_PASSWORD=zcashpassword
 export WATCH_WALLETS_B64=watchblob
 export DASHBOARD_BIND_IP=127.0.0.1
 
@@ -48,6 +56,9 @@ echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'BITCOIN_RPC_
 echo "$rendered" | grep -q 'NODE_NAME: bitcoin-node' || fail "NODE_NAME default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK: "0"' || fail "ALERT_NEW_BLOCK default not applied"
 echo "$rendered" | grep -q 'ALERT_NEW_BLOCK_MONERO: "0"' || fail "ALERT_NEW_BLOCK_MONERO default not applied"
+for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+  echo "$rendered" | grep -q "ALERT_NEW_BLOCK_${chain}: \"0\"" || fail "ALERT_NEW_BLOCK_${chain} default not applied"
+done
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
 grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"
@@ -107,6 +118,16 @@ grep -qF 'socat TCP4-LISTEN:18081,reuseaddr,fork,max-children=32 TCP4:172.29.0.3
   fail "Tor entrypoint does not relay opt-in Monero RPC"
 grep -qF 'socat TCP4-LISTEN:18083,reuseaddr,fork,max-children=32 TCP4:172.29.0.30:18083' build/tor/entrypoint.sh ||
   fail "Tor entrypoint does not relay opt-in Monero ZMQ"
+grep -qF 'socat TCP4-LISTEN:18142,reuseaddr,fork,max-children=32 TCP4:172.29.0.32:18142' build/tor/entrypoint.sh || fail "Tor entrypoint does not relay opt-in Tari gRPC"
+grep -qF 'socat TCP4-LISTEN:9332,reuseaddr,fork,max-children=32 TCP4:172.29.0.33:9332' build/tor/entrypoint.sh || fail "Tor entrypoint does not relay opt-in Litecoin RPC"
+grep -qF 'socat TCP4-LISTEN:22555,reuseaddr,fork,max-children=32 TCP4:172.29.0.34:22555' build/tor/entrypoint.sh || fail "Tor entrypoint does not relay opt-in Dogecoin RPC"
+grep -qF 'socat TCP4-LISTEN:18332,reuseaddr,fork,max-children=32 TCP4:172.29.0.35:8332' build/tor/entrypoint.sh || fail "Tor entrypoint does not relay opt-in Bitcoin Cash RPC"
+grep -qF 'socat TCP4-LISTEN:18232,reuseaddr,fork,max-children=32 TCP4:172.29.0.27:18232' build/tor/entrypoint.sh || fail "Tor entrypoint does not relay opt-in Zcash RPC through the authenticated dashboard proxy"
+grep -qF 'SOCKS4A:127.0.0.1:dnsseed.str4d.xyz:8233,socksport=9050' build/tor/entrypoint.sh || fail "Zcash bootstrap relay does not resolve its peer through Tor"
+# shellcheck disable=SC2016
+grep -qF 'if [ "${ZCASH_ENABLED:-0}" = "1" ] && [ "${ZCASH_ACTIVE:-1}" = "1" ]; then' build/tor/entrypoint.sh || fail "Zcash bootstrap relays run when the node is disabled or inactive"
+echo "$rendered" | sed -n '/^  tor:$/,/^  bitcoin:$/p' | grep -q 'ZCASH_ENABLED: "0"' || fail "Tor did not receive disabled Zcash state"
+echo "$rendered" | sed -n '/^  tor:$/,/^  bitcoin:$/p' | grep -q 'ZCASH_ACTIVE: "1"' || fail "Tor did not receive Zcash active state"
 
 lan_rendered=$(DASHBOARD_BIND_IP=192.168.1.117 docker compose --env-file /dev/null config)
 echo "$lan_rendered" | grep -q 'host_ip: 192.168.1.117' || fail "private-LAN dashboard bind was not rendered"
@@ -183,6 +204,30 @@ echo "$monero_lan" | grep -A5 'target: 18083' | grep -q 'published: "28083"' || 
 echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_RPC_PORT: "28081"' || fail "dashboard did not receive Monero RPC port"
 echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_ZMQ_PORT: "28083"' || fail "dashboard did not receive Monero ZMQ port"
 [ "$(echo "$monero_lan" | grep -c 'published:' || true)" = "3" ] || fail "Monero overrides published an unexpected port"
+
+all_nodes=$(COMPOSE_PROFILES=bitcoin,monero,tari,litecoin,dogecoin,bitcoincash,zcash TARI_ENABLED=1 LITECOIN_ENABLED=1 DOGECOIN_ENABLED=1 BITCOINCASH_ENABLED=1 ZCASH_ENABLED=1 docker compose --env-file /dev/null config)
+for service in tari litecoin dogecoin bitcoincash zcash; do
+  echo "$all_nodes" | grep -q "^  $service:" || fail "$service profile did not render"
+  echo "$all_nodes" | sed -n "/^  $service:$/,/^  [a-z]/p" | grep -q '127.0.0.1' || fail "$service DNS is not fail-closed"
+  echo "$all_nodes" | sed -n "/^  $service:$/,/^  [a-z]/p" | grep -q 'published:' && fail "$service publishes a port by default"
+done
+grep -q '^onlynet=onion$' build/litecoin/entrypoint.sh || fail "Litecoin is not Tor-only"
+grep -q '^onlynet=onion$' build/dogecoin/entrypoint.sh || fail "Dogecoin is not Tor-only"
+grep -q '^onlynet=onion$' build/bitcoincash/entrypoint.sh || fail "Bitcoin Cash is not Tor-only"
+echo "$all_nodes" | sed -n '/^  bitcoincash:$/,/^  dashboard:$/p' | grep -q '^    command:' && fail "Bitcoin Cash command bypasses its private runtime config"
+
+new_lan=$(TARI_GRPC_EXPOSE=1 TARI_GRPC_BIND_IP=192.168.1.10 TARI_GRPC_PORT=28142 \
+  LITECOIN_RPC_EXPOSE=1 LITECOIN_RPC_BIND_IP=192.168.1.10 LITECOIN_RPC_PORT=29332 \
+  DOGECOIN_RPC_EXPOSE=1 DOGECOIN_RPC_BIND_IP=192.168.1.10 DOGECOIN_RPC_PORT=32555 \
+  BITCOINCASH_RPC_EXPOSE=1 BITCOINCASH_RPC_BIND_IP=192.168.1.10 BITCOINCASH_RPC_PORT=28332 \
+  ZCASH_RPC_EXPOSE=1 ZCASH_RPC_BIND_IP=192.168.1.10 ZCASH_RPC_PORT=28232 \
+  COMPOSE_FILE=docker-compose.yml:docker-compose.tari-grpc.yml:docker-compose.litecoin-rpc.yml:docker-compose.dogecoin-rpc.yml:docker-compose.bitcoincash-rpc.yml:docker-compose.zcash-rpc.yml \
+  docker compose --env-file /dev/null config)
+for port in 28142 29332 32555 28332 28232; do
+  echo "$new_lan" | grep -q "published: \"$port\"" || fail "new node LAN listener $port was not rendered"
+done
+[ "$(echo "$new_lan" | grep -c 'published:' || true)" = 6 ] || fail "new node overrides published an unexpected port"
+echo "$new_lan" | sed -n '/^  zcash:$/,/^  [a-z]/p' | grep -q 'published:' && fail "Zcash native RPC is published instead of the dashboard proxy"
 
 # Without credentials the stack refuses to start
 if env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD docker compose --env-file /dev/null config >/dev/null 2>&1; then

@@ -132,6 +132,9 @@ func (a *app) fetchMoneroFeeEstimate(ctx context.Context) ([]uint64, error) {
 }
 
 func (a *app) sampleMoneroFee(ctx context.Context) {
+	if !a.nodeWorkerRunnable(nodeMonero, true) {
+		return
+	}
 	fees, err := a.fetchMoneroFeeEstimate(ctx)
 	if err != nil || a.moneroFees == nil {
 		return

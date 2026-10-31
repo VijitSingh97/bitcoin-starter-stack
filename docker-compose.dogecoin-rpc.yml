@@ -1,0 +1,4 @@
+services:
+  tor:
+    ports:
+      - "${DOGECOIN_RPC_BIND_IP:?set dogecoin.rpc_bind_ip in config.json}:${DOGECOIN_RPC_PORT:-22555}:22555"
