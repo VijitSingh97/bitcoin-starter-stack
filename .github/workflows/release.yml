@@ -21,7 +21,15 @@ jobs:
     needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      developer_bot_configured: ${{ steps.bot.outputs.configured }}
     steps:
+      - name: Check optional developer bot configuration
+        id: bot
+        env:
+          BOT_CONFIGURED: ${{ (vars.DEVELOPER_BOT_APP_ID != '' || secrets.DEVELOPER_BOT_APP_ID != '') && secrets.DEVELOPER_BOT_PRIVATE_KEY != '' }}
+        run: printf 'configured=%s\n' "$BOT_CONFIGURED" >>"$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify tag matches VERSION
@@ -94,11 +102,11 @@ jobs:
 
   homebrew:
     needs: [publish, images]
-    if: vars.DEVELOPER_BOT_APP_ID != ''
+    if: needs.publish.outputs.developer_bot_configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      BSS_DEVELOPER_BOT_APP_ID: ${{ vars.DEVELOPER_BOT_APP_ID }}
+      BSS_DEVELOPER_BOT_APP_ID: ${{ vars.DEVELOPER_BOT_APP_ID || secrets.DEVELOPER_BOT_APP_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,6 +117,7 @@ jobs:
         env:
           PRIVATE_KEY: ${{ secrets.DEVELOPER_BOT_PRIVATE_KEY }}
         run: |
+          : "${BSS_DEVELOPER_BOT_APP_ID:?set the DEVELOPER_BOT_APP_ID repository variable or secret}"
           : "${PRIVATE_KEY:?set the DEVELOPER_BOT_PRIVATE_KEY repository secret}"
           key="$RUNNER_TEMP/developer-bot.pem"
           printf '%s' "$PRIVATE_KEY" >"$key"
