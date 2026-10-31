@@ -23,6 +23,15 @@ export function powerRequest(node, confirmation = "") {
   return { active: !active, confirmation: active ? confirmation : "" };
 }
 
+export function chainFeesView(id, data) {
+  const standard = id === "zcash";
+  const values = data.fees_available && Array.isArray(data.fee_estimates) ? data.fee_estimates : [];
+  return {
+    label: standard ? "Standard fee (zats/action):" : data.fee_unit ? `Fee ${data.fee_unit} (1/3/6 blocks):` : "Fee estimates:",
+    value: values.length ? (standard ? String(values[0]) : values.join(" / ")) : "Unavailable",
+  };
+}
+
 function byId(id) { return document.getElementById(id); }
 
 function setText(id, value) {
@@ -97,8 +106,9 @@ function renderNode(id, data) {
   setText(`${id}-updated`, `Updated: ${view.updated}`);
   const feeSection=byId(`${id}-fee-section`);
   if(feeSection) feeSection.hidden=data.fees_available!==true;
-  setText(`${id}-fees`, data.fees_available && Array.isArray(data.fee_estimates) ? data.fee_estimates.join(" / ") : "Unavailable");
-  setText(`${id}-fee-unit`, data.fee_unit ? `Fee ${data.fee_unit} (1/3/6 blocks):` : "Fee estimates:");
+  const fees=chainFeesView(id,data);
+  setText(`${id}-fees`, fees.value);
+  setText(`${id}-fee-unit`, fees.label);
   setText(`${id}-wallet-reason`, data.wallet_view_reason || "Public-key balance monitoring is unavailable for this chain.");
   const cpus=Number(data.steady_cpus), memory=Number(data.steady_mem_limit_mb);
   setText(`${id}-budget`,cpus>0 && memory>0 ? `${cpus} core${cpus===1?"":"s"} · ${(memory/1024).toFixed(1)} GiB RAM` : "No automatic cap");

@@ -1,10 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {powerView,powerRequest,controlView} from './chains.js';
+import {powerView,powerRequest,controlView,chainFeesView} from './chains.js';
 import {genericNodeView,normalizeNode} from './nodes.js';
 import {overviewLayout,previewDepth,GRID} from './tower.js';
 
 const active={configured:true,supported:true,active:true};
+test('Zcash shows a standard per-action fee without inventing confirmation targets',()=>{
+  assert.deepEqual(chainFeesView('zcash',{fees_available:true,fee_estimates:['400'],fee_unit:'zats/action'}),{label:'Standard fee (zats/action):',value:'400'});
+  assert.deepEqual(chainFeesView('litecoin',{fees_available:true,fee_estimates:['1','2','3'],fee_unit:'sat/vB'}),{label:'Fee sat/vB (1/3/6 blocks):',value:'1 / 2 / 3'});
+  assert.equal(chainFeesView('zcash',{fees_available:false}).value,'Unavailable');
+});
 test('deactivation requires the exact confirmation and inactive nodes can reactivate',()=>{
   for(const word of ['', 'Deactivate', 'deactivate ', 'yes']) assert.throws(()=>powerRequest(active,word));
   assert.deepEqual(powerRequest(active,'deactivate'),{active:false,confirmation:'deactivate'});

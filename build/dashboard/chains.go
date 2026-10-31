@@ -293,7 +293,7 @@ func (a *app) fetchZcashStatus(ctx context.Context, node nodeConfig, status gene
 	var fee zcashStandardFee
 	if rpc.call(ctx, "getstandardfee", nil, &fee) == nil && fee.StandardFee > 0 {
 		value := strconv.FormatInt(fee.StandardFee, 10)
-		status.FeeEstimates = []string{value, value, value}
+		status.FeeEstimates = []string{value}
 		status.FeeUnit, status.FeesAvailable = "zats/action", true
 	}
 	if disk := diskUsage(node.DataDir); disk.Total > 0 {

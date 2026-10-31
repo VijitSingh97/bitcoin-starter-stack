@@ -198,7 +198,7 @@ func TestZcashStatusUsesNativeShapeWithoutBitcoinIBDOrAuth(t *testing.T) {
 	response := httptest.NewRecorder()
 	a.apiAdditionalNode(response, request)
 	var status genericNodeStatus
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil || !status.Supported || !status.Available || !status.Synced || status.Height != 3_500_000 || status.TargetHeight != 3_500_000 || !status.Pruned || !status.LatestBlockAvailable || !status.FeesAvailable || status.FeeUnit != "zats/action" || len(status.FeeEstimates) != 3 || status.FeeEstimates[0] != "400" || status.WalletViewSupported {
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &status) != nil || !status.Supported || !status.Available || !status.Synced || status.Height != 3_500_000 || status.TargetHeight != 3_500_000 || !status.Pruned || !status.LatestBlockAvailable || !status.FeesAvailable || status.FeeUnit != "zats/action" || len(status.FeeEstimates) != 1 || status.FeeEstimates[0] != "400" || status.WalletViewSupported {
 		t.Fatalf("Zcash status = %d %#v", response.Code, status)
 	}
 }
