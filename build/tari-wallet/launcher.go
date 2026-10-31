@@ -64,6 +64,9 @@ type supervisor struct {
 	poll       time.Duration
 	child      *exec.Cmd
 	childDone  chan error
+	renamePath func(string, string) error
+	removePath func(string) error
+	removeTree func(string) error
 }
 
 func main() {
@@ -184,6 +187,19 @@ func (s *supervisor) prepare() error {
 func (s *supervisor) restore() error {
 	dbExists := regularFile(s.dbPath())
 	identityExists := regularFile(s.identityPath())
+	if identityExists {
+		id, err := s.readIdentity()
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(s.archiveRoot(), id.WalletID)
+		if pathExists(destination) {
+			if err := s.recoverInterruptedRemoval(destination, s.dataPath()); err != nil {
+				return err
+			}
+			dbExists = regularFile(s.dbPath())
+		}
+	}
 	if !dbExists && !identityExists {
 		return nil
 	}
@@ -274,8 +290,13 @@ func validateRequest(r request) error {
 }
 
 func (s *supervisor) create(r request) error {
-	if s.child != nil || pathExists(s.dbPath()) || pathExists(s.identityPath()) {
+	if s.child != nil || pathExists(s.identityPath()) {
 		return errors.New("a Tari watch-only wallet already exists")
+	}
+	if pathExists(s.dataPath()) {
+		if err := s.archiveFailed(r.WalletID); err != nil {
+			return fmt.Errorf("archive incomplete Tari wallet before retry: %w", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(s.dbPath()), 0700); err != nil {
 		return fmt.Errorf("create wallet storage: %w", err)
@@ -296,8 +317,11 @@ func (s *supervisor) create(r request) error {
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-done:
-			s.archiveFailed(r.WalletID)
-			return fmt.Errorf("wallet provisioning stopped: %w", err)
+			stopped := errors.New("wallet provisioning stopped")
+			if err != nil {
+				stopped = fmt.Errorf("wallet provisioning stopped: %w", err)
+			}
+			return s.provisionError(r.WalletID, stopped)
 		case <-time.After(250 * time.Millisecond):
 			if regularFile(s.dbPath()) && tcpReady(s.grpcAddr) {
 				ready = true
@@ -309,17 +333,14 @@ func (s *supervisor) create(r request) error {
 	}
 	s.stopCommand(cmd, done)
 	if !ready {
-		s.archiveFailed(r.WalletID)
-		return errors.New("wallet provisioning did not become ready within 120 seconds")
+		return s.provisionError(r.WalletID, errors.New("wallet provisioning did not become ready within 120 seconds"))
 	}
 	if err := protectTree(s.dataPath()); err != nil {
-		s.archiveFailed(r.WalletID)
-		return errors.New("wallet database permissions could not be protected")
+		return s.provisionError(r.WalletID, errors.New("wallet database permissions could not be protected"))
 	}
 	id := identity{WalletID: r.WalletID, PublicSpendKey: strings.ToLower(*r.PublicSpendKey), BirthdayDays: birthday}
 	if err := writeJSONAtomic(s.identityPath(), id); err != nil {
-		s.archiveFailed(r.WalletID)
-		return fmt.Errorf("save wallet identity: %w", err)
+		return s.provisionError(r.WalletID, fmt.Errorf("save wallet identity: %w", err))
 	}
 	if err := s.startRuntime(id); err != nil {
 		return err
@@ -379,14 +400,20 @@ func (s *supervisor) remove(r request) error {
 	if err != nil {
 		return err
 	}
-	if id.WalletID != r.WalletID || !regularFile(s.dbPath()) {
+	if id.WalletID != r.WalletID {
 		return errors.New("wallet identity does not match the remove request")
+	}
+	destination := filepath.Join(s.archiveRoot(), r.WalletID)
+	if err := s.recoverInterruptedRemoval(destination, s.dataPath()); err != nil {
+		return err
+	}
+	if !regularFile(s.dbPath()) {
+		return errors.New("wallet database is missing from active and private archive storage")
 	}
 	s.stopChild()
 	if err := protectTree(s.dataPath()); err != nil {
 		return errors.New("wallet database permissions are unsafe")
 	}
-	destination := filepath.Join(s.archiveRoot(), r.WalletID)
 	if pathExists(destination) {
 		return errors.New("wallet archive already exists")
 	}
@@ -397,24 +424,21 @@ func (s *supervisor) remove(r request) error {
 	dataPath := s.dataPath()
 	archivedData := filepath.Join(staging, "data")
 	archivedIdentity := filepath.Join(staging, "identity.json")
-	if err := os.Rename(dataPath, archivedData); err != nil {
-		_ = os.Remove(staging)
-		return fmt.Errorf("archive wallet database: %w", err)
+	if err := s.rename(dataPath, archivedData); err != nil {
+		cleanupErr := s.removeAll(staging)
+		return errors.Join(fmt.Errorf("archive wallet database: %w", err), wrapError("clean incomplete wallet archive", cleanupErr))
 	}
 	if err := writeJSONAtomic(archivedIdentity, id); err != nil {
-		_ = os.Rename(archivedData, dataPath)
-		_ = os.RemoveAll(staging)
-		return fmt.Errorf("archive wallet identity: %w", err)
+		rollbackErr := s.rollbackArchive(archivedData, dataPath, staging)
+		return errors.Join(fmt.Errorf("archive wallet identity: %w", err), wrapError("roll back wallet archive", rollbackErr))
 	}
-	if err := os.Rename(staging, destination); err != nil {
-		_ = os.Rename(archivedData, dataPath)
-		_ = os.RemoveAll(staging)
-		return fmt.Errorf("finish wallet archive: %w", err)
+	if err := s.rename(staging, destination); err != nil {
+		rollbackErr := s.rollbackArchive(archivedData, dataPath, staging)
+		return errors.Join(fmt.Errorf("finish wallet archive: %w", err), wrapError("roll back wallet archive", rollbackErr))
 	}
-	if err := os.Remove(s.identityPath()); err != nil {
-		_ = os.Rename(filepath.Join(destination, "data"), dataPath)
-		_ = os.RemoveAll(destination)
-		return fmt.Errorf("remove active wallet identity: %w", err)
+	if err := s.removeFile(s.identityPath()); err != nil {
+		rollbackErr := s.rollbackArchive(filepath.Join(destination, "data"), dataPath, destination)
+		return errors.Join(fmt.Errorf("remove active wallet identity: %w", err), wrapError("roll back wallet archive", rollbackErr))
 	}
 	s.writeStatus(status{ID: r.ID, Action: r.Action, WalletID: r.WalletID, State: "removed", Message: "Tari watch-only wallet was archived."})
 	return nil
@@ -493,14 +517,89 @@ func (s *supervisor) readIdentity() (identity, error) {
 	return id, nil
 }
 
-func (s *supervisor) archiveFailed(walletID string) {
+func (s *supervisor) archiveFailed(walletID string) error {
 	data := s.dataPath()
 	if !pathExists(data) {
-		return
+		return nil
 	}
-	_ = protectTree(data)
-	destination := filepath.Join(s.archiveRoot(), "failed-"+walletID+"-"+strconv.FormatInt(time.Now().Unix(), 10))
-	_ = os.Rename(data, destination)
+	if err := protectTree(data); err != nil {
+		return fmt.Errorf("protect incomplete wallet database: %w", err)
+	}
+	destination := filepath.Join(s.archiveRoot(), "failed-"+walletID+"-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err := s.rename(data, destination); err != nil {
+		return fmt.Errorf("move incomplete wallet database to private archive: %w", err)
+	}
+	return nil
+}
+
+func (s *supervisor) provisionError(walletID string, cause error) error {
+	return errors.Join(cause, wrapError("archive incomplete wallet database", s.archiveFailed(walletID)))
+}
+
+func (s *supervisor) rollbackArchive(archivedData, dataPath, cleanupPath string) error {
+	var result error
+	restored := true
+	if pathExists(archivedData) {
+		if err := s.rename(archivedData, dataPath); err != nil {
+			result = errors.Join(result, fmt.Errorf("restore active wallet database: %w", err))
+			restored = false
+		}
+	}
+	if restored {
+		if err := s.removeAll(cleanupPath); err != nil {
+			result = errors.Join(result, fmt.Errorf("clean incomplete wallet archive: %w", err))
+		}
+	}
+	return result
+}
+
+func (s *supervisor) recoverInterruptedRemoval(destination, dataPath string) error {
+	if !pathExists(destination) {
+		return nil
+	}
+	archivedData := filepath.Join(destination, "data")
+	activeExists := pathExists(dataPath)
+	archivedExists := pathExists(archivedData)
+	if activeExists && archivedExists {
+		return errors.New("wallet database exists in both active and private archive storage")
+	}
+	if !activeExists && archivedExists {
+		if err := s.rename(archivedData, dataPath); err != nil {
+			return fmt.Errorf("recover interrupted wallet removal: %w", err)
+		}
+	}
+	if err := s.removeAll(destination); err != nil {
+		return fmt.Errorf("clean interrupted wallet removal: %w", err)
+	}
+	return nil
+}
+
+func (s *supervisor) rename(oldPath, newPath string) error {
+	if s.renamePath != nil {
+		return s.renamePath(oldPath, newPath)
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+func (s *supervisor) removeFile(path string) error {
+	if s.removePath != nil {
+		return s.removePath(path)
+	}
+	return os.Remove(path)
+}
+
+func (s *supervisor) removeAll(path string) error {
+	if s.removeTree != nil {
+		return s.removeTree(path)
+	}
+	return os.RemoveAll(path)
+}
+
+func wrapError(message string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 func (s *supervisor) writeErrorFromIdentity(err error) {

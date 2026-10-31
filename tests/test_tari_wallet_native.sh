@@ -118,7 +118,7 @@ docker exec "$container" sh -c \
 
 docker stop -t 25 "$container" >/dev/null
 docker run --rm -v "$control_volume:/tari-wallet" -v "$data_volume:/tari-wallet/private" --entrypoint sh "$image" -c \
-  'cp /tari-wallet/private/archive/11111111111111111111111111111111/identity.json /tari-wallet/identity.json; chown 1000:1000 /tari-wallet/identity.json; chmod 600 /tari-wallet/identity.json'
+  'mv /tari-wallet/private/archive/11111111111111111111111111111111 /tari-wallet/private/archive/preserved-proof; cp /tari-wallet/private/archive/preserved-proof/identity.json /tari-wallet/identity.json; chown 1000:1000 /tari-wallet/identity.json; chmod 600 /tari-wallet/identity.json'
 docker start "$container" >/dev/null
 for _ in $(seq 1 20); do
   state=$(docker run --rm -v "$control_volume:/tari-wallet" --entrypoint sh "$image" -c \

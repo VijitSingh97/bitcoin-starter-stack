@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -115,6 +116,82 @@ func TestRestoreFailsClosed(t *testing.T) {
 	}
 }
 
+func TestFailedProvisionArchiveErrorPreservesDatabaseForRetry(t *testing.T) {
+	s := &supervisor{root: t.TempDir()}
+	if err := s.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(s.dataPath(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.dbPath(), []byte("wallet"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.renamePath = func(string, string) error { return errors.New("injected rename failure") }
+	if err := s.archiveFailed(strings.Repeat("1", 32)); err == nil || !strings.Contains(err.Error(), "move incomplete") {
+		t.Fatalf("archive failure was not reported: %v", err)
+	}
+	if !regularFile(s.dbPath()) {
+		t.Fatal("archive failure lost the active database")
+	}
+	s.renamePath = nil
+	if err := s.archiveFailed(strings.Repeat("1", 32)); err != nil {
+		t.Fatalf("archive retry failed: %v", err)
+	}
+	archives, err := filepath.Glob(filepath.Join(s.archiveRoot(), "failed-"+strings.Repeat("1", 32)+"-*"))
+	if err != nil || len(archives) != 1 || pathExists(s.dataPath()) {
+		t.Fatalf("archive retry did not preserve the incomplete database: %v", err)
+	}
+}
+
+func TestRemoveRollbackRestoresDatabaseForRetry(t *testing.T) {
+	s, id, r := seededRemoval(t)
+	s.removePath = func(path string) error {
+		if path == s.identityPath() {
+			return errors.New("injected identity removal failure")
+		}
+		return os.Remove(path)
+	}
+	if err := s.remove(r); err == nil || !strings.Contains(err.Error(), "remove active wallet identity") {
+		t.Fatalf("identity removal failure was not reported: %v", err)
+	}
+	if !regularFile(s.dbPath()) || !regularFile(s.identityPath()) || pathExists(filepath.Join(s.archiveRoot(), id.WalletID)) {
+		t.Fatal("successful rollback did not restore the active wallet")
+	}
+	s.removePath = nil
+	if err := s.remove(r); err != nil {
+		t.Fatalf("removal retry failed: %v", err)
+	}
+}
+
+func TestRemoveRollbackFailureKeepsArchiveRecoverable(t *testing.T) {
+	s, id, r := seededRemoval(t)
+	destination := filepath.Join(s.archiveRoot(), id.WalletID)
+	s.removePath = func(path string) error {
+		if path == s.identityPath() {
+			return errors.New("injected identity removal failure")
+		}
+		return os.Remove(path)
+	}
+	s.renamePath = func(oldPath, newPath string) error {
+		if oldPath == filepath.Join(destination, "data") && newPath == s.dataPath() {
+			return errors.New("injected rollback failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	if err := s.remove(r); err == nil || !strings.Contains(err.Error(), "roll back wallet archive") {
+		t.Fatalf("rollback failure was not reported: %v", err)
+	}
+	if !regularFile(filepath.Join(destination, "data", "wallet.db")) || !regularFile(s.identityPath()) || pathExists(s.dbPath()) {
+		t.Fatal("rollback failure did not preserve the database in private archive storage")
+	}
+	s.removePath = nil
+	s.renamePath = nil
+	if err := s.remove(r); err != nil {
+		t.Fatalf("removal retry did not recover the interrupted archive: %v", err)
+	}
+}
+
 func TestRunFailsClosedWhenIdentityIsIncomplete(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("TARI_WALLET_PASSWORD", "databasepassword")
@@ -175,6 +252,26 @@ func TestRunExitsAfterUnexpectedWalletStop(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `"state":"error"`) {
 		t.Fatalf("unexpected child exit did not write error status: %v", err)
 	}
+}
+
+func seededRemoval(t *testing.T) (*supervisor, identity, request) {
+	t.Helper()
+	s := &supervisor{root: t.TempDir()}
+	if err := s.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(s.dataPath(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.dbPath(), []byte("wallet"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	id := identity{WalletID: strings.Repeat("1", 32), PublicSpendKey: strings.Repeat("a", 64)}
+	if err := writeJSONAtomic(s.identityPath(), id); err != nil {
+		t.Fatal(err)
+	}
+	r := request{ID: strings.Repeat("2", 32), Action: "remove", WalletID: id.WalletID, RequestedAt: 2}
+	return s, id, r
 }
 
 func buildFakeWallet(t *testing.T) string {
