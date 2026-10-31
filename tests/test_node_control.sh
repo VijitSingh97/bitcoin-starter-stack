@@ -27,13 +27,25 @@ EOF
 cat >"$root/stack" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$FAKE_STACK_LOG"
+[ "${FAKE_STACK_INTERRUPT_ON_PULL:-0}" != 1 ] || [ "${1:-}" != pull ] || {
+  kill -KILL "$PPID"
+  exit 1
+}
 [ "${FAKE_STACK_FAIL_ONCE:-0}" != 1 ] || {
   if [ ! -e "$FAKE_STACK_FAIL_MARKER" ]; then
     : >"$FAKE_STACK_FAIL_MARKER"
+    [ "${1:-}" != apply ] || printf 'PARTIAL=1\n' >"$BITCOIN_STACK_STATE_DIR/.env"
     exit 1
   fi
 }
 [ "${FAKE_STACK_FAIL:-0}" != 1 ]
+if [ "${1:-}" = apply ] || [ "${1:-}" = approve-rendered-config ]; then
+  jq -S . "$BITCOIN_STACK_CONFIG_DIR/config.json" >"$BITCOIN_STACK_STATE_DIR/.approved-config.tmp"
+  chmod 600 "$BITCOIN_STACK_STATE_DIR/.approved-config.tmp"
+  mv "$BITCOIN_STACK_STATE_DIR/.approved-config.tmp" "$BITCOIN_STACK_STATE_DIR/.approved-config.json"
+  cp "$BITCOIN_STACK_STATE_DIR/.env" "$BITCOIN_STACK_STATE_DIR/.approved.env"
+  chmod 600 "$BITCOIN_STACK_STATE_DIR/.approved.env"
+fi
 EOF
 chmod +x "$root/configure.sh" "$root/stack" "$root/scripts/node-control"
 cat >"$tmp/docker" <<'EOF'
@@ -41,11 +53,21 @@ cat >"$tmp/docker" <<'EOF'
 set -eu
 if [ "$1" = inspect ]; then
   case "$3" in
-    '{{.Id}}') printf 'dashboard-id\n' ;;
+    '{{.Id}}') [ "${FAKE_DASHBOARD_MISSING:-0}" = 1 ] || printf 'dashboard-id\n' ;;
+    *RestartPolicy*) printf '%s/docker-compose.yml|on-failure|3\n' "$BITCOIN_STACK_ROOT" ;;
     *project.config_files*) printf '%s/docker-compose.yml\n' "$BITCOIN_STACK_ROOT" ;;
   esac
   exit 0
 fi
+[ "$1" != update ] || {
+  printf '%s\n' "$*" >>"$FAKE_STACK_LOG"
+  [ "${FAKE_DOCKER_UPDATE_FAIL:-0}" != 1 ] || exit 1
+  if [ "${FAKE_DOCKER_UPDATE_FAIL_ONCE:-0}" = 1 ] && [ ! -e "$FAKE_DOCKER_UPDATE_FAIL_MARKER" ]; then
+    : >"$FAKE_DOCKER_UPDATE_FAIL_MARKER"
+    exit 1
+  fi
+  exit 0
+}
 [ "$1" = exec ] || exit 1
 shift
 [ "${1:-}" != -i ] || shift
@@ -62,13 +84,19 @@ exec "${args[@]}"
 EOF
 chmod +x "$tmp/docker"
 cat >"$config/config.json" <<'EOF'
-{"bitcoin":{"enabled":true,"active":true},"monero":{"enabled":true,"active":true},"tari":{"enabled":true,"active":true},"litecoin":{"enabled":false},"dogecoin":{"enabled":false},"bitcoincash":{"enabled":false}}
+{"bitcoin":{"enabled":true,"active":true},"monero":{"enabled":true,"active":true},"tari":{"enabled":true,"active":true},"litecoin":{"enabled":false,"data_dir":"/preset/litecoin","resource_profile":"compact","steady_cpus":0.75,"steady_mem_limit_mb":3072},"dogecoin":{"enabled":false},"bitcoincash":{"enabled":false}}
 EOF
 printf 'DASHBOARD_PASSWORD=testpassword\n' >"$state/.env"
+jq -S . "$config/config.json" >"$state/.approved-config.json"
+cp "$state/.env" "$state/.approved.env"
 export BITCOIN_STACK_ROOT=$root BITCOIN_STACK_STATE_DIR=$state BITCOIN_STACK_CONFIG_DIR=$config
 export DOCKER_BIN=$tmp/docker FAKE_DASH_STATE=$dashboard_state FAKE_STACK_LOG=$tmp/stack.log NODE_CONTROL_NOW_EPOCH=1000
 export FAKE_STACK_FAIL_ONCE=0 FAKE_STACK_FAIL_MARKER=$tmp/stack-failed
 export FAKE_CONFIGURE_FAIL_ONCE=0 FAKE_CONFIGURE_FAIL_MARKER=$tmp/configure-failed
+export FAKE_DOCKER_UPDATE_FAIL_ONCE=0 FAKE_DOCKER_UPDATE_FAIL_MARKER=$tmp/docker-update-failed
+export FAKE_DOCKER_UPDATE_FAIL=0
+export FAKE_STACK_INTERRUPT_ON_PULL=0
+export FAKE_DASHBOARD_MISSING=0
 
 request() { printf '%s\n' "$1" >"$dashboard_state/node-control.request"; }
 status() { jq -r "$1" "$dashboard_state/node-control.status"; }
@@ -78,6 +106,7 @@ request '{"id":"11111111111111111111111111111111","node":"tari","active":false,"
 [ "$(jq -r .tari.active "$config/config.json")" = false ] || fail "Tari was not deactivated"
 grep -qx 'stop tari-wallet tari' "$tmp/stack.log" || fail "Tari wallet was not stopped before its node"
 [ "$(status .state)" = applied ] || fail "deactivation status was not applied"
+[ -s "$state/.approved.env" ] || fail "deactivation did not approve its rendered environment"
 [ "$(jq -r '.bitcoin,.monero,.tari' "$dashboard_state/node-runtime.json" | tr '\n' ' ')" = 'true true false ' ] || fail "runtime state map is wrong"
 if [ "$(uname -s)" = Darwin ]; then
   runtime_mode=$(stat -f %Lp "$dashboard_state/node-runtime.json")
@@ -90,6 +119,7 @@ request '{"id":"22222222222222222222222222222222","node":"tari","active":true,"c
 "$root/scripts/node-control"
 [ "$(jq -r .tari.active "$config/config.json")" = true ] || fail "Tari was not reactivated"
 grep -qx 'up tari tari-wallet' "$tmp/stack.log" || fail "Tari node was not started before its wallet"
+[ "$(jq -r .tari.active "$state/.approved-config.json")" = true ] || fail "node state did not advance approved config"
 
 request '{"id":"22222222222222222222222222222222","node":"tari","active":false,"confirmation":"deactivate","requested_at":1000}'
 "$root/scripts/node-control"
@@ -118,17 +148,96 @@ FAKE_CONFIGURE_FAIL_ONCE=1 "$root/scripts/node-control"
 ! grep -q '^stop bitcoin$' "$tmp/stack.log" || fail "failed render changed a service"
 
 printf 'DASHBOARD_PASSWORD=\n' >"$state/.env"
-rm -f "$dashboard_state/node-control.capability"
 request '{"id":"55555555555555555555555555555555","node":"bitcoin","active":false,"confirmation":"deactivate","requested_at":1000}'
 "$root/scripts/node-control"
-[ ! -e "$dashboard_state/node-control.capability" ] || fail "control enabled without dashboard authentication"
-[ "$(jq -r .bitcoin.active "$config/config.json")" = true ] || fail "unauthenticated request changed config"
-rm -f "$dashboard_state/node-control.request"
-printf '%s\n' '{"version":1,"iterations":210000,"salt":"0123456789abcdef0123456789abcdef","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$dashboard_state/dashboard_auth.json"
-"$root/scripts/node-control"
-[ "$(cat "$dashboard_state/node-control.capability")" = ready ] || fail "saved dashboard authentication did not enable node control"
-printf '%s\n' '{"version":1,"iterations":210000,"salt":"bad","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$dashboard_state/dashboard_auth.json"
-"$root/scripts/node-control"
-[ ! -e "$dashboard_state/node-control.capability" ] || fail "malformed saved dashboard authentication enabled node control"
+[ "$(jq -r .bitcoin.active "$config/config.json")" = false ] || fail "passwordless trusted-LAN node control was blocked"
+jq -e '.install_supported and (.boot_supported|not) and (.boot_enabled|not) and (.config_pending|not) and .platform=="source" and .boot_kind=="unsupported"' "$dashboard_state/node-control.capability" >/dev/null || fail "host capability is wrong"
+
+request '{"action":"install","id":"66666666666666666666666666666666","node":"litecoin","requested_at":1000}'
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(jq -r '.litecoin.enabled and .litecoin.active and (.litecoin.rpc_expose|not) and .litecoin.steady_cpus==0.75 and .litecoin.steady_mem_limit_mb==3072 and .litecoin.data_dir=="/preset/litecoin"' "$config/config.json")" = true ] || fail "safe Litecoin defaults did not preserve preset settings"
+[ "$(status .action)" = install ] && [ "$(status .state)" = applied ] || fail "install status was not applied"
+grep -qx pull "$tmp/stack.log" || fail "install did not use the normal image pull"
+request '{"action":"install","id":"66666666666666666666666666666666","node":"litecoin","requested_at":1000}'
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = replayed ] || fail "replayed install request was accepted"
+request '{"action":"install","id":"67676767676767676767676767676767","node":"dogecoin","requested_at":699}'
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .id)" = 67676767676767676767676767676767 ] || fail "stale install response lost its request ID"
+[ "$(status .error_code)" = invalid_request ] || fail "stale install request was accepted"
+
+request '{"action":"install","id":"68686868686868686868686868686868","node":"bitcoincash","requested_at":1000}'
+FAKE_STACK_INTERRUPT_ON_PULL=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control" >/dev/null 2>&1 || true
+[ "$(jq -r .bitcoincash.enabled "$config/config.json")" = true ] || fail "interrupted install did not reach its durable transaction"
+[ -d "$state/node-control/install-transaction" ] || fail "interrupted install did not retain recovery state"
+FAKE_DASHBOARD_MISSING=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(jq -r .bitcoincash.enabled "$config/config.json")" = false ] || fail "dashboard liveness gate blocked interrupted install recovery"
+[ ! -e "$state/node-control/install-transaction" ] || fail "headless recovery left install recovery state"
+[ -e "$dashboard_state/node-control.processing" ] || fail "headless recovery discarded the request before retry"
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .state)" = applied ] || fail "interrupted install was not safely retried"
+[ "$(jq -r .bitcoincash.enabled "$config/config.json")" = true ] || fail "retried install was not applied"
+[ ! -e "$state/node-control/install-transaction" ] || fail "completed retry left install recovery state"
+
+mkdir "$state/node-control/install-transaction"
+cat >"$state/node-control/install-transaction/meta.json" <<'EOF'
+{"id":"69696969696969696969696969696969","node":"bitcoincash","phase":"applied","had_config":false,"had_env":false,"had_approved_config":false,"had_approved_env":false}
+EOF
+printf '%s\n' '{"action":"install","id":"69696969696969696969696969696969","node":"bitcoincash","requested_at":1000}' >"$dashboard_state/node-control.processing"
+FAKE_DASHBOARD_MISSING=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ -d "$state/node-control/install-transaction" ] || fail "headless applied recovery discarded its completion record"
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .id)" = 69696969696969696969696969696969 ] && [ "$(status .state)" = applied ] || fail "applied install recovery did not finalize the original request"
+[ ! -e "$state/node-control/install-transaction" ] && [ ! -e "$dashboard_state/node-control.processing" ] || fail "applied install recovery was not finalized"
+
+request '{"action":"launch_at_boot","enabled":true,"id":"76767676767676767676767676767676","requested_at":1000}'
+FAKE_DOCKER_UPDATE_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = apply_failed ] || fail "failed launch policy update lacked typed status"
+[ "$(jq -r '.dashboard.launch_at_boot // false' "$config/config.json")" = false ] || fail "failed launch policy update changed config"
+grep -q '^update --restart=on-failure:3 dashboard$' "$tmp/stack.log" || fail "failed launch policy update did not restore retry count"
+request '{"action":"launch_at_boot","enabled":true,"id":"75757575757575757575757575757575","requested_at":1000}'
+FAKE_DOCKER_UPDATE_FAIL=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = rollback_failed ] || fail "failed launch policy rollback lacked typed status"
+[ "$(jq -r '.dashboard.launch_at_boot // false' "$config/config.json")" = false ] || fail "failed launch policy rollback changed config"
+request '{"action":"launch_at_boot","enabled":true,"id":"77777777777777777777777777777777","requested_at":1000}'
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(jq -r .dashboard.launch_at_boot "$config/config.json")" = true ] || fail "launch-at-boot setting was not saved"
+grep -q '^update --restart=unless-stopped dashboard$' "$tmp/stack.log" || fail "running containers did not receive launch policy"
+[ "$(status .enabled)" = true ] || fail "launch status omitted its state"
+
+approved_before=$(shasum -a 256 "$state/.approved-config.json" "$state/.approved.env")
+rm -f "$FAKE_STACK_FAIL_MARKER"
+request '{"action":"install","id":"78787878787878787878787878787878","node":"dogecoin","requested_at":1000}'
+FAKE_STACK_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(jq -r .dogecoin.enabled "$config/config.json")" = false ] || fail "failed install left Dogecoin configured"
+[ "$(status .error_code)" = apply_failed ] || fail "failed install lacked typed status"
+[ "$(shasum -a 256 "$state/.approved-config.json" "$state/.approved.env")" = "$approved_before" ] || fail "failed install advanced approved snapshots"
+grep -qx 'stop dogecoin' "$tmp/stack.log" || fail "failed install did not stop its partial service"
+
+jq '.dashboard.external_edit=true' "$config/config.json" >"$config/config.tmp" && mv "$config/config.tmp" "$config/config.json"
+request '{"action":"install","id":"88888888888888888888888888888888","node":"dogecoin","requested_at":1000}'
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = config_pending ] || fail "install silently approved an external config edit"
+[ "$(jq -r .dogecoin.enabled "$config/config.json")" = false ] || fail "pending config was mutated by install"
+revision=$(jq -S -c . "$config/config.json" | shasum -a 256 | awk '{print $1}')
+rm -f "$FAKE_STACK_FAIL_MARKER"
+request "{\"action\":\"apply_config\",\"config_revision\":\"$revision\",\"id\":\"89898989898989898989898989898989\",\"requested_at\":1000}"
+FAKE_STACK_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = apply_failed ] || fail "partial config apply did not report a restored failure"
+[ "$(jq -r .dashboard.external_edit "$config/config.json")" = true ] || fail "failed config apply discarded the pending edit"
+cmp -s "$state/.env" "$state/.approved.env" || fail "failed config apply did not restore the approved environment"
+grep -qx up "$tmp/stack.log" || fail "failed config apply did not reconcile the approved runtime"
+request "{\"action\":\"apply_config\",\"config_revision\":\"$revision\",\"id\":\"99999999999999999999999999999999\",\"requested_at\":1000}"
+BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .state)" = applied ] || fail "reviewed pending config was not applied"
+cmp -s <(jq -S . "$config/config.json") "$state/.approved-config.json" || fail "applied config was not approved"
+
+rm -f "$config/config.json" "$FAKE_STACK_FAIL_MARKER"
+deleted_revision=$(printf '{}\n' | shasum -a 256 | awk '{print $1}')
+request "{\"action\":\"apply_config\",\"config_revision\":\"$deleted_revision\",\"id\":\"90909090909090909090909090909090\",\"requested_at\":1000}"
+FAKE_STACK_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = apply_failed ] || fail "deleted pending config failure lacked restored status"
+[ ! -e "$config/config.json" ] || fail "failed deleted-config apply recreated the pending file"
+cp "$state/.approved-config.json" "$config/config.json"
 
 echo "PASS: test_node_control.sh"

@@ -18,9 +18,10 @@
   estimates, not minimum requirements or measured average usage. More resources
   can shorten validation; Tor and SSD performance also affect sync time.
 
-Optional on Linux: after setting `dashboard.bind_ip` to this host's private address,
-`avahi-daemon` lets you reach it at `http://<hostname>.local` from other
-machines on your LAN.
+Setup chooses a private LAN address automatically and prints the URL. Optional
+on Linux: `avahi-daemon` also lets other machines use `http://<hostname>.local`
+(append `:8080` for Homebrew). Set `dashboard.bind_ip` explicitly to use another
+private address or `127.0.0.1` for access only from this machine.
 
 On Ubuntu, install `jq`, `openssl`, `curl`, `iproute2`, and optionally
 `avahi-daemon` with APT.
@@ -39,8 +40,8 @@ brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
 bitcoin-stack init
 ```
 
-Installation is inert. The explicit `init` command runs the same wizard and
-can pull images and start your selected nodes. Homebrew stores configuration
+Installation is inert. The explicit `init` command creates default private
+configuration, downloads missing images, and starts Bitcoin without prompts. Homebrew stores configuration
 and chain data outside its Cellar so upgrades preserve them:
 
 | Host | Configuration | Generated state and chain data |
@@ -55,18 +56,18 @@ directory or a custom data path automatically. If an existing/custom path has
 the wrong ownership, startup stops and prints the exact migration command so
 you can inspect the path before running it.
 
-After setup, `brew services start bitcoin-starter-stack` keeps the host-side
-controls and post-sync resource handoff running after login. It waits for both
-configuration and Docker, and never runs setup or pulls images itself. On a
-Mac, enable Docker Desktop's start-at-login option; a per-user launch agent
-cannot start containers before login. Stopping the Homebrew service stops its
-supervisor but leaves nodes running; use `bitcoin-stack down` to stop them.
+Setup starts the host supervisor for dashboard controls. Use **Settings →
+Launch at login** to choose whether the configured application should return
+when you sign in. On a Mac, Docker Desktop must be running; its own start-at-login
+setting is separate. The user service cannot start containers before login.
+Turning this option off leaves the current nodes running. Use
+`bitcoin-stack down` to stop them now.
 
-Homebrew defaults the dashboard to `http://localhost:8080`. See the complete
-[Homebrew guide](homebrew.md), including local formula testing and upgrades.
-Host-path and control tests run on macOS and Ubuntu CI. The local container
-proof used Apple Silicon; a full initial sync and post-sync cap trial on an
-Intel Mac has not been completed.
+Homebrew uses port **8080**. Setup prints the selected private-LAN URL, or
+localhost if no private interface is available. See the complete
+[Homebrew guide](homebrew.md). Host-path and control tests run on macOS and
+Ubuntu CI; a full initial sync and post-sync cap trial on an Intel Mac remains
+unqualified.
 
 ### APT on Ubuntu
 
@@ -98,10 +99,10 @@ sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
 
-The wizard lets you select any combination of the supported nodes, downloads missing images with the host's Docker
-settings, and starts the stack when you accept its final default. Docker keeps
-image layers in its own managed storage. Neither package installation nor the
-wizard changes the Docker daemon or its proxy settings.
+`init` downloads missing images using the host's existing Docker settings and
+starts a pruned Bitcoin node. It does not ask setup questions. Docker stores
+image layers in its managed storage. Setup does not change Docker's daemon or
+proxy configuration. Use **Settings → Node set** later to install another chain.
 
 ### Release tarball on Linux
 
@@ -119,82 +120,100 @@ The tarball's semantic version matches its published container images.
 Development branches use unpublished image tags and require images built in a
 separate development environment; do not use a branch checkout for installation.
 
-For an offline installation, unpack the source and load all images locally. The
-wizard sees that they are present and starts without downloading. `up` and
-`apply` never download or build implicitly; `pull` is always an explicit host
-network action.
+For an offline installation, unpack the source and load all required images
+locally. `init` sees that they are present and starts without downloading.
+Routine `up` and `apply` never download or build implicitly; `pull` is the
+explicit command for obtaining images ahead of time.
 
-`./stack up` runs `configure.sh` on first launch, which renders a gitignored
-`.env` and creates the data directory. With no `config.json` it uses sensible
-defaults (10,000 MiB of recent blocks, about 28–56 GiB total disk) and **auto-generates**
-separate passwords for the dashboard and each node's RPC (username defaults to
-`admin`). Existing generated credentials are retained on subsequent applies.
+## Default first start
 
-The wizard prints newly generated credentials once at the end; save them in a
-password manager. If you skip it, the mode-600 `.env` contains the baseline
-dashboard login. A password later changed in the dashboard is stored as a hash
-in dashboard state and takes precedence over that baseline.
+Run `bitcoin-stack init` for Homebrew, `sudo bitcoin-stack init` for APT, or
+`./stack init` for source. A fresh run:
 
-The stack's local support images are published prebuilt on GHCR
-(`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) for amd64 and arm64
-(Raspberry Pi). `./stack pull` downloads them with the host's existing Docker
-settings. The running Bitcoin and dashboard containers remain isolated behind
-Tor regardless of how their images were obtained.
+1. Starts **Bitcoin only**, pruned to 10 GB of recent block files (plan roughly
+   28–56 GiB total disk space).
+2. Chooses an IPv4 address on your private LAN, with localhost as a fallback,
+   and prints the actual dashboard URL. Homebrew uses port 8080; APT/source use 80.
+3. Leaves the dashboard password empty and every node LAN interface closed.
+   The optional dashboard password can be added from Settings. Node RPC passwords
+   are generated separately with username `admin` and retained on later applies.
+4. Downloads missing versioned container images and starts the application.
+5. Leaves launch at boot/login off until selected in global Settings. After
+   a later reboot with this off, run `bitcoin-stack up` (`sudo` for APT), or
+   `./stack up` for source, to start the application manually.
 
-Everything is optional. Two ways to customize:
+Fresh containers retry a crash up to five times even when launch at boot/login
+is off; they do not automatically return after Docker itself restarts. Existing
+installations retain their saved reboot behavior until you change it.
 
-- **`./stack init`** — an interactive wizard that asks for a dashboard
-  password (Enter generates one), selected nodes, their data directories,
-  a loopback or private-LAN dashboard address, one-click upgrades,
-  optional private-LAN RPC, Bitcoin recent-block retention, and whether to download
-  missing images and start. Every prompt has a default you accept by pressing Enter.
-- Or edit `config.json` by hand (copy `config.example.json`) and run
-  `./stack apply`. Stick to letters and numbers in any credentials you set.
+Only run a passwordless dashboard on a trusted LAN. HTTP is unencrypted even
+when a password is set. See the [privacy model](privacy.md).
 
-The full key reference is in [Configuration](configuration.md).
+Open the printed URL, then use the gear menu to install additional nodes and
+configure Appearance, the dashboard password, Telegram, Healthchecks, and
+launch at boot/login. Installing a node starts it with its default data path,
+pruned mode where supported, and LAN interfaces closed. It preserves the data
+of every existing node. Watch progress or correct a failed installation in the
+same panel. View-only wallets are added in the relevant tower; setup does not
+ask for wallet keys or seed phrases.
 
-A default source-install wizard run includes these choices. The dashboard port
-is not another prompt; source/APT use port 80 and Homebrew uses 8080 unless you
-set `dashboard.port` in `config.json`:
+Fresh APT and Homebrew installs select `resource_profile: compact`. The host
+helper waits for three spaced, healthy, current sync checks before applying
+1 CPU / 2048 MiB to Bitcoin or Monero, or 1 CPU / 4096 MiB to the other nodes,
+with no extra swap. Initial sync is uncapped. Source and existing profiles stay
+off unless configured. These ceilings remain experimental until sustained
+operation is qualified; they do not mean a whole 2 GiB VPS can host multiple
+nodes. See [resource caps](configuration.md#resource-caps).
 
-```text
-Dashboard password (letters/numbers) [Enter = strong random]:
-Nodes to run (comma-separated: bitcoin, monero, tari, litecoin, dogecoin, bitcoincash, zcash) [bitcoin]:
-Dashboard bind address (loopback or private LAN) [127.0.0.1]:
-One-click upgrades from the dashboard (Upgrade button)? [y/N]
-Bitcoin data directory [./data/bitcoin]:
-Expose Bitcoin RPC to trusted LAN wallet apps? [y/N]
-Recent-block retention in GB [10]:
-Download missing containers and start the stack now? [Y/n]
-Generated credentials (shown once):
-  Dashboard — username: admin  password: <dashboard password>
-  Bitcoin RPC — username: admin  password: <different Bitcoin RPC password>
+## Customize before first start
+
+Install the command first, but do not run `init` yet. Create `config.json` at
+your installation's configuration path:
+
+| Install | File to create |
+|---|---|
+| APT | `/etc/bitcoin-starter-stack/config.json` |
+| macOS Homebrew | `~/Library/Application Support/bitcoin-starter-stack/config/config.json` |
+| Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` |
+| Source | `config.json` beside `stack` |
+
+For example, this selects Bitcoin and Monero and keeps automatic LAN detection:
+
+```json
+{
+  "bitcoin": { "enabled": true },
+  "monero": { "enabled": true },
+  "dashboard": { "bind_ip": "auto" }
+}
 ```
 
-Package installation is deliberately noninteractive and does not start setup.
-After installing a future Debian/APT package, run `sudo bitcoin-stack init`
-explicitly. The project does not currently publish an APT feed.
+For Monero alone, set `bitcoin.enabled` to `false`. Add `data_dir` to a node's
+section to choose a mounted SSD. Add `dashboard.password` to require a login
+from the first page load; `dashboard.port` changes the dashboard's host port.
+Keys you omit retain their defaults. The full template and key descriptions
+are in [Configuration](configuration.md). Never put a seed phrase or private
+spend key in configuration.
 
-Selecting Monero asks for its own data directory, optional restricted LAN RPC,
-and optional LAN ZMQ for P2Pool. Selecting only Monero skips Bitcoin questions.
-Every other selected chain asks for its data directory and optional private-LAN
-RPC or gRPC listener. The wizard prints credentials only for selected nodes. See
-[Pithead remote-node setup](nodes.md#pithead-remote-nodes).
+Create missing parent folders, save the file with permissions `600`, and run
+your installation's `init` command. APT configuration is owned by root, so use
+`sudo` when editing it. `init` preserves supplied values and starts that
+configuration without a wizard. Existing data and generated credentials are
+retained.
 
-Fresh APT and Homebrew wizard installs select `resource_profile: compact` for each
-chosen node. The managed host helper waits for three spaced, healthy, current sync checks
-before applying 1 CPU and 2048 MiB for Bitcoin/Monero or 4096 MiB for the other
-nodes, with no extra swap. Homebrew performs the same checks through its
-optional background service. Existing installs and
-source installs leave automatic resource limits off. The profile remains
-experimental until sustained capped operation is qualified; it is not a claim
-that a whole 2 GiB VPS can host multiple nodes.
+## Later configuration changes
 
-The wizard writes `steady_cpus: 1` and the chain-specific memory budget into
-each selected node's `config.json` section. To change a budget, edit the
-installation's `config.json` and run `bitcoin-stack apply` (`sudo` for APT).
-Initial sync stays uncapped; the helper uses the edited values after its sync
-checks pass. See [resource caps](configuration.md#resource-caps).
+Dashboard changes save through the host helper. For a file edit, change the
+existing `config.json` and run `bitcoin-stack apply` (`sudo` for APT), or
+`./stack apply` for source. This explicitly approves the new configuration and
+recreates changed services using local images. If you manually enable a new
+node in the file, download its images first with `pull`.
+
+If the file changed while the application was stopped, a manual `up` or
+`restart` asks **Config change detected. Run new config?** Declining keeps the
+last approved settings and retains your edit for later review. An unattended
+boot does the same without waiting for terminal input; global Settings shows
+the pending change and lets you approve it. A private approved snapshot makes
+this possible; never delete it as a way to apply an edit.
 
 ## First start: what to expect
 
@@ -215,17 +234,16 @@ checks pass. See [resource caps](configuration.md#resource-caps).
    listener. An internal view-only wallet service supports dashboard monitoring;
    it has no host port and cannot spend. No miner starts.
 
-4. **The dashboard** at `http://localhost` (or `http://localhost:8080` for
-   Homebrew) shows the configured towers. Click a tower to
+4. **The dashboard** at the URL printed by setup shows the configured towers. Click a tower to
    open its chain's card. It shows a connecting state until RPC comes up,
    then sync progress. After its wallet section, that node's settings contain
    block alerts, LAN ports, and any authenticated RPC credentials. The gear
-   menu contains global Appearance, Dashboard password, Telegram, and
-   Healthchecks settings. A disabled node says **Not configured**.
+   menu contains node installation, launch at boot/login, Appearance, Dashboard
+   password, Telegram, and Healthchecks settings. A disabled node says **Not configured**.
 
-To open it to your private LAN, set `dashboard.bind_ip` to this host's RFC1918
-address and run `bitcoin-stack apply` or `./stack apply`. Wildcard and public
-binds are rejected.
+Automatic binding selects a private LAN address each time configuration is
+rendered. Set `dashboard.bind_ip` to `127.0.0.1` for localhost only, or choose a
+specific RFC1918 host address and apply. Wildcard and public binds are rejected.
 
 The node downloads and validates the whole historical chain, currently hundreds
 of GB (roughly 900 GB), even though it later retains only 10,000 MiB of block files.

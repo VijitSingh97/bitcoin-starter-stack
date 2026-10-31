@@ -52,9 +52,10 @@ test("snapshot charts preserve a single atomic-unit change", () => {
   assert.deepEqual(tariHistoryPoints([{ balance_atomic: "1" }]), []);
 });
 
-test("editing requires dashboard authentication and an active available wallet service", () => {
+test("editing requires trusted configuration access and an active available wallet service", () => {
   assert.equal(tariAccessView({ has_password: true, active: true, available: true }).canEdit, true);
-  assert.match(tariAccessView({ has_password: false, active: true, available: true }).status, /dashboard password/);
+  assert.equal(tariAccessView({ has_password: false, can_configure: true, active: true, available: true }).canEdit, true);
+  assert.match(tariAccessView({ has_password: false, active: true, available: true }).status, /trusted LAN/);
   assert.equal(tariAccessView({ has_password: true, active: false, available: true, reason: "Tari is inactive." }).status, "Tari is inactive.");
   assert.equal(tariAccessView({ has_password: true, active: true, available: false, reason: "Wallet process unavailable." }).status, "Wallet process unavailable.");
 });

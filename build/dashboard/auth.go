@@ -134,10 +134,6 @@ func (a *app) apiDashboardPassword(w http.ResponseWriter, r *http.Request) {
 	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
-	if !a.hasDashboardPassword() {
-		http.Error(w, "set a dashboard password in the server configuration first", http.StatusForbidden)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var input struct {
 		Old    string `json:"old_password"`
@@ -157,7 +153,7 @@ func (a *app) apiDashboardPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.mu.Lock()
 	defer auth.mu.Unlock()
-	if !auth.matchesLocked(input.Old) {
+	if auth.enabled && !auth.matchesLocked(input.Old) || !auth.enabled && input.Old != "" {
 		http.Error(w, "current password is incorrect", http.StatusForbidden)
 		return
 	}

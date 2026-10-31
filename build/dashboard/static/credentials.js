@@ -9,8 +9,8 @@ const labels = {
 };
 const states = ["pending", "applying", "applied", "rejected", "failed"];
 
-export function passwordChangeError(oldPassword, newPassword, repeatPassword) {
-  if (!oldPassword) return "Enter your current dashboard password.";
+export function passwordChangeError(oldPassword, newPassword, repeatPassword, passwordConfigured = true) {
+  if (passwordConfigured && !oldPassword) return "Enter your current dashboard password.";
   for (const value of [oldPassword, newPassword, repeatPassword]) {
     if (/[\u0000-\u001f\u007f-\u009f]/.test(String(value ?? ""))) return "Passwords cannot contain control characters.";
   }
@@ -33,7 +33,7 @@ export function credentialControlModel(data) {
   const message = state
     ? String((typeof data?.status === "string" ? data.status : source?.message) || "")
     : "";
-  return { available: data?.available === true, interfaces, status: { state, node, message } };
+  return { available: data?.available === true, requiresPassword: data?.requires_password === true, interfaces, status: { state, node, message } };
 }
 
 export function shouldPollCredentials(dialogOpen, state) {
@@ -110,6 +110,7 @@ export function credentialSettingsController(settingsDialog, root = document) {
     save: byId("settings-password-save"),
     reload: byId("settings-password-reload"),
     status: byId("settings-password-status"),
+    oldLabel: byId("settings-password-old-label"),
   };
   const resetDialog = byId("credential-reset-dialog");
   const resetForm = byId("credential-reset-form");
@@ -126,6 +127,7 @@ export function credentialSettingsController(settingsDialog, root = document) {
   let credentialNode = "";
   let generation = 0;
   let passwordGeneration = 0;
+  let passwordConfigured = true;
   let poll;
   let resetNode = "";
 
@@ -164,11 +166,12 @@ export function credentialSettingsController(settingsDialog, root = document) {
     for (const node of nodes) {
       const enabled = view.interfaces[node]?.enabled === true;
       panels[node].panel.hidden = !enabled;
-      panels[node].reveal.disabled = !enabled;
+      panels[node].reveal.disabled = !enabled || view.requiresPassword;
       panels[node].reset.disabled = !enabled || !available || shouldPollCredentials(true, view.status.state);
       panels[node].status.textContent = view.status.node === node
         ? view.status.message
-        : enabled && !available ? "Password reset requires the installed host helper." : "";
+        : enabled && view.requiresPassword ? "Set a dashboard password in global settings to reveal or reset RPC credentials."
+          : enabled && !available ? "Password reset requires the installed host helper." : "";
       if (!enabled) hideSecret(node);
     }
     clearTimeout(poll);
@@ -192,7 +195,7 @@ export function credentialSettingsController(settingsDialog, root = document) {
   };
 
   password.save.addEventListener("click", async () => {
-    const error = passwordChangeError(password.old.value, password.next.value, password.repeat.value);
+    const error = passwordChangeError(password.old.value, password.next.value, password.repeat.value, passwordConfigured);
     password.status.textContent = error;
     password.reload.hidden = true;
     if (error) return;
@@ -303,6 +306,11 @@ export function credentialSettingsController(settingsDialog, root = document) {
       password.save.disabled = false;
       password.reload.hidden = true;
       password.status.textContent = "";
+    },
+    setPasswordConfigured(configured) {
+      passwordConfigured = configured === true;
+      password.oldLabel.hidden = !passwordConfigured;
+      password.save.textContent = passwordConfigured ? "Change password" : "Set password";
     },
     closePassword() {
       passwordGeneration += 1;

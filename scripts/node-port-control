@@ -6,6 +6,7 @@ state_root=${BITCOIN_STACK_STATE_DIR:-$stack_root}
 config_root=${BITCOIN_STACK_CONFIG_DIR:-$state_root}
 env_file=$state_root/.env
 config_file=$config_root/config.json
+approved_config=$state_root/.approved-config.json
 config_lock=$state_root/.config.lock
 docker_bin=${DOCKER_BIN:-docker}
 ss_bin=${SS_BIN:-ss}
@@ -17,7 +18,6 @@ control_state=$state_root/port-control
 credential_state=$state_root/credential-control
 request_path=/state/port-control.request
 processing_path=/state/port-control.processing
-capability_path=/state/port-control.capability
 credential_request_path=/state/credential-control.request
 credential_processing_path=/state/credential-control.processing
 credential_capability_path=/state/credential-control.capability
@@ -59,6 +59,48 @@ write_status() {
 
 clear_processing() {
   dashboard_exec rm -f "$processing_path" >/dev/null 2>&1 || true
+}
+
+approve_config() {
+  BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+    BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" approve-rendered-config >/dev/null 2>&1
+}
+
+canonical_config() {
+  if [ -f "$1" ]; then jq -S -c . "$1" 2>/dev/null; else printf '{}\n'; fi
+}
+
+config_pending() {
+  current_approved=$(canonical_config "$config_file") || return 0
+  saved_approved=$(canonical_config "$approved_config") || return 0
+  [ -f "$approved_config" ] && [ "$current_approved" = "$saved_approved" ] && return 1
+  return 0
+}
+
+write_port_candidate() {
+  jq --argjson changes "$changes" '
+    reduce $changes[] as $change (.;
+      if $change.port == "bitcoin_rpc" then
+        .bitcoin.rpc_expose = $change.enabled |
+        if $change.enabled then .bitcoin.rpc_bind_ip = $change.bind_ip | .bitcoin.rpc_port = $change.host_port else . end
+      elif $change.port == "monero_rpc" then
+        .monero.rpc_expose = $change.enabled |
+        if $change.enabled then .monero.rpc_bind_ip = $change.bind_ip | .monero.rpc_port = $change.host_port else . end
+      elif $change.port == "monero_zmq" then
+        .monero.zmq_expose = $change.enabled |
+        if $change.enabled then .monero.zmq_bind_ip = $change.bind_ip | .monero.zmq_port = $change.host_port else . end
+      elif $change.port == "tari_grpc" then
+        .tari.grpc_expose = $change.enabled | if $change.enabled then .tari.grpc_bind_ip=$change.bind_ip | .tari.grpc_port=$change.host_port else . end
+      elif $change.port == "litecoin_rpc" then
+        .litecoin.rpc_expose = $change.enabled | if $change.enabled then .litecoin.rpc_bind_ip=$change.bind_ip | .litecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "dogecoin_rpc" then
+        .dogecoin.rpc_expose = $change.enabled | if $change.enabled then .dogecoin.rpc_bind_ip=$change.bind_ip | .dogecoin.rpc_port=$change.host_port else . end
+      elif $change.port == "bitcoincash_rpc" then
+        .bitcoincash.rpc_expose = $change.enabled | if $change.enabled then .bitcoincash.rpc_bind_ip=$change.bind_ip | .bitcoincash.rpc_port=$change.host_port else . end
+      else
+        .zcash.rpc_expose = $change.enabled | if $change.enabled then .zcash.rpc_bind_ip=$change.bind_ip | .zcash.rpc_port=$change.host_port else . end
+      end)
+  ' "$1" >"$2"
 }
 
 write_credential_status() {
@@ -339,6 +381,7 @@ process_credential_request() {
   credential_transaction_before=$credential_state/transaction.before
   credential_transaction_after=$credential_state/transaction.after
   credential_limits_file=$credential_state/transaction.limits
+  credential_env_before=$credential_state/transaction.env.before
   credential_intent_file=$credential_state/transaction.intent
   credential_result_file=$credential_state/transaction.result
   if [ -s "$credential_result_file" ]; then
@@ -353,7 +396,7 @@ process_credential_request() {
       credential_result_message=$(jq -r .message "$credential_result_file")
       credential_result_services=$(jq -c .affected_services "$credential_result_file")
       write_credential_status "$credential_id" "$credential_node" "$credential_result_state" "$credential_result_message" "$credential_result_services"
-      rm -f "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+      rm -f "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_env_before" "$credential_intent_file" "$credential_inflight"
       remember_credential_seen
       clear_credential_processing
       rm -f "$credential_result_file"
@@ -375,18 +418,24 @@ process_credential_request() {
   mkdir -p "$config_root"
   exec 8>"$config_lock"
   flock 8
+  prior_inflight=$(cat "$credential_inflight" 2>/dev/null || true)
+  if config_pending && [ "$prior_inflight" != "$credential_id" ]; then
+    remember_credential_seen
+    clear_credential_processing
+    write_credential_status "$credential_id" "$credential_node" rejected "Review the pending config change first." "$credential_services"
+    return 0
+  fi
   credential_committed=0
   credential_committed_snapshot=$credential_transaction_after
   credential_rollback_snapshot=$credential_transaction_before
   credential_recovering_rollback=0
-  prior_inflight=$(cat "$credential_inflight" 2>/dev/null || true)
   if [ -n "$prior_inflight" ] && [ "$prior_inflight" != "$credential_id" ]; then
     write_credential_status "$credential_id" "$credential_node" failed "An interrupted credential reset requires recovery." "$credential_services"
     remove_credential_capability
     return 0
   fi
   if [ "$prior_inflight" = "$credential_id" ] && [ -f "$credential_transaction_before" ] &&
-    [ -f "$credential_transaction_after" ] && [ -f "$credential_limits_file" ] && [ -f "$credential_intent_file" ]; then
+    [ -f "$credential_transaction_after" ] && [ -f "$credential_limits_file" ] && [ -f "$credential_env_before" ] && [ -f "$credential_intent_file" ]; then
     credential_intent=$(cat "$credential_intent_file")
     if [ "$credential_intent" = rollback ]; then
       credential_recovering_rollback=1
@@ -399,6 +448,10 @@ process_credential_request() {
       write_credential_status "$credential_id" "$credential_node" failed "Interrupted credential reset could not be recovered safely." "$credential_services"
       remove_credential_capability
       return 0
+    fi
+    if [ "$credential_recovering_rollback" = 1 ]; then
+      cp "$credential_env_before" "$env_file"
+      chmod 600 "$env_file"
     fi
     if cmp -s "$config_file" "$credential_recovery_source"; then
       credential_committed=1
@@ -423,6 +476,13 @@ process_credential_request() {
   credential_attempt=0
   while [ "$credential_committed" != 1 ] && [ "$credential_attempt" -lt 3 ]; do
     credential_attempt=$((credential_attempt + 1))
+    if config_pending; then
+      rm -f "$credential_inflight" "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_env_before" "$credential_intent_file"
+      remember_credential_seen
+      clear_credential_processing
+      write_credential_status "$credential_id" "$credential_node" rejected "Review the pending config change first." "$credential_services"
+      return 0
+    fi
     credential_config_snapshot=$(mktemp "$credential_state/.config.snapshot.XXXXXX")
     credential_config_tmp=$(mktemp "$config_root/.config.credential-control.XXXXXX")
     credential_validate_dir=$(mktemp -d "$credential_state/.validate.XXXXXX")
@@ -467,14 +527,15 @@ process_credential_request() {
       }
       cp "$credential_config_snapshot" "$credential_transaction_before"
       cp "$credential_config_tmp" "$credential_transaction_after"
+      cp "$env_file" "$credential_env_before"
       if ! credential_limits=$(credential_resource_limits "$credential_node"); then
-        rm -f "$credential_config_snapshot" "$credential_config_tmp" "$credential_transaction_before" "$credential_transaction_after"
+        rm -f "$credential_config_snapshot" "$credential_config_tmp" "$credential_transaction_before" "$credential_transaction_after" "$credential_env_before"
         break
       fi
       printf '%s\n' "$credential_limits" >"$credential_limits_file"
       printf 'apply\n' >"$credential_intent_file"
       printf '%s\n' "$credential_id" >"$credential_inflight"
-      chmod 600 "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+      chmod 600 "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_env_before" "$credential_intent_file" "$credential_inflight"
       mv "$credential_config_tmp" "$config_file"
       rm -f "$credential_config_snapshot"
       credential_committed=1
@@ -483,7 +544,7 @@ process_credential_request() {
     rm -f "$credential_config_snapshot" "$credential_config_tmp"
   done
   if [ "$credential_committed" != 1 ]; then
-    rm -f "$credential_inflight" "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_intent_file"
+    rm -f "$credential_inflight" "$credential_transaction_before" "$credential_transaction_after" "$credential_limits_file" "$credential_env_before" "$credential_intent_file"
     remember_credential_seen
     clear_credential_processing
     write_credential_status "$credential_id" "$credential_node" failed "RPC password could not be saved." "$credential_services"
@@ -521,6 +582,8 @@ process_credential_request() {
     cat "$credential_rollback_snapshot" >"$credential_rollback_tmp"
     chmod 600 "$credential_rollback_tmp"
     mv "$credential_rollback_tmp" "$config_file"
+    cp "$credential_env_before" "$env_file"
+    chmod 600 "$env_file"
     if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
       BITCOIN_STACK_PACKAGE_MANAGED="${BITCOIN_STACK_PACKAGE_MANAGED:-0}" BITCOIN_STACK_CONFIG_LOCK_HELD=1 \
       BITCOIN_STACK_CREDENTIAL_LIMITS="$credential_limits" \
@@ -532,6 +595,10 @@ process_credential_request() {
       return 0
     fi
   fi
+  if [ "$credential_final_state" = applied ] && ! approve_config; then
+    credential_final_state=failed
+    credential_final_message="RPC password was applied, but its configuration approval could not be saved."
+  fi
   credential_result_tmp=$(mktemp "$credential_state/.transaction.result.XXXXXX")
   jq -nc --arg id "$credential_id" --arg node "$credential_node" --arg state "$credential_final_state" \
     --arg message "$credential_final_message" --argjson affected_services "$credential_services" \
@@ -539,7 +606,7 @@ process_credential_request() {
   chmod 600 "$credential_result_tmp"
   mv "$credential_result_tmp" "$credential_result_file"
   write_credential_status "$credential_id" "$credential_node" "$credential_final_state" "$credential_final_message" "$credential_services"
-  rm -f "$credential_committed_snapshot" "$credential_rollback_snapshot" "$credential_limits_file" "$credential_intent_file" "$credential_inflight"
+  rm -f "$credential_committed_snapshot" "$credential_rollback_snapshot" "$credential_limits_file" "$credential_env_before" "$credential_intent_file" "$credential_inflight"
   remember_credential_seen
   clear_credential_processing
   rm -f "$credential_result_file"
@@ -557,16 +624,15 @@ dashboard_auth_configured() {
   ' >/dev/null 2>&1
 }
 
-if ! dashboard_auth_configured; then
-  dashboard_exec rm -f "$capability_path" >/dev/null 2>&1 || true
-  remove_credential_capability
-  exit 0
-fi
 dashboard_exec sh -c \
   'umask 077; printf "ready\n" > /state/.port-control.capability.tmp; mv /state/.port-control.capability.tmp /state/port-control.capability' >/dev/null
-write_credential_capability
-if process_credential_request; then
-  exit 0
+if ! dashboard_auth_configured; then
+  remove_credential_capability
+else
+  write_credential_capability
+  if process_credential_request; then
+    exit 0
+  fi
 fi
 
 if ! dashboard_exec test -f "$processing_path" >/dev/null 2>&1; then
@@ -637,6 +703,21 @@ inflight=$(cat "$inflight_file" 2>/dev/null || true)
 mkdir -p "$config_root"
 exec 8>"$config_lock"
 flock 8
+if config_pending; then
+  recovery_expected=
+  if [ "$inflight" = "$request_id" ] && [ -f "$approved_config" ]; then
+    recovery_expected=$(mktemp "$control_state/.config.expected.XXXXXX")
+    write_port_candidate "$approved_config" "$recovery_expected" || true
+  fi
+  if [ -z "$recovery_expected" ] || [ "$(canonical_config "$config_file")" != "$(canonical_config "$recovery_expected")" ]; then
+    rm -f "$recovery_expected"
+    remember_seen
+    clear_processing
+    write_status "$request_id" rejected "Review the pending config change first." config_pending
+    exit 0
+  fi
+  rm -f "$recovery_expected"
+fi
 
 recovering=0
 if [ "$inflight" = "$request_id" ]; then
@@ -652,6 +733,13 @@ rollback_had_config=0
 attempt=0
 while [ "$attempt" -lt 3 ]; do
   attempt=$((attempt + 1))
+  if [ "$recovering" != 1 ] && config_pending; then
+    rm -f "$inflight_file"
+    remember_seen
+    clear_processing
+    write_status "$request_id" rejected "Review the pending config change first." config_pending
+    exit 0
+  fi
   config_snapshot=$(mktemp "$control_state/.config.snapshot.XXXXXX")
   config_tmp=$(mktemp "$config_root/.config.port-control.XXXXXX")
   validate_dir=$(mktemp -d "$control_state/.validate.XXXXXX")
@@ -714,29 +802,7 @@ while [ "$attempt" -lt 3 ]; do
     write_status "$request_id" rejected "Invalid or unchanged port settings."
     exit 0
   fi
-  jq --argjson changes "$changes" '
-    reduce $changes[] as $change (.;
-      if $change.port == "bitcoin_rpc" then
-        .bitcoin.rpc_expose = $change.enabled |
-        if $change.enabled then .bitcoin.rpc_bind_ip = $change.bind_ip | .bitcoin.rpc_port = $change.host_port else . end
-      elif $change.port == "monero_rpc" then
-        .monero.rpc_expose = $change.enabled |
-        if $change.enabled then .monero.rpc_bind_ip = $change.bind_ip | .monero.rpc_port = $change.host_port else . end
-      elif $change.port == "monero_zmq" then
-        .monero.zmq_expose = $change.enabled |
-        if $change.enabled then .monero.zmq_bind_ip = $change.bind_ip | .monero.zmq_port = $change.host_port else . end
-      elif $change.port == "tari_grpc" then
-        .tari.grpc_expose = $change.enabled | if $change.enabled then .tari.grpc_bind_ip=$change.bind_ip | .tari.grpc_port=$change.host_port else . end
-      elif $change.port == "litecoin_rpc" then
-        .litecoin.rpc_expose = $change.enabled | if $change.enabled then .litecoin.rpc_bind_ip=$change.bind_ip | .litecoin.rpc_port=$change.host_port else . end
-      elif $change.port == "dogecoin_rpc" then
-        .dogecoin.rpc_expose = $change.enabled | if $change.enabled then .dogecoin.rpc_bind_ip=$change.bind_ip | .dogecoin.rpc_port=$change.host_port else . end
-      elif $change.port == "bitcoincash_rpc" then
-        .bitcoincash.rpc_expose = $change.enabled | if $change.enabled then .bitcoincash.rpc_bind_ip=$change.bind_ip | .bitcoincash.rpc_port=$change.host_port else . end
-      else
-        .zcash.rpc_expose = $change.enabled | if $change.enabled then .zcash.rpc_bind_ip=$change.bind_ip | .zcash.rpc_port=$change.host_port else . end
-      end)
-  ' "$config_snapshot" >"$config_tmp"
+  write_port_candidate "$config_snapshot" "$config_tmp"
   cp "$config_tmp" "$validate_dir/config.json"
   if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate_dir" \
     BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
@@ -852,6 +918,10 @@ if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOI
   "$stack_root/stack" apply-port-settings >/dev/null 2>&1; then
   final_state=applied
   final_message="LAN port settings applied."
+  if ! approve_config; then
+    final_state=failed
+    final_message="LAN port settings were applied, but their configuration approval could not be saved."
+  fi
 else
   final_state=failed
   final_message="Port settings are saved but could not be applied."

@@ -380,9 +380,19 @@
           <option>AUD</option><option>JPY</option><option>RUB</option><option>CNY</option>
         </select></label>
       </fieldset>
+      <fieldset id="settings-host">
+        <legend>Node set</legend>
+        <div id="settings-host-nodes" class="settings-host-nodes"></div>
+        <label id="settings-launch-at-start-label" class="settings-check"><input id="settings-launch-at-start" type="checkbox"> <span>Launch at boot</span></label>
+        <div id="settings-config-change" hidden>
+          <p class="settings-note">Config change detected. Run the new config?</p>
+          <button id="settings-apply-config" type="button">Run new config</button>
+        </div>
+        <p id="settings-host-status" class="settings-note" role="status" aria-live="polite"></p>
+      </fieldset>
       <fieldset id="settings-dashboard-password">
         <legend>Dashboard password</legend>
-        <label>Current password<input id="settings-password-old" type="password" autocomplete="current-password" maxlength="256"></label>
+        <label id="settings-password-old-label">Current password<input id="settings-password-old" type="password" autocomplete="current-password" maxlength="256"></label>
         <label>New password<input id="settings-password-new" type="password" autocomplete="new-password" minlength="12" maxlength="128"></label>
         <label>Repeat new password<input id="settings-password-repeat" type="password" autocomplete="new-password" minlength="12" maxlength="128"></label>
         <div class="settings-actions"><button id="settings-password-save" type="button">Change password</button><button id="settings-password-reload" type="button" hidden>Reload and sign in</button></div>

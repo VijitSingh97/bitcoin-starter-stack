@@ -36,9 +36,10 @@ test("public examples are clearly excluded from personal assets", () => {
   assert.match(view.note, /Public example; excluded from your assets/);
 });
 
-test("editing requires a supported active node and dashboard password", () => {
+test("editing requires a supported active node and trusted configuration access", () => {
   assert.equal(familyAccessView({ supported: true, enabled: true, active: true, has_password: true }, "litecoin").canEdit, true);
-  assert.match(familyAccessView({ supported: true, enabled: true, active: true, has_password: false }, "litecoin").status, /dashboard password/);
+  assert.equal(familyAccessView({ supported: true, enabled: true, active: true, has_password: false, can_configure: true }, "litecoin").canEdit, true);
+  assert.match(familyAccessView({ supported: true, enabled: true, active: true, has_password: false }, "litecoin").status, /trusted LAN/);
   assert.equal(familyAccessView({ supported: false, reason: "Dogecoin scanner details." }, "dogecoin").status, "Wallet balance not available.");
   assert.equal(familyAccessView({ supported: false, reason: "Zcash scanner details." }, "zcash").status, "Wallet balance not available.");
   assert.equal(familyAccessView({ supported: false, reason: "Tari wallet service unavailable." }, "tari").status, "Tari wallet service unavailable.");

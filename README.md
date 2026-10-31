@@ -40,12 +40,13 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   and local DNS forwarding is disabled. Bitcoin uses onion peers; inbound connections use an onion
   service when enabled. See the [privacy model](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
-  low-space warning). Start on localhost, or bind its configurable port to your private LAN IP;
-  add a password and an onion address for remote access. RPC is private by default,
+  low-space warning). First setup chooses a private LAN address automatically, falling back
+  to localhost when none is available. A dashboard password is optional; add one in Settings
+  or preset it in configuration. RPC is private by default,
   with optional authenticated access where the node supports it. Tari mining gRPC and Monero ZMQ assume a trusted LAN.
-- 🔑 **Separate generated logins.** Fresh installs generate different passwords for
-  the dashboard and each authenticated node endpoint. The username defaults to `admin`; the wizard
-  prints the selected services' credentials once. Existing passwords are preserved. Config
+- 🔑 **Separate generated logins.** Fresh installs generate a separate password for
+  each authenticated node endpoint, with username `admin`. The dashboard starts without a
+  password unless you preset one; its Settings panel can add one later. Existing passwords are preserved. Config
   renders into gitignored files, so a stray
   `git add` can't publish your RPC password — and bitcoind itself gets only a salted
   `rpcauth` hash, never the plaintext.
@@ -55,8 +56,8 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- ⚙️ **Settings that stick.** Use the gear menu for Appearance, the dashboard
-  password, Telegram, and Healthchecks. Each tower keeps its own block alert,
+- ⚙️ **Settings that stick.** Use the gear menu to install another node, choose launch at boot/login,
+  and configure Appearance, the dashboard password, Telegram, and Healthchecks. Each tower keeps its own block alert,
   LAN-port, and RPC-login controls after its wallet section. Use localhost, your
   private LAN, or a password-protected onion dashboard.
   Saved values are visible in the settings panel, and a separate JSON override survives
@@ -68,7 +69,7 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   installs start without it. Public examples are always excluded from personal totals.
   [How watch-only works](docs/watch-only.md).
 - 👁️ **Monero view-only wallets.** Add a main address and private view key from the
-  password-protected Monero card. No private spend key or seed is accepted, and the
+  Monero card on your trusted LAN. No private spend key or seed is accepted, and the
   dashboard cannot sign or send. Optional signed key images make spent/current balance
   tracking accurate; without them the amount is clearly labeled received-only. Fresh
   wallet state includes the sourced Monero General Fund as a received-only example.
@@ -98,7 +99,7 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   a developer-bot workflow proposes node-binary upgrades after verifying signed
   upstream checksums. Updates arrive as pull requests.
 - ⬆️ **One-command upgrades.** `./stack upgrade` fetches the latest release, backs up, and
-  applies it — or flip on `dashboard.control` (one question in `./stack init`) and upgrade
+  applies it — or set `dashboard.control` in `config.json` and upgrade
   with a button from the dashboard; the stack runs the host-side agent for you.
 - 🔭 **Knows when it's stale.** A daily update check (over Tor) surfaces new stack releases on
   the dashboard, and a Prometheus `/metrics` endpoint plugs into whatever
@@ -150,7 +151,7 @@ sync one chain at a time on a smaller host. See [Hardware Requirements](docs/har
 These are planning budgets, not measured average usage or hard minimums. Sync
 is uncapped by default; a smaller host can work but may take longer. Each node's
 `steady_cpus` and `steady_mem_limit_mb` are editable in `config.json`. Fresh APT
-wizard installs activate those caps after healthy sync checks; source installs
+default managed installs activate those caps after healthy sync checks; source installs
 leave automatic caps off. See [changing resource caps](docs/configuration.md#resource-caps).
 
 ### 1. Install the current release
@@ -170,8 +171,8 @@ cd bitcoin-starter-stack
 ```
 
 The download and extraction do not start Docker containers. `./stack init` is
-the explicit setup step. It writes private configuration, asks which nodes to
-run, and offers to download and start their images.
+the explicit setup step. It writes private configuration, downloads missing images,
+and starts a pruned Bitcoin node with no questions.
 
 Homebrew support for macOS and Linux is prepared but unreleased. After a release
 publishes the generated formula, its commands will be:
@@ -200,62 +201,61 @@ The first package release is for fresh installs and will not migrate an existing
 source-managed node. Development branches use unpublished image tags and are
 not an installation path.
 
-### 2. Accept the safe defaults
+### 2. Open the dashboard
 
-Enter any comma-separated combination of `bitcoin`, `monero`, `tari`,
-`litecoin`, `dogecoin`, `bitcoincash`, and `zcash`. Press Enter at the password
-prompt to generate a strong dashboard password. Every authenticated node
-endpoint gets a different generated password with username `admin`. Tari's
-optional LAN gRPC endpoint has no password and belongs only on a trusted LAN.
-The wizard prints the selected service credentials once at the end; save them
-in your password manager. A Bitcoin and Monero setup looks like:
+Run the installation's `init` command once. Setup uses these defaults:
 
-```text
-Dashboard password (letters/numbers) [Enter = strong random]:
-Nodes to run (comma-separated: bitcoin, monero, tari, litecoin, dogecoin, bitcoincash, zcash) [bitcoin]: bitcoin,monero
-Dashboard bind address (loopback or private LAN) [127.0.0.1]:
-Bitcoin data directory [/var/lib/bitcoin-starter-stack/data/bitcoin]:
-Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] n
-Recent-block retention in GB [10]:
-Monero data directory [/var/lib/bitcoin-starter-stack/data/monero]:
-Expose restricted Monero RPC to trusted LAN apps? [y/N] n
-Expose Monero ZMQ to a trusted LAN P2Pool host? [y/N] n
-Download missing containers and start the stack now? [Y/n]
+- **Bitcoin only**, with pruning enabled and 10 GB of recent block files.
+- **No dashboard password.** Use it on a trusted LAN; add a password in Settings
+  or preset `dashboard.password` before first start.
+- **Automatic private LAN address**, with localhost as a fallback. Setup prints
+  the actual dashboard URL. Homebrew uses port **8080**; APT/source use **80**.
+- **No exposed node RPC, gRPC, or ZMQ ports.** Each authenticated node endpoint
+  still gets its own generated `admin` login.
+- **Launch at boot/login off**, until enabled in global Settings. On macOS,
+  Docker Desktop must also be running in your logged-in session. After a reboot
+  with this option off, run `bitcoin-stack up` (`sudo` for APT) to open the
+  dashboard again.
 
-Generated credentials (shown once):
-  Dashboard — username: admin  password: <generated dashboard password>
-  Bitcoin RPC — username: admin  password: <different generated Bitcoin password>
-  Monero RPC — username: admin  password: <different generated Monero password>
+Open the printed URL. The gear menu lets you install another supported node,
+choose launch at boot/login, add a dashboard password, and set Appearance,
+Telegram, and Healthchecks. Each tower's **Node controls** contains its block
+alerts and optional LAN interfaces. Installing another node downloads its versioned
+images and starts it with default storage and closed LAN ports; progress and
+errors appear in Settings.
+
+Container downloads use the host's normal Docker connection. Once running,
+node peers, prices, alerts, and dashboard update checks use Tor. Setup does not
+change Docker's proxy or daemon configuration.
+
+For a different first start, create `config.json` at the path in the table below
+**before running `init`**. For example, this starts Bitcoin and Monero together:
+
+```json
+{
+  "bitcoin": { "enabled": true },
+  "monero": { "enabled": true },
+  "dashboard": { "bind_ip": "auto" }
+}
 ```
 
-Press Enter at the final question. Docker downloads the published container
-images using the host's normal network settings, then the stack starts. The
-wizard does not change Docker's proxy or daemon configuration. These initial
-APT and container downloads happen on the host; once running, node peers,
-prices, alerts, and dashboard update checks use the stack's Tor container.
+Only the values you change are required. To run Monero alone, also set
+`bitcoin.enabled` to `false`. You can preset data directories, a dashboard
+password, ports, and resource budgets in the same file. Follow the
+[first-start configuration steps](docs/getting-started.md#customize-before-first-start)
+and [configuration reference](docs/configuration.md).
 
-Keep `127.0.0.1` to open the dashboard only on this machine. For trusted-LAN
-access, enter this machine's private IPv4 address, such as `192.168.1.117`.
-This is the local address Docker should listen on, not the address of another
-computer or a public internet address. Wildcard, public, and IPv6 addresses are
-rejected. The source wizard uses `./data/<node>` and asks about the optional
-Upgrade button, which defaults to off.
+If you edit configuration while the application is stopped, the next manual
+start asks **Config change detected. Run new config?** An unattended boot keeps
+the last approved configuration and offers the pending change in Settings.
+`bitcoin-stack apply` (`sudo` for APT), or `./stack apply` for source, explicitly
+approves and applies the file. Routine `up` and `apply` use local images only;
+`init` and dashboard **Install** are explicit image-download actions.
 
-Fresh APT and Homebrew wizard installs will select the experimental compact
-resource profile. Source installs leave automatic caps off. The values are
-editable in `config.json`; see [resource caps](docs/configuration.md#resource-caps).
-
-If you answer **n** at the final question, start later with:
-
-```bash
-sudo bitcoin-stack pull
-sudo bitcoin-stack up
-sudo bitcoin-stack status
-```
-
-For a source install, use `./stack pull`, `./stack up`, and `./stack status`.
-`pull` is the explicit network action; routine `up` and `apply` use local images
-only and never build or download implicitly.
+Fresh APT and Homebrew installs select the experimental compact resource
+profile. Initial sync is uncapped; healthy sync checks activate the configured
+steady limits. Source installs leave automatic caps off. See
+[resource caps](docs/configuration.md#resource-caps).
 
 ### 3. Know where configuration and passwords live
 
@@ -266,8 +266,8 @@ only and never build or download implicitly.
 | Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` | same Homebrew commands |
 | APT | `/etc/bitcoin-starter-stack/config.json` | `/var/lib/bitcoin-starter-stack/.env` and `backups/` | `sudo bitcoin-stack apply` / `up` / `status` |
 
-`config.json` and `.env` are mode 600. The wizard prints the dashboard and
-selected node endpoint credentials once; the same values remain in those
+`config.json` and `.env` are mode 600. Setup prints the configured dashboard
+login, if any, and selected node endpoint credentials once; the same values remain in those
 private files so the stack can restart. Internal wallet-service credentials are
 generated into `.env` and are separate from the dashboard login and personal
 view-only wallet material. If you later change the dashboard password from the
@@ -318,18 +318,22 @@ credentials with these examples. Monero and Tari scans are advanced optional
 features that use view-only material; neither accepts a private spend key or
 seed phrase.
 
-Containers use Docker's `unless-stopped` policy. They return after a reboot when
-Docker starts, unless you explicitly stopped them. On Linux, enable Docker at
-boot. On macOS, Docker Desktop must start after login; the optional Homebrew
-service also waits for Docker and a completed configuration. Day-to-day commands,
-upgrades, backups, and troubleshooting are in [Operations](docs/operations.md).
+Fresh installs leave launch at boot/login off and retry crashed containers up
+to five times during the current Docker session. Enable **Launch at boot/login**
+in Settings to use Docker's `unless-stopped` policy and return automatically
+when Docker starts. Existing installations retain their saved policy. Linux
+needs Docker enabled at boot; macOS needs Docker Desktop after login.
+Day-to-day commands, upgrades, backups, and troubleshooting are in
+[Operations](docs/operations.md).
 
 ## 📈 Monitoring
 
-Open `http://localhost` on an APT/source node, or `http://localhost:8080` for
-Homebrew. After setting a private LAN bind address,
-use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
-The landing page shows a gold Bitcoin tower and an orange Monero tower. Click
+Open the URL printed by setup: `http://<server-ip>` for APT/source, or
+`http://<server-ip>:8080` for Homebrew. Linux can also use `<hostname>.local`
+when `avahi-daemon` is installed. Automatic binding uses the default network
+interface; if it is public, a VPN, or unsupported, setup falls back to localhost.
+Set an explicit private `dashboard.bind_ip` in configuration when needed.
+The landing page shows a colored tower for each configured node. Click
 one to zoom in and open its card; close it with **×**, Escape, or a click outside
 the panel. Towers continue below the screen, grow on hover or keyboard
 focus, and show a pulsing loading block on top. Names are hidden by default;
@@ -384,9 +388,9 @@ address-only confirmed-UTXO snapshots. Tari accepts one native view-only wallet
 and keeps confirmed, available, timelocked, and pending amounts distinct.
 Dogecoin and Zcash show **Wallet balance not available** with no address card.
 
-The gear menu contains global Appearance, Dashboard password, Telegram, and
-Healthchecks settings. Changing the dashboard password requires the current
-password plus the new value twice; the old login stops working immediately, so
+The gear menu contains node installation, launch at boot/login, Appearance,
+Dashboard password, Telegram, and Healthchecks settings. Adding the first dashboard password leaves the current field blank; changing an
+existing one requires its current password plus the new value twice; the old login stops working immediately, so
 reload and sign in again. When configured, the password protects the whole
 dashboard. Personal wallet views, wallet changes, node settings, and upgrades
 require it. LAN HTTP is unencrypted:

@@ -49,7 +49,7 @@ export function tariDraftAfterSubmit(draft, accepted) {
 
 export function tariAccessView(data) {
   const reason = typeof data?.reason === "string" ? data.reason : "";
-  if (data?.has_password !== true) return { canEdit: false, status: "Set a dashboard password to use view-only wallets." };
+  if (data?.can_configure !== true && data?.has_password !== true) return { canEdit: false, status: "Open this dashboard from its trusted LAN address to use view-only wallets." };
   if (data?.active !== true) return { canEdit: false, status: reason || "Tari is inactive." };
   if (data?.available !== true) return { canEdit: false, status: reason || "Tari wallet service unavailable." };
   return { canEdit: true, status: reason };

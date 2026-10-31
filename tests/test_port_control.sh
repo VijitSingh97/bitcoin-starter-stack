@@ -115,9 +115,23 @@ new_case() {
 printf '%s\n' "$*" >>"$FAKE_STACK_LOG"
 if [ "${FAKE_APPLY_FAIL_ONCE:-0}" = 1 ] && [ ! -e "$FAKE_APPLY_FAIL_MARKER" ]; then
   : >"$FAKE_APPLY_FAIL_MARKER"
+  if [ "${1:-}" = apply-credential-settings ] && [ "${2:-}" = bitcoin ]; then
+    changed_password=$(jq -r '.bitcoin.node_password // empty' "$BITCOIN_STACK_CONFIG_DIR/config.json")
+    if [ -n "$changed_password" ]; then
+      sed "s/^BITCOIN_RPC_PASSWORD=.*/BITCOIN_RPC_PASSWORD=$changed_password/" "$BITCOIN_STACK_STATE_DIR/.env" >"$BITCOIN_STACK_STATE_DIR/.env.tmp"
+      mv "$BITCOIN_STACK_STATE_DIR/.env.tmp" "$BITCOIN_STACK_STATE_DIR/.env"
+    fi
+  fi
   exit 1
 fi
-[ "${FAKE_APPLY_FAIL:-0}" != 1 ]
+[ "${FAKE_APPLY_FAIL:-0}" != 1 ] || exit 1
+if [ "${1:-}" = approve-rendered-config ]; then
+  jq -S . "$BITCOIN_STACK_CONFIG_DIR/config.json" >"$BITCOIN_STACK_STATE_DIR/.approved-config.tmp"
+  chmod 600 "$BITCOIN_STACK_STATE_DIR/.approved-config.tmp"
+  mv "$BITCOIN_STACK_STATE_DIR/.approved-config.tmp" "$BITCOIN_STACK_STATE_DIR/.approved-config.json"
+  cp "$BITCOIN_STACK_STATE_DIR/.env" "$BITCOIN_STACK_STATE_DIR/.approved.env"
+  chmod 600 "$BITCOIN_STACK_STATE_DIR/.approved.env"
+fi
 EOF
   chmod +x "$case_root/root/stack"
   cat >"$case_root/state/.env" <<'EOF'
@@ -129,6 +143,10 @@ EOF
   cat >"$case_root/config/config.json" <<'EOF'
 {"bitcoin":{"enabled":true,"node_password":"bitcoinpassword1234567890123456","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":8332,"steady_cpus":0.5},"monero":{"enabled":true,"node_password":"moneropassword12345678901234567","rpc_expose":true,"rpc_bind_ip":"192.168.1.10","rpc_port":18081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.10","zmq_port":18083},"tari":{"enabled":true,"grpc_expose":false},"litecoin":{"enabled":true,"node_password":"litecoinpassword123456789012345","rpc_expose":false},"dogecoin":{"enabled":true,"node_password":"dogecoinpassword123456789012345","rpc_expose":false},"bitcoincash":{"enabled":true,"node_password":"bitcoincashpassword1234567890123","rpc_expose":false},"zcash":{"enabled":true,"node_password":"zcashpassword123456789012345678","rpc_expose":false},"dashboard":{"password":"testpassword"},"other":{"keep":"yes"}}
 EOF
+  jq -S . "$case_root/config/config.json" >"$case_root/state/.approved-config.json"
+  chmod 600 "$case_root/state/.approved-config.json"
+  cp "$case_root/state/.env" "$case_root/state/.approved.env"
+  chmod 600 "$case_root/state/.approved.env"
   export BITCOIN_STACK_ROOT=$case_root/root
   export BITCOIN_STACK_STATE_DIR=$case_root/state
   export BITCOIN_STACK_CONFIG_DIR=$case_root/config
@@ -154,6 +172,10 @@ EOF
 }
 
 request() {
+  if [ "${APPROVE_BEFORE_REQUEST:-1}" = 1 ]; then
+    jq -S . "$case_root/config/config.json" >"$case_root/state/.approved-config.json"
+    chmod 600 "$case_root/state/.approved-config.json"
+  fi
   printf '%s\n' "$1" >"$FAKE_DASH_STATE/port-control.request"
 }
 
@@ -162,6 +184,10 @@ status() {
 }
 
 credential_request() {
+  if [ "${APPROVE_BEFORE_REQUEST:-1}" = 1 ]; then
+    jq -S . "$case_root/config/config.json" >"$case_root/state/.approved-config.json"
+    chmod 600 "$case_root/state/.approved-config.json"
+  fi
   printf '%s\n' "$1" >"$FAKE_DASH_STATE/credential-control.request"
 }
 
@@ -211,6 +237,9 @@ scripts/node-port-control
 [ "$(jq -r '.other.keep' "$case_root/config/config.json")" = yes ] || fail "unrelated config changed"
 [ "$(stat -c %a "$case_root/config/config.json" 2>/dev/null || stat -f %Lp "$case_root/config/config.json")" = 600 ] || fail "config permissions are not private"
 [ "$(status .state)" = applied ] || fail "successful close status was not applied"
+[ "$(jq -S -c . "$case_root/config/config.json")" = "$(jq -S -c . "$case_root/state/.approved-config.json")" ] ||
+  fail "successful close did not advance the approved config"
+[ -s "$case_root/state/.approved.env" ] || fail "successful close did not approve its rendered environment"
 [ "$(status '.affected_services | join(",")')" = tor,dashboard ] || fail "status did not name the affected services"
 grep -qx apply-port-settings "$FAKE_STACK_LOG" || fail "close did not use the bounded port-settings apply"
 grep -q pull "$FAKE_STACK_LOG" && fail "close attempted an image download"
@@ -239,6 +268,16 @@ printf '%4097s' x >"$FAKE_DASH_STATE/port-control.request"
 scripts/node-port-control
 [ "$(status .state)" = rejected ] || fail "oversized request was accepted"
 [ "$(grep -c '^apply-port-settings$' "$FAKE_STACK_LOG")" = 1 ] || fail "invalid request invoked apply"
+
+new_case pending-config
+jq '.other.external="pending"' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+APPROVE_BEFORE_REQUEST=0 request '{"id":"11111111111111111111111111111113","changes":[{"port":"bitcoin_rpc","enabled":false}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = rejected ] || fail "pending config did not block a port change"
+[ "$(status .error_code)" = config_pending ] || fail "pending config rejection lacked typed status"
+[ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = true ] || fail "pending config port request changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "pending config port request invoked apply"
 
 new_case open
 jq '.bitcoin.rpc_expose=false | .monero.rpc_expose=false | .monero.zmq_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
@@ -624,11 +663,13 @@ request '{"id":"12121212121212121212121212121212","changes":[{"port":"bitcoin_rp
 scripts/node-port-control
 PATH=$saved_path
 unset REAL_CMP CAS_CONFIG CAS_EDIT_MARKER
-[ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = false ] || fail "concurrent edit retry did not close requested port"
+[ "$(status .state)" = rejected ] || fail "concurrent external edit was accepted"
+[ "$(status .error_code)" = config_pending ] || fail "concurrent external edit lacked pending-config status"
+[ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = true ] || fail "concurrent edit request changed the requested port"
 [ "$(jq -r '.monero.rpc_expose' "$case_root/config/config.json")" = false ] || fail "concurrent port closure was reverted"
 [ "$(jq -r '.dashboard.password' "$case_root/config/config.json")" = changedconcurrently1234567890 ] || fail "concurrent password edit was reverted"
 [ "$(jq -r '.other.concurrent' "$case_root/config/config.json")" = preserved ] || fail "concurrent unrelated edit was reverted"
-[ "$(grep -c '^apply-port-settings$' "$FAKE_STACK_LOG")" = 1 ] || fail "concurrent edit retry invoked apply more than once"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "concurrent external edit invoked apply"
 
 new_case interrupted
 mkdir -p "$case_root/state/port-control"
@@ -663,7 +704,7 @@ new_case no-password
 sed -i.bak 's/DASHBOARD_PASSWORD=.*/DASHBOARD_PASSWORD=/' "$case_root/state/.env"
 : >"$FAKE_DASH_STATE/port-control.capability"
 scripts/node-port-control
-[ ! -e "$FAKE_DASH_STATE/port-control.capability" ] || fail "passwordless dashboard retained a capability"
+[ "$(cat "$FAKE_DASH_STATE/port-control.capability")" = ready ] || fail "passwordless dashboard did not receive port control"
 [ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "passwordless dashboard received credential control"
 printf '%s\n' '{"version":1,"iterations":210000,"salt":"0123456789abcdef0123456789abcdef","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' >"$FAKE_DASH_STATE/dashboard_auth.json"
 scripts/node-port-control
@@ -730,10 +771,28 @@ scripts/node-port-control
 [ ! -e "$FAKE_DASH_STATE/credential-control.capability" ] || fail "failed credential apply retained a capability"
 [ "$(grep -c '^apply-credential-settings monero$' "$FAKE_STACK_LOG")" = 2 ] || fail "failed credential apply did not restore affected services"
 
+new_case credential-env-rollback
+jq 'del(.bitcoin.node_password)' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+printf '%s\n' 'BITCOIN_RPC_PASSWORD=oldgeneratedpassword123456789012345' >>"$case_root/state/.env"
+chmod 600 "$case_root/state/.env"
+old_env=$(cat "$case_root/state/.env")
+APPROVE_BEFORE_REQUEST=1 credential_request '{"id":"16161616161616161616161616161616","node":"bitcoin","requested_at":1000}'
+cp "$case_root/state/.env" "$case_root/state/.approved.env"
+approved_config_hash=$(shasum -a 256 "$case_root/state/.approved-config.json")
+approved_env_hash=$(shasum -a 256 "$case_root/state/.approved.env")
+export FAKE_APPLY_FAIL_ONCE=1
+scripts/node-port-control
+[ "$(cat "$case_root/state/.env")" = "$old_env" ] || fail "failed credential reset retained the new generated environment password"
+[ "$(shasum -a 256 "$case_root/state/.approved-config.json")" = "$approved_config_hash" ] || fail "failed credential reset advanced approved config"
+[ "$(shasum -a 256 "$case_root/state/.approved.env")" = "$approved_env_hash" ] || fail "failed credential reset advanced approved environment"
+[ "$(credential_status .state)" = failed ] || fail "credential environment rollback did not report failure"
+
 new_case credential-interrupted
 mkdir -p "$case_root/state/credential-control"
 cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.before"
 jq '.bitcoin.node_password="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$case_root/config/config.json" >"$case_root/state/credential-control/transaction.after"
+cp "$case_root/state/.env" "$case_root/state/credential-control/transaction.env.before"
 printf '0 0 0\n' >"$case_root/state/credential-control/transaction.limits"
 printf 'apply\n' >"$case_root/state/credential-control/transaction.intent"
 printf '13131313131313131313131313131313\n' >"$case_root/state/credential-control/inflight"
@@ -750,6 +809,7 @@ mkdir -p "$case_root/state/credential-control"
 printf '%s\n' '{"id":"15151515151515151515151515151515","node":"bitcoin","state":"applied","message":"RPC password reset.","affected_services":["bitcoin","dashboard"]}' >"$case_root/state/credential-control/transaction.result"
 cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.before"
 cp "$case_root/config/config.json" "$case_root/state/credential-control/transaction.after"
+cp "$case_root/state/.env" "$case_root/state/credential-control/transaction.env.before"
 printf '0 0 0\n' >"$case_root/state/credential-control/transaction.limits"
 printf 'apply\n' >"$case_root/state/credential-control/transaction.intent"
 printf '15151515151515151515151515151515\n' >"$case_root/state/credential-control/inflight"
@@ -770,7 +830,7 @@ scripts/node-port-control
 [ "$(jq -r .bitcoin.node_password "$case_root/config/config.json")" = "$old_password" ] || fail "double failure did not select the prior password"
 [ "$(credential_status .state)" = failed ] || fail "double failure status was not recorded"
 [ "$(cat "$case_root/state/credential-control/transaction.intent")" = rollback ] || fail "double failure did not preserve rollback intent"
-for artifact in transaction.before transaction.after transaction.limits transaction.intent inflight; do
+for artifact in transaction.before transaction.after transaction.env.before transaction.limits transaction.intent inflight; do
   [ -s "$case_root/state/credential-control/$artifact" ] || fail "double failure discarded $artifact"
 done
 [ -s "$FAKE_DASH_STATE/credential-control.processing" ] || fail "double failure discarded the pending recovery request"

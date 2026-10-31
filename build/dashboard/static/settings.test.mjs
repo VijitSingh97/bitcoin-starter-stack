@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel } from "./settings.js";
+import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel, hostControlModel, hostActionPayload, bootControlLabel } from "./settings.js";
 
 const alertDefaults = {
   alert_monitor_online: true,
@@ -19,6 +19,26 @@ test("settings remain read-only unless the server confirms configuration access"
   for (const data of [undefined, {}, { can_configure: false }, { can_configure: "true" }]) {
     assert.equal(configurationAccess(data), false);
   }
+});
+
+test("host controls expose installed nodes, platform startup wording, and revision-bound config approval", () => {
+  const revision = "a".repeat(64);
+  const view = hostControlModel({
+    available: true, install_supported: true, boot_supported: true, boot_enabled: true, boot_kind: "login",
+    config_pending: true, config_revision: revision,
+    nodes: [{ id: "bitcoin", name: "Bitcoin", installed: true }, { id: "unknown", installed: true }],
+    status: { action: "install", state: "pending", message: "Installing…" },
+  });
+  assert.equal(view.nodes.bitcoin.installed, true);
+  assert.equal(view.nodes.monero.installed, false);
+  assert.equal(view.config_pending, true);
+  assert.equal(view.boot_kind, "login");
+  assert.equal(bootControlLabel(view.boot_kind), "Launch at login");
+  assert.deepEqual(hostActionPayload("install", "monero"), { action: "install", node: "monero" });
+  assert.deepEqual(hostActionPayload("launch_at_boot", false), { action: "launch_at_boot", enabled: false });
+  assert.deepEqual(hostActionPayload("apply_config", revision), { action: "apply_config", config_revision: revision });
+  assert.equal(hostActionPayload("install", "unknown"), undefined);
+  assert.equal(hostActionPayload("apply_config", "bad"), undefined);
 });
 
 test("global alert preferences default on and accept only bounded thresholds", () => {

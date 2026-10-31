@@ -105,9 +105,9 @@ that makes `tor_egress` Tor's deterministic default route.
 - **RPC auth is a salted hash.** bitcoind is started with `rpcauth=`; the
   plaintext password exists only in the dashboard container and `.env`.
   The bitcoin health check authenticates with Core's `.cookie` file.
-- **The only published port by default is the dashboard's `80`.** It binds to
-  `127.0.0.1` by default; `dashboard.bind_ip` accepts only loopback or RFC1918
-  host addresses for intentional LAN access. `bitcoin.rpc_expose` can publish
+- **The only published port by default is the dashboard's `80`.** It selects an RFC1918 host address automatically, with loopback as a fallback.
+  `dashboard.bind_ip` accepts `auto`, loopback, or an explicit RFC1918 host
+  address; public and wildcard bindings are rejected. `bitcoin.rpc_expose` can publish
   authenticated RPC on a private host address through Tor's TCP relay;
   `rpcallowip` still restricts Core to Docker's address space. SOCKS (`9050`)
   and the Tor control port (`9051`) are not published to the host. The optional
@@ -123,15 +123,15 @@ that makes `tor_egress` Tor's deterministic default route.
 
 ## Trust boundaries — and non-boundaries
 
-- Fresh installs generate separate dashboard and authenticated node RPC logins,
+- Fresh installs generate separate authenticated node RPC logins,
   plus Monero wallet RPC, Tari wallet RPC, a Monero wallet-file password, and a
   Tari native wallet startup password. Tari mining gRPC
-  and Monero ZMQ rely on the trusted LAN boundary. Existing deployments
-  may keep an empty or separate `dashboard.password`. The default host bind is loopback; set a private
-  `dashboard.bind_ip` to make LAN exposure intentional. See
-  [SECURITY.md](../SECURITY.md).
-  Personal wallet views and all wallet/upgrade mutations require a configured
-  password; sourced public examples are readable without one.
+  and Monero ZMQ rely on the trusted LAN boundary. The dashboard defaults to
+  no password and an automatically selected private LAN address. Trusted LAN
+  clients can view personal wallets and manage nodes; same-origin, Host, and
+  private-client checks protect passwordless mutations. Add a password in
+  Settings to restrict access. Credential reveal/reset, dashboard upgrades, and
+  onion access still require authentication. See [SECURITY.md](../SECURITY.md).
 - The opt-in Upgrade button keeps the container↔host boundary intact: the
   dashboard writes a fixed marker file to its own volume — content never read,
   no Docker socket, no host access — and the host-side `upgrade-agent` polls
@@ -145,7 +145,7 @@ that makes `tor_egress` Tor's deterministic default route.
   listener fields in server config and applies it offline. The dashboard cannot
   publish a public listener, choose host paths, run commands, or access Docker.
   Source installs reuse the host agent; APT installs use a dedicated hardened
-  systemd timer. Port changes require the dashboard password.
+  systemd timer. Passwordless changes are limited to trusted local/LAN requests.
   A compromised dashboard process can exercise these allowed LAN-listener
   controls; the helper limits its actions rather than independently authenticating the operator.
 - Node activation uses another fixed, typed request. The host validates the node

@@ -65,10 +65,10 @@ export function genesisNote(w) {
 }
 
 export function editAccess(view) {
-  const enabled = !!view.has_password;
+  const enabled = view.can_configure === true || view.has_password === true;
   return {
     enabled,
-    warning: enabled ? "" : "Set a dashboard password to add or remove watch-only wallets.",
+    warning: enabled ? "" : "Open this dashboard from its trusted LAN address to manage watch-only wallets.",
   };
 }
 

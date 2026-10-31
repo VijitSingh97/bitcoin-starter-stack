@@ -2,8 +2,9 @@
 
 ## Dashboard settings
 
-The gear at the bottom right opens shared Appearance, Telegram, and Healthchecks
-settings plus a collapsible section for each configured node. Changes apply
+The gear at the bottom right opens node installation, launch at boot/login,
+Appearance, Dashboard password, Telegram, and Healthchecks. Each tower contains
+its own separate Alerts and LAN access sections under Node controls. Changes apply
 immediately unless LAN port settings change. A dashboard
 password protects the gear when configured; without one, it follows the same
 access policy as the rest of the dashboard. The gear works from localhost, a
@@ -24,9 +25,8 @@ edited directly. Anyone with dashboard access can view those values. Disabling a
 service clears its credentials from the dashboard override; the server
 configuration is unchanged.
 
-Each configured node has its own collapsible section. It shows whether its LAN
-RPC or ZMQ port is exposed. With a dashboard password and the installed host
-helper, the same bottom Save button can open or close those ports using the
+Each configured tower's LAN access section shows whether RPC or ZMQ is exposed.
+With the installed host helper, its Save button can open or close ports using the
 server's configured private LAN address. The port number is editable; the
 address stays in server configuration. Port edits stay local until Save. The button reads
 **Save & restart** when a port change will recreate the Tor relay and dashboard;

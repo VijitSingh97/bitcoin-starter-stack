@@ -64,6 +64,10 @@ grep -Fq 'XDG_CONFIG_HOME' docs/homebrew.md || fail "Linuxbrew config does not f
 grep -Fq 'XDG_DATA_HOME' docs/homebrew.md || fail "Linuxbrew data does not follow XDG"
 grep -Fq 'run [opt_bin/"bitcoin-stack", "host-service"]' "$template" || fail "brew service does not use host-service"
 grep -Fq 'bitcoin-stack init' "$template" || fail "formula does not explain explicit setup"
+grep -Fq 'Setup starts the Homebrew host supervisor automatically.' "$template" || fail "formula caveats describe manual supervisor setup"
+grep -Fq 'STACK_RESTART_POLICY=on-failure:5' "$template" || fail "formula test omits the launch-at-login default"
+grep -Fq 'assert_equal preset_config, config_path.read' "$template" || fail "formula test does not preserve preset config"
+grep -Fq 'pipe_output("#{bin}/bitcoin-stack init"' "$template" && fail "formula test can start Docker or register a real service"
 grep -Eq 'post_install|system .*bitcoin-stack.*(init|up)|system .*docker' "$template" &&
   fail "formula installation has a lifecycle side effect"
 

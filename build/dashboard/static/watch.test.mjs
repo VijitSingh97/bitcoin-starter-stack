@@ -100,11 +100,12 @@ test("genesisNote applies only to the genesis public address", () => {
   assert.equal(genesisNote({ key: "bc1qexample" }), "");
 });
 
-test("editAccess keeps a passwordless watch list read-only", () => {
+test("editAccess allows passwordless trusted-LAN configuration", () => {
   assert.deepEqual(editAccess({ has_password: false }), {
     enabled: false,
-    warning: "Set a dashboard password to add or remove watch-only wallets.",
+    warning: "Open this dashboard from its trusted LAN address to manage watch-only wallets.",
   });
+  assert.deepEqual(editAccess({ has_password: false, can_configure: true }), { enabled: true, warning: "" });
   assert.deepEqual(editAccess({ has_password: true }), { enabled: true, warning: "" });
 });
 

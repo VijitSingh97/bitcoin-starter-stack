@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+export BITCOIN_STACK_DEFAULT_BIND_IP=192.168.50.10
 cp configure.sh "$tmp/"
 
 fail() {
@@ -24,11 +25,11 @@ monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.e
 monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
 tari_wallet_rpc_password=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
 tari_wallet_password=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$tmp/.env")
-if [ -z "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ] || [ -z "$tari_wallet_rpc_password" ] || [ -z "$tari_wallet_password" ]; then
-  fail "fresh install did not generate all passwords"
+if [ -n "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ] || [ -z "$tari_wallet_rpc_password" ] || [ -z "$tari_wallet_password" ]; then
+  fail "fresh install password defaults are wrong"
 fi
-passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" "$tari_wallet_rpc_password" "$tari_wallet_password" | sort -u | wc -l | tr -d ' ')
-[ "$passwords" = "7" ] || fail "fresh install did not separate service passwords"
+passwords=$(printf '%s\n' "$rpc_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" "$tari_wallet_rpc_password" "$tari_wallet_password" | sort -u | wc -l | tr -d ' ')
+[ "$passwords" = "6" ] || fail "fresh install did not separate service passwords"
 grep -q '^MONERO_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Monero wallet RPC user default is not admin"
 grep -q '^MONERO_WALLET_RPC_URL=http://172.29.0.31:18082$' "$tmp/.env" || fail "Monero wallet RPC URL is not internal"
 grep -q '^TARI_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Tari wallet RPC user default is not admin"
@@ -49,10 +50,15 @@ grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Bitcoin steady
 grep -q '^MONERO_STEADY_CPUS=1$' "$tmp/.env" || fail "Monero steady CPU default is not 1"
 grep -q '^MONERO_STEADY_MEM_LIMIT_MB=2048$' "$tmp/.env" || fail "Monero steady memory default is not 2048 MB"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "fresh install dashboard onion default is not off"
+grep -q '^STACK_RESTART_POLICY=on-failure:5$' "$tmp/.env" || fail "fresh install restart policy is not crash-only"
 watch_b64=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$tmp/.env")
 watch_json=$(printf '%s' "$watch_b64" | openssl base64 -d -A)
 printf '%s' "$watch_json" | jq -e 'length == 1 and .[0].name == "Binance (public)" and .[0].key == "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo" and .[0].birthday == ""' >/dev/null ||
   fail "zero-config install did not seed the public Binance example"
+printf '%s\n' '{"dashboard":{"launch_at_boot":true}}' >"$tmp/config.json"
+(cd "$tmp" && ./configure.sh) >/dev/null
+grep -q '^STACK_RESTART_POLICY=unless-stopped$' "$tmp/.env" || fail "launch-at-boot setting did not render"
+rm -f "$tmp/config.json"
 
 # 2. Re-running keeps the same auto-generated credentials AND the rpcauth
 #    salt/hash (idempotent). A rotating salt re-derives the hash every run, which
@@ -101,6 +107,7 @@ grep -q '^BITCOIN_DBCACHE=3000$' "$legacy/.env" || fail "existing dbcache was re
 grep -q '^BITCOIN_PRUNE=0$' "$legacy/.env" || fail "existing archival node was converted to pruning"
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$legacy/.env" || fail "existing inbound onion setting was disabled"
 grep -q '^DASHBOARD_ONION=1$' "$legacy/.env" || fail "existing dashboard onion setting was disabled"
+grep -q '^STACK_RESTART_POLICY=unless-stopped$' "$legacy/.env" || fail "legacy install had launch at boot disabled"
 
 legacy_missing="$tmp/legacy-missing-prune"
 mkdir "$legacy_missing"
@@ -176,7 +183,7 @@ grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
-grep -qE '^DASHBOARD_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "dashboard password was not independently generated"
+grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password should default to disabled"
 grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
 grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"
 grep -qE '^MONERO_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet password was not generated"
@@ -184,7 +191,8 @@ grep -qE '^TARI_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Tari
 grep -qE '^TARI_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Tari wallet password was not generated"
 grep -q '^MONERO_DATA_DIR=./data/monero$' "$tmp/.env" || fail "Monero data_dir default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
-grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
+grep -q '^DASHBOARD_BIND_IP=192.168.50.10$' "$tmp/.env" || fail "dashboard did not use the detected private LAN address"
+grep -q '^STACK_RESTART_POLICY=on-failure:5$' "$tmp/.env" || fail "fresh config restart policy is not crash-only"
 grep -q '^TELEGRAM_BOT_TOKEN=$' "$tmp/.env" || fail "telegram token default not applied"
 grep -q '^HEALTHCHECKS_URL=$' "$tmp/.env" || fail "healthchecks default not applied"
 grep -q '^ALERT_NEW_BLOCK=0$' "$tmp/.env" || fail "new-block alert default not applied"
@@ -234,7 +242,7 @@ perms=$(ls -l "$tmp/.env" | cut -c1-10)
 # 10. Custom values are honored
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin": {"node_username": "u", "node_password": "longrpcpassword1234567890", "data_dir": "./elsewhere", "dbcache_mb": 512, "prune_mb": 550, "inbound_onion": true, "rpc_expose": true, "rpc_bind_ip": "192.168.1.118", "rpc_port": 18332},
- "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117"},
+ "dashboard": {"password": "dashpass1", "onion": true, "bind_ip": "192.168.1.117", "launch_at_boot": true},
  "notifications": {"telegram_bot_token": "123:abc-DEF", "telegram_chat_id": "-10042", "healthchecks_url": "https://hc-ping.com/uuid", "alert_new_block": true, "alert_new_block_monero": true, "alert_new_block_tari": true, "alert_new_block_litecoin": true, "alert_new_block_dogecoin": true, "alert_new_block_bitcoincash": true, "alert_new_block_zcash": true},
  "wallets": [{"name": "Cold storage", "key": "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", "birthday": "2021-01-01"}]}
 EOF
@@ -250,6 +258,7 @@ grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.rpc.yml$' "$tmp/.env" |
 grep -q '^DASHBOARD_PASSWORD=dashpass1$' "$tmp/.env" || fail "dashboard password not rendered"
 grep -q '^DASHBOARD_ONION=1$' "$tmp/.env" || fail "dashboard onion not rendered"
 grep -q '^DASHBOARD_BIND_IP=192.168.1.117$' "$tmp/.env" || fail "dashboard LAN bind not rendered"
+grep -q '^STACK_RESTART_POLICY=unless-stopped$' "$tmp/.env" || fail "launch at boot was not rendered"
 grep -q '^TELEGRAM_BOT_TOKEN=123:abc-DEF$' "$tmp/.env" || fail "telegram token not rendered"
 grep -q '^TELEGRAM_CHAT_ID=-10042$' "$tmp/.env" || fail "telegram chat id not rendered"
 grep -q '^HEALTHCHECKS_URL=https://hc-ping.com/uuid$' "$tmp/.env" || fail "healthchecks url not rendered"
@@ -303,6 +312,17 @@ echo '{"bitcoin": {"sync_over_clearnet": false}}' >"$tmp/config.json"
 grep -q '^BITCOIN_SYNC_OVER_CLEARNET=' "$tmp/.env" && fail "legacy clearnet variable remains in .env"
 
 # Dashboard publication is limited to loopback and RFC1918 IPv4 addresses.
+printf 'DASHBOARD_BIND_IP=192.168.50.40\n' >"$tmp/.env"
+echo '{"dashboard":{"bind_ip":"auto"}}' >"$tmp/config.json"
+(cd "$tmp" && BITCOIN_STACK_DEFAULT_BIND_IP=192.168.50.41 ./configure.sh) >/dev/null
+grep -q '^DASHBOARD_BIND_IP=192.168.50.41$' "$tmp/.env" || fail "auto dashboard bind reused a stale address"
+(cd "$tmp" && BITCOIN_STACK_DEFAULT_BIND_IP=8.8.8.8 ./configure.sh) >"$tmp/auto-bind.out" 2>&1
+grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "auto dashboard bind did not fall back to loopback"
+grep -q 'No private LAN address detected' "$tmp/auto-bind.out" || fail "loopback fallback was not reported"
+echo '{"dashboard":{"bind_ip":"192.168.50.42"}}' >"$tmp/config.json"
+(cd "$tmp" && BITCOIN_STACK_DEFAULT_BIND_IP=192.168.50.43 ./configure.sh) >/dev/null
+grep -q '^DASHBOARD_BIND_IP=192.168.50.42$' "$tmp/.env" || fail "explicit dashboard bind was replaced by auto detection"
+
 for bind_ip in 127.0.0.2 10.1.2.3 172.16.0.1 172.31.255.254 192.168.50.4; do
   jq -n --arg ip "$bind_ip" '{dashboard:{bind_ip:$ip}}' >"$tmp/config.json"
   (cd "$tmp" && ./configure.sh) >/dev/null || fail "private dashboard bind $bind_ip was rejected"

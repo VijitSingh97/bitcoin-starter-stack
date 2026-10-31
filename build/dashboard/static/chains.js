@@ -144,7 +144,7 @@ if (typeof document !== "undefined") {
       button.disabled=view.disabled || !control.available || control.pending || busy;
       button.textContent=pending ? (control.status.active ? "Activating…" : "Deactivating…") : view.button;
       if(pending) setText(`${id}-power-status`, "Applying node state change…");
-      else if(node.configured && !control.available) setText(`${id}-power-status`, "Node controls require a dashboard password and the installed host helper.");
+      else if(node.configured && !control.available) setText(`${id}-power-status`, "Node controls require the installed host helper.");
     }
   };
 
@@ -165,7 +165,7 @@ if (typeof document !== "undefined") {
         refreshNode(id);
       }
       const configured=[...state.values()].some(node=>node.configured);
-      setText("node-overview-status",configured ? "" : "No nodes are configured. Run setup to select a node.");
+      setText("node-overview-status",configured ? "" : "No nodes are configured. Install a node in Settings.");
       if(requestID && control.status?.id===requestID && ["applied","rejected","failed"].includes(control.status.state)) {
         const result=control.status;
         setText(`${result.node}-power-status`,result.message || (result.state==="applied" ? "Node state updated." : "Node state could not be changed."));

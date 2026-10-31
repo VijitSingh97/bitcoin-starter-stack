@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -498,11 +499,24 @@ func passwordlessSettingsHostAllowed(authority string) bool {
 }
 
 func (a *app) rejectUnsafeSettingsHost(w http.ResponseWriter, r *http.Request) bool {
-	if a.hasDashboardPassword() || passwordlessSettingsHostAllowed(r.Host) {
+	if a.configurationAllowed(r) {
 		return false
 	}
 	http.Error(w, "passwordless notification settings require a local dashboard address", http.StatusForbidden)
 	return true
+}
+
+func (a *app) configurationAllowed(r *http.Request) bool {
+	return a.hasDashboardPassword() || passwordlessSettingsHostAllowed(r.Host) && passwordlessRemoteAllowed(r.RemoteAddr)
+}
+
+func passwordlessRemoteAllowed(remote string) bool {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		return false
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && (address.IsLoopback() || address.IsPrivate())
 }
 
 func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -523,6 +537,7 @@ func (a *app) apiSettingsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view["port_control"] = a.portControlView()
+	view["dashboard_password_set"] = a.hasDashboardPassword()
 	if r.URL.Query().Get("scope") == "nodes" {
 		delete(view, "telegram_bot_token")
 		delete(view, "telegram_chat_id")
@@ -536,7 +551,7 @@ func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
 	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSettingsBody)
@@ -568,6 +583,7 @@ func (a *app) apiSettingsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view["port_control"] = a.portControlView()
+	view["dashboard_password_set"] = a.hasDashboardPassword()
 	if r.URL.Query().Get("scope") == "nodes" {
 		delete(view, "telegram_bot_token")
 		delete(view, "telegram_chat_id")

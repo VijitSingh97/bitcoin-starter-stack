@@ -41,8 +41,10 @@ export ZCASH_RPC_USER=zcashuser
 export ZCASH_RPC_PASSWORD=zcashpassword
 export WATCH_WALLETS_B64=watchblob
 export DASHBOARD_BIND_IP=127.0.0.1
+export STACK_VERSION=test
 
 rendered=$(docker compose --env-file /dev/null config)
+restart_rendered=$(STACK_RESTART_POLICY=unless-stopped docker compose --env-file /dev/null config)
 legacy_cache_rendered=$(env -u BITCOIN_DBCACHE docker compose --env-file /dev/null config)
 
 # Settings reach bitcoind's environment
@@ -65,6 +67,9 @@ for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
 done
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
+[ "$(grep -c 'restart: \${STACK_RESTART_POLICY:-on-failure:5}' docker-compose.yml)" = 11 ] || fail "not every application container uses the launch policy"
+[ "$(echo "$rendered" | grep -c 'restart: on-failure:5')" = 3 ] || fail "active containers do not use bounded crash recovery"
+[ "$(echo "$restart_rendered" | grep -c 'restart: unless-stopped')" = 3 ] || fail "launch-at-boot policy did not reach active containers"
 grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"
 
 # The plaintext RPC password reaches ONLY the dashboard (bitcoind gets the
@@ -248,6 +253,9 @@ echo "$new_lan" | sed -n '/^  zcash:$/,/^  [a-z]/p' | grep -q 'published:' && fa
 # Without credentials the stack refuses to start
 if env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD docker compose --env-file /dev/null config >/dev/null 2>&1; then
   fail "compose config succeeded without credentials"
+fi
+if env -u STACK_VERSION docker compose --env-file /dev/null config >/dev/null 2>&1; then
+  fail "compose config silently selected an unversioned project image"
 fi
 
 # The dashboard mounts the chain read-only and gets a separate writable volume

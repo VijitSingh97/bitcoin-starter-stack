@@ -32,6 +32,24 @@ the core Bitcoin deployment:
 `docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
 shows recent probe output when diagnosing.
 
+## Startup and external configuration changes
+
+The application starts only when you run `init` or `up`, unless **Launch at
+boot/login** is enabled in global Settings. APT uses Docker's startup policy;
+Homebrew uses its user service after login and waits for Docker. The host
+management helper remains available independently of the application startup
+preference. Turning the preference off leaves running nodes alone. Fresh
+containers use `on-failure:5` while it is off and `unless-stopped` while on.
+Existing installations preserve their previous behavior until explicitly changed.
+
+Private `.approved-config.json` and `.approved.env` snapshots retain the last
+approved host configuration. If `config.json` changes while stopped, a manual
+start asks before applying it. A background start keeps the approved version;
+global Settings offers the pending file for approval. Approval is tied to that
+file revision, so a second edit requires a fresh review. `apply` is explicit
+approval. On an older installation with no approval snapshot, the existing
+rendered runtime is retained until the file is explicitly approved once.
+
 ## Dashboard and node credentials
 
 Open the gear menu to change the dashboard login. Enter the current password,
@@ -40,8 +58,10 @@ characters. The old password stops working immediately; reload and sign in
 with the new one. The dashboard stores only a salted hash in
 `/state/dashboard_auth.json` inside the `dashboard_state` named volume. That
 saved login takes precedence over the baseline in `config.json` and `.env`.
-If dashboard authentication was disabled, set a password in the server
-configuration first; the web panel cannot claim a passwordless installation.
+If authentication is currently disabled, leave the current-password field blank
+to add a password from Settings. Existing logins still require their current
+password. A passwordless dashboard allows trusted LAN users to manage the
+application; add a password before sharing access with less-trusted devices.
 
 If the dashboard password is forgotten, set a new baseline
 `dashboard.password` in the installation's `config.json`, then stop the
@@ -54,7 +74,8 @@ actual volume name, so inspect the deployment before making this offline change
 or ask the installer administrator to perform it.
 
 Node credentials are in the selected tower's settings, after its wallet
-section. For an enabled authenticated LAN RPC listener, **Show password**
+section. Add a dashboard password before revealing or resetting RPC credentials.
+For an enabled authenticated LAN RPC listener, **Show password**
 reveals that node's username and password only after an explicit click. To
 rotate the password, type `reset`. The host helper creates a new 48-character
 hex password, updates the private node configuration and `.env`, and restarts
@@ -212,7 +233,9 @@ first — a live copy of `chainstate/` is corrupt by construction.
 
 ## Self-healing (a deliberate non-feature)
 
-`restart: unless-stopped` already restarts any container that *crashes*.
+Fresh installs use `on-failure:5` to retry a crashed container up to five times.
+With launch at boot/login enabled, `unless-stopped` also restarts crashed
+containers and brings them back after Docker restarts.
 The remaining case — running but unhealthy — would need something with
 Docker-socket access to act on, and a socket proxy is a bigger attack
 surface than the failure it heals on a single-node stack. So: unhealthy

@@ -59,6 +59,40 @@ export function configurationAccess(data) {
   return data?.can_configure === true;
 }
 
+export function hostControlModel(data = {}) {
+  const nodes = Object.fromEntries(allNodes.map((id) => [id, { id, name: id, installed: false }]));
+  for (const node of Array.isArray(data.nodes) ? data.nodes : []) {
+    if (!allNodes.includes(node?.id)) continue;
+    nodes[node.id] = { id: node.id, name: String(node.name || node.id), installed: node.installed === true };
+  }
+  const action = ["install", "launch_at_boot", "apply_config"].includes(data?.status?.action) ? data.status.action : "";
+  const state = ["pending", "applied", "rejected", "failed"].includes(data?.status?.state) ? data.status.state : "";
+  const bootKind = ["boot", "login", "unsupported"].includes(data.boot_kind) ? data.boot_kind : "unsupported";
+  const revision = data.config_pending === true && /^[0-9a-f]{64}$/.test(String(data.config_revision || "")) ? data.config_revision : "";
+  return {
+    available: data.available === true,
+    install_supported: data.install_supported === true,
+    boot_supported: data.boot_supported === true && bootKind !== "unsupported",
+    boot_enabled: data.boot_enabled === true,
+    boot_kind: bootKind,
+    config_pending: !!revision,
+    config_revision: revision,
+    nodes,
+    status: { action, state, message: state ? String(data.status?.message || "") : "" },
+  };
+}
+
+export function hostActionPayload(action, value) {
+  if (action === "install" && allNodes.includes(value)) return { action, node: value };
+  if (action === "launch_at_boot" && typeof value === "boolean") return { action, enabled: value };
+  if (action === "apply_config" && /^[0-9a-f]{64}$/.test(String(value || ""))) return { action, config_revision: value };
+  return undefined;
+}
+
+export function bootControlLabel(kind) {
+  return kind === "login" ? "Launch at login" : "Launch at boot";
+}
+
 export function notificationChanged(saved, payload) {
   const savedAlertPreferences = alertPreferenceModel(saved);
   return Object.entries(payload).some(([field, value]) => {
@@ -243,6 +277,12 @@ if (typeof document !== "undefined") {
   const defaultCurrency = byId("default-currency");
   const save = byId("save");
   const reset = byId("reset");
+  const hostNodes = byId("host-nodes");
+  const launchAtStart = byId("launch-at-start");
+  const launchAtStartLabel = byId("launch-at-start-label");
+  const configChange = byId("config-change");
+  const applyConfig = byId("apply-config");
+  const hostStatus = byId("host-status");
   const nodeViews = {};
   for (const node of allNodes) {
     const details = byId(`${node}-alerts`);
@@ -286,6 +326,8 @@ if (typeof document !== "undefined") {
   let ambiguousStatusTarget;
   let submittedPortNode = "";
   let stagedPortDraft;
+  let hostPoll;
+  let hostView = hostControlModel();
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
   const portRows = {
@@ -382,6 +424,69 @@ if (typeof document !== "undefined") {
   };
 
   const clearSecrets = () => { token.value = ""; chat.value = ""; url.value = ""; };
+
+  const requestHost = async (payload) => {
+    const response = await fetch("/api/settings/host", {
+      method: payload ? "POST" : "GET",
+      headers: payload ? { "Content-Type": "application/json", "X-Requested-With": "fetch" } : {},
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    });
+    if (!response.ok) {
+      const message = (await response.text()).trim();
+      throw new Error(message.length <= 200 ? message : "Could not update the node set.");
+    }
+    return response.json();
+  };
+
+  const renderHost = (data) => {
+    hostView = hostControlModel(data);
+    hostNodes.replaceChildren();
+    const busy = hostView.status.state === "pending";
+    for (const node of Object.values(hostView.nodes)) {
+      const row = document.createElement("div");
+      row.className = "settings-host-node";
+      const name = document.createElement("span");
+      name.textContent = node.name;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = node.installed ? "Installed" : "Install";
+      button.disabled = node.installed || !hostView.available || !hostView.install_supported || hostView.config_pending || busy;
+      button.addEventListener("click", () => submitHost(hostActionPayload("install", node.id)));
+      row.append(name, button);
+      hostNodes.append(row);
+    }
+    launchAtStart.checked = hostView.boot_enabled;
+    launchAtStart.disabled = !hostView.available || !hostView.boot_supported || hostView.config_pending || busy;
+    launchAtStartLabel.querySelector("span").textContent = bootControlLabel(hostView.boot_kind);
+    launchAtStartLabel.hidden = hostView.boot_kind === "unsupported";
+    configChange.hidden = !hostView.config_pending;
+    applyConfig.disabled = !hostView.available || busy;
+    hostStatus.textContent = hostView.status.message || (!hostView.available ? "Host controls require the installed helper." : "");
+    clearTimeout(hostPoll);
+    if (busy && dialog.open) hostPoll = setTimeout(loadHost, 2000);
+  };
+
+  async function loadHost() {
+    try { renderHost(await requestHost()); }
+    catch (error) { hostStatus.textContent = error.message; }
+  }
+
+  async function submitHost(payload) {
+    if (!payload) return;
+    clearTimeout(hostPoll);
+    hostStatus.textContent = "Applying…";
+    for (const button of hostNodes.querySelectorAll("button")) button.disabled = true;
+    launchAtStart.disabled = applyConfig.disabled = true;
+    try {
+      const statusView = await requestHost(payload);
+      hostView.status = { action: payload.action, state: "pending", message: statusView.message || "Applying host change…" };
+      hostStatus.textContent = hostView.status.message;
+      hostPoll = setTimeout(loadHost, 1000);
+    } catch (error) {
+      hostStatus.textContent = error.message;
+      await loadHost();
+    }
+  }
   const updateInputs = () => {
     token.disabled = chat.disabled = !allowed || !telegramEnabled.checked;
     for (const input of Object.values(alertPreferences)) input.disabled = !allowed || !telegramEnabled.checked;
@@ -394,6 +499,7 @@ if (typeof document !== "undefined") {
   const render = (data, scope = "global") => {
     saved = { ...saved, ...data };
     allowed = configurationAccess(data);
+    if (Object.hasOwn(data, "dashboard_password_set")) credentialSettings.setPasswordConfigured(data.dashboard_password_set === true);
     if (scope === "global") {
       telegramEnabled.checked = !!data.telegram_enabled;
       healthchecksEnabled.checked = !!data.healthchecks_enabled;
@@ -491,9 +597,9 @@ if (typeof document !== "undefined") {
     }
     catch (error) { status.textContent = error.message; }
   }
-  byId("open").addEventListener("click", () => { dialog.showModal(); credentialSettings.openPassword(); load(); });
+  byId("open").addEventListener("click", () => { dialog.showModal(); credentialSettings.openPassword(); load(); loadHost(); });
   byId("close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
+  dialog.addEventListener("close", () => { clearTimeout(hostPoll); clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
   window.addEventListener("node-selected", (event) => {
     credentialSettings.closeNode();
     if (event.detail?.node) {
@@ -503,6 +609,8 @@ if (typeof document !== "undefined") {
   });
   telegramEnabled.addEventListener("change", updateInputs);
   healthchecksEnabled.addEventListener("change", updateInputs);
+  launchAtStart.addEventListener("change", () => submitHost(hostActionPayload("launch_at_boot", launchAtStart.checked)));
+  applyConfig.addEventListener("click", () => submitHost(hostActionPayload("apply_config", hostView.config_revision)));
   for (const row of Object.values(portRows)) {
     for (const input of row.querySelectorAll("input")) input.addEventListener("input", () => updatePortPlan(true));
   }

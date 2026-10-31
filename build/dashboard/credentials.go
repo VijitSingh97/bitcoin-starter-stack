@@ -153,13 +153,12 @@ func (a *app) credentialControlView() map[string]any {
 			}
 		}
 	}
-	return map[string]any{"available": a.credentialControlAvailable(), "interfaces": interfaces, "status": status}
+	return map[string]any{"available": a.credentialControlAvailable(), "requires_password": !a.hasDashboardPassword(), "interfaces": interfaces, "status": status}
 }
 
 func (a *app) apiCredentialsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !a.hasDashboardPassword() {
-		http.Error(w, "set a dashboard password to manage RPC credentials", http.StatusForbidden)
+	if a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	writeJSON(w, a.credentialControlView())

@@ -34,6 +34,44 @@ config='{}'
 get() { jq -r "$1 // \"${2:-}\"" <<<"$config"; }
 flag() { jq -r "if $1 == true then 1 else 0 end" <<<"$config"; }
 
+private_ipv4() {
+  local ip=$1 a b c d
+  [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r a b c d <<<"$ip"
+  ((10#$a == 10 || (10#$a == 172 && 10#$b >= 16 && 10#$b <= 31) || (10#$a == 192 && 10#$b == 168)))
+}
+
+detect_dashboard_bind_ip() {
+  local interface ip
+  if [ -n "${BITCOIN_STACK_DEFAULT_BIND_IP:-}" ]; then
+    if private_ipv4 "$BITCOIN_STACK_DEFAULT_BIND_IP"; then
+      printf '%s\n' "$BITCOIN_STACK_DEFAULT_BIND_IP"
+    else
+      echo "No private LAN address detected; dashboard will listen on 127.0.0.1." >&2
+      printf '%s\n' 127.0.0.1
+    fi
+    return
+  fi
+  case "$(uname -s)" in
+    Darwin)
+      interface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')
+      case "$interface" in '' | lo* | utun* | bridge* | vmnet* | docker*) interface= ;; esac
+      [ -z "$interface" ] || ip=$(ipconfig getifaddr "$interface" 2>/dev/null || true)
+      ;;
+    Linux)
+      interface=$(ip -4 route show default 2>/dev/null | awk '/^default /{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+      case "$interface" in '' | lo | docker* | veth* | virbr* | br-*) interface= ;; esac
+      [ -z "$interface" ] || ip=$(ip -o -4 addr show dev "$interface" scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+      ;;
+  esac
+  if private_ipv4 "${ip:-}"; then
+    printf '%s\n' "$ip"
+  else
+    echo "No private LAN address detected; dashboard will listen on 127.0.0.1." >&2
+    printf '%s\n' 127.0.0.1
+  fi
+}
+
 # Fresh installs generate separate passwords; upgrades reuse each existing value.
 rpc_user=$(get '.bitcoin.node_username')
 rpc_password=$(get '.bitcoin.node_password')
@@ -69,8 +107,21 @@ tari_wallet_rpc_password=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$env_file" 
 tari_wallet_password=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 dashboard_password=$(get '.dashboard.password')
 dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
+launch_at_boot=$(jq -r 'if ((.dashboard // {}) | has("launch_at_boot")) then if .dashboard.launch_at_boot == true then "true" else "false" end else "missing" end' <<<"$config")
 had_env=0
 [ -f "$env_file" ] && had_env=1
+restart_policy=on-failure:5
+if [ "$launch_at_boot" = true ]; then
+  restart_policy=unless-stopped
+elif [ "$launch_at_boot" = false ]; then
+  restart_policy=on-failure:5
+elif [ "$had_env" = 1 ]; then
+  saved_restart_policy=$(sed -n 's/^STACK_RESTART_POLICY=//p' "$env_file" 2>/dev/null || true)
+  case "$saved_restart_policy" in
+    no | on-failure:5 | unless-stopped) restart_policy=$saved_restart_policy ;;
+    *) restart_policy=unless-stopped ;;
+  esac
+fi
 [ -n "$rpc_user" ] || rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$env_file" 2>/dev/null || true)
 [ -n "$rpc_password" ] || rpc_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 [ -n "$bitcoin_enabled" ] || bitcoin_enabled=$(sed -n 's/^BITCOIN_ENABLED=//p' "$env_file" 2>/dev/null || true)
@@ -98,10 +149,6 @@ had_env=0
 [ -n "$monero_wallet_password" ] || monero_wallet_password=$(openssl rand -hex 24)
 [ -n "$tari_wallet_rpc_password" ] || tari_wallet_rpc_password=$(openssl rand -hex 24)
 [ -n "$tari_wallet_password" ] || tari_wallet_password=$(openssl rand -hex 24)
-if [ "$had_env" = "0" ] && [ "$dashboard_password_set" = "0" ] && [ -z "$dashboard_password" ]; then
-  dashboard_password=$(openssl rand -hex 24)
-fi
-
 data_dir=$(get '.bitcoin.data_dir')
 if [ -z "$data_dir" ]; then
   if [ -n "${BITCOIN_STACK_DATA_DIR:-}" ]; then
@@ -228,7 +275,15 @@ dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboa
 [ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' "$env_file" 2>/dev/null || true)
 [ -n "$dashboard_onion" ] || dashboard_onion=0
 dashboard_control=$(flag '.dashboard.control')
-dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
+dashboard_bind_setting=$(get '.dashboard.bind_ip')
+if [ "$dashboard_bind_setting" = auto ]; then
+  dashboard_bind_ip=$(detect_dashboard_bind_ip)
+elif [ -n "$dashboard_bind_setting" ]; then
+  dashboard_bind_ip=$dashboard_bind_setting
+else
+  dashboard_bind_ip=$(sed -n 's/^DASHBOARD_BIND_IP=//p' "$env_file" 2>/dev/null || true)
+  [ -n "$dashboard_bind_ip" ] || dashboard_bind_ip=$(detect_dashboard_bind_ip)
+fi
 dashboard_default_port=80
 [ "$package_managed" != brew ] || dashboard_default_port=8080
 dashboard_port=$(jq -r '.dashboard.port // empty' <<<"$config")
@@ -751,6 +806,7 @@ ALERT_NEW_BLOCK_BITCOINCASH=$alert_new_block_bitcoincash
 ALERT_NEW_BLOCK_ZCASH=$alert_new_block_zcash
 NODE_NAME=$(hostname)
 STACK_VERSION=$stack_version
+STACK_RESTART_POLICY=$restart_policy
 STACK_ROOT=$stack_root
 STACK_ASSET_ROOT=$asset_root
 WATCH_WALLETS_B64=$watch_wallets_b64

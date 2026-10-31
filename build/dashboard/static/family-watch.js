@@ -66,7 +66,7 @@ export function familyAccessView(data, node) {
   if (data?.supported !== true && (node === "dogecoin" || node === "zcash")) return { canEdit: false, status: "Wallet balance not available." };
   if (data?.supported !== true) return { canEdit: false, status: reason || "Watch-only balances are unavailable for this chain." };
   if (data?.enabled !== true || data?.active !== true) return { canEdit: false, status: reason || `${LABELS[node] || "This node"} is unavailable.` };
-  if (data?.has_password !== true) return { canEdit: false, status: "Set a dashboard password to add or remove watch-only addresses." };
+  if (data?.can_configure !== true && data?.has_password !== true) return { canEdit: false, status: "Open this dashboard from its trusted LAN address to manage watch-only addresses." };
   return { canEdit: true, status: reason };
 }
 

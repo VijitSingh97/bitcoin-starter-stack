@@ -3,7 +3,7 @@
 Homebrew support installs the same Docker Compose stack used on Linux. On macOS,
 Docker Desktop supplies the Linux virtual machine that runs the containers. The
 formula installs only the command and immutable stack files; it does not install
-or start Docker, download images, run the wizard, or start a node.
+or start Docker, download images, run setup, or start a node.
 Homebrew installs Bash, flock, jq, and OpenSSL for the host commands; Linuxbrew
 also installs iproute2. Docker remains an external prerequisite.
 
@@ -16,8 +16,7 @@ generated formula.
 
 Install and start [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/),
 then confirm that `docker compose version` reports 2.33.1 or newer. Docker
-Desktop must have enough disk space and memory for the nodes selected in the
-wizard; see [node requirements](nodes.md#storage-and-resource-planning). Enable
+Desktop must have enough disk space and memory for the nodes you configure; see [node requirements](nodes.md#storage-and-resource-planning). Enable
 Docker Desktop's start-at-login option if nodes should return after a reboot.
 
 ```sh
@@ -26,22 +25,23 @@ brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
 bitcoin-stack init
 ```
 
-Installation is intentionally inert. `bitcoin-stack init` creates the private
-configuration, asks which nodes to run, and offers to download and start their
-containers. If image download is deferred, use `bitcoin-stack pull` and then
-`bitcoin-stack up` when ready. The Homebrew dashboard defaults to
-`http://127.0.0.1:8080`; set `dashboard.port` in `config.json` and run
-`bitcoin-stack apply` to choose another host port.
+Installation is intentionally inert. `bitcoin-stack init` starts a default
+pruned Bitcoin node without questions. It preserves a `config.json` created
+before first start, downloads missing versioned images, and prints the dashboard
+URL. The dashboard chooses a private LAN address automatically, falling back
+to localhost, and uses port **8080** so the command needs no root privileges.
+Change `dashboard.bind_ip` or `dashboard.port` in configuration to override this.
 
-The wizard prints the dashboard and selected node endpoint logins once. Save
-them in a password manager. It stores the same values in the mode-600 files
-below so containers can restart. Personal wallet monitoring is separate from
-these service credentials and never accepts a private spend key or seed phrase.
+The dashboard has no password by default and belongs on a trusted LAN. Add one
+in global Settings or preset `dashboard.password` before first start. Each
+selected authenticated node gets a separate generated `admin` login, retained
+in private state. No node RPC, gRPC, or ZMQ port is exposed by default.
 
-In the dashboard, the gear menu contains global Appearance, Dashboard password,
-Telegram, and Healthchecks settings. Open a tower for that node's block alert,
-LAN listener, and authenticated RPC credential controls. The optional Homebrew
-service must be running to apply LAN-port or credential changes on the host.
+Global Settings installs additional nodes, controls launch at login, and
+contains Appearance, Dashboard password, Telegram, and Healthchecks. Open a
+tower for its block alerts, optional LAN interfaces, and RPC credentials.
+Personal view-only wallet material is separate from these service logins;
+never enter a seed phrase or private spend key.
 
 The default user-owned paths survive Homebrew upgrades:
 
@@ -64,18 +64,30 @@ For example:
 BITCOIN_STACK_HOME=/Volumes/Node Data/bitcoin-starter-stack
 ```
 
-After setup succeeds, the stack can be supervised at login through launchd:
+Setup starts the Homebrew host supervisor so dashboard controls work. It can
+also be managed explicitly with:
 
 ```sh
 brew services start bitcoin-starter-stack
 ```
 
-The service starts an already configured stack from locally available images
-and processes dashboard node, port, and post-sync resource-control requests. It
-does not run setup or download containers. Stopping the Homebrew service stops
-the host supervisor; use `bitcoin-stack down` when the containers should also
-stop. Containers use Docker's `unless-stopped` restart policy, so they return
-when Docker Desktop starts unless you explicitly stopped them.
+The per-user service launches at **login**, rather than before login, following
+[Homebrew service conventions](https://docs.brew.sh/Manpage#services-subcommand). The
+application's **Launch at login** setting defaults off: the supervisor remains
+available but does not start the stack on the next login until you enable it.
+Enable Docker Desktop's own start-at-login option separately if desired.
+Turning the application setting off leaves the current containers running and
+disables automatic startup after Docker restarts. Fresh installs still retry
+a crashed container up to five times during the current Docker session. Run `bitcoin-stack up` to start them
+manually after a later login. Source installs without a managed
+service show this setting as unavailable.
+
+The supervisor processes node installation, port changes, and post-sync caps.
+It never runs initial setup or downloads images just because you log in; an
+explicit dashboard **Install** request authorizes downloading that node's
+images. If configuration was edited while stopped, it keeps the last approved
+version and offers the pending file in Settings. Stopping the Homebrew service
+stops the supervisor; use `bitcoin-stack down` to stop the containers too.
 
 ## Linuxbrew
 
@@ -93,7 +105,7 @@ Linuxbrew follows the XDG directory convention:
 `brew services start bitcoin-starter-stack` uses a user systemd service on
 Linux. A logged-out user service may require lingering to remain active; the APT
 package is the simpler choice for a system-wide Ubuntu server. The service waits
-for both saved configuration and Docker; it does not run the wizard or pull
+for both saved configuration and Docker; it does not run setup or pull
 images.
 
 ## Edit and check the configuration
@@ -105,7 +117,7 @@ bitcoin-stack apply
 bitcoin-stack status
 ```
 
-`apply` renders the private state and recreates only changed containers from
+`apply` explicitly approves the edited file, renders the private state and recreates only changed containers from
 images already on the machine. It does not download images. Run
 `bitcoin-stack pull` first when an upgrade needs new images. Use
 `bitcoin-stack doctor` for a read-only dependency, configuration, disk, node,

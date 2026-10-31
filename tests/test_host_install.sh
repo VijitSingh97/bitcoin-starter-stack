@@ -83,7 +83,9 @@ cp "$root/stack" "$payload/stack"
 cat >"$payload/configure.sh" <<'SH'
 #!/bin/sh
 printf 'configure\n' >>"$HOST_TEST_LOG"
-printf 'COMPOSE_FILE=docker-compose.yml\n' >"$BITCOIN_STACK_STATE_DIR/.env"
+policy=on-failure:5
+[ "$(jq -r '.dashboard.launch_at_boot == true' "$BITCOIN_STACK_CONFIG_DIR/config.json")" != true ] || policy=unless-stopped
+printf 'COMPOSE_FILE=docker-compose.yml\nSTACK_RESTART_POLICY=%s\n' "$policy" >"$BITCOIN_STACK_STATE_DIR/.env"
 SH
 for helper in node-control node-port-control node-resource-profile; do
   # shellcheck disable=SC2016
@@ -106,7 +108,7 @@ rm -f "$BITCOIN_STACK_CONFIG_DIR/config.json" "$BITCOIN_STACK_STATE_DIR/.env"
 service_pid=$!
 sleep 1
 [ ! -f "$HOST_TEST_LOG" ] || fail "service did work without saved configuration"
-printf '{}\n' >"$BITCOIN_STACK_CONFIG_DIR/config.json"
+printf '{"dashboard":{"launch_at_boot":true}}\n' >"$BITCOIN_STACK_CONFIG_DIR/config.json"
 touch "$HOST_TEST_DOCKER_READY"
 for ((attempt=0; attempt<15; attempt++)); do
   if [ -f "$HOST_TEST_LOG" ] && grep -q '^node-resource-profile$' "$HOST_TEST_LOG"; then break; fi
@@ -120,6 +122,22 @@ done
 kill "$service_pid"
 wait "$service_pid"
 service_pid=
+
+: >"$HOST_TEST_LOG"
+rm -f "$BITCOIN_STACK_STATE_DIR/.env" "$BITCOIN_STACK_STATE_DIR/.approved.env" "$BITCOIN_STACK_STATE_DIR/.approved-config.json"
+printf '{"dashboard":{"launch_at_boot":false}}\n' >"$BITCOIN_STACK_CONFIG_DIR/config.json"
+"$root/scripts/bitcoin-stack" host-service >"$tmp/service-off.log" 2>&1 &
+service_pid=$!
+for ((attempt=0; attempt<15; attempt++)); do
+  if [ -f "$HOST_TEST_LOG" ] && grep -q '^node-control$' "$HOST_TEST_LOG"; then break; fi
+  sleep 1
+done
+grep -q '^node-control$' "$HOST_TEST_LOG" || { cat "$tmp/service-off.log"; fail "host controls stopped when launch at login was off"; }
+! grep -q '^compose$' "$HOST_TEST_LOG" || fail "launch-at-login off started application containers"
+kill "$service_pid"
+wait "$service_pid"
+service_pid=
+
 "$root/scripts/bitcoin-stack" upgrade >"$tmp/upgrade.log"
 grep -q 'brew upgrade bitcoin-starter-stack' "$tmp/upgrade.log" || fail "Homebrew upgrade uses source checkout"
 configure_before=$(grep -c '^configure$' "$HOST_TEST_LOG")

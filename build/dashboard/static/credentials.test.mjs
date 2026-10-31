@@ -5,6 +5,7 @@ import { credentialControlModel, passwordChangeError, shouldPollCredentials } fr
 
 test("dashboard password changes require the current password and validate the replacement", () => {
   assert.equal(passwordChangeError("", "twelve-chars", "twelve-chars"), "Enter your current dashboard password.");
+  assert.equal(passwordChangeError("", "twelve-chars", "twelve-chars", false), "");
   assert.equal(passwordChangeError("old", "twelve-chars", "twelve-chars"), "");
   assert.equal(passwordChangeError("old", "short", "short"), "The new password must be at least 12 characters.");
   assert.equal(passwordChangeError("old", "twelve-chars", "different-one"), "The new passwords do not match.");
@@ -23,6 +24,7 @@ test("credential status exposes only supported LAN RPC interfaces", () => {
     status: { state: "applying", node: "bitcoin", message: "Restarting Bitcoin RPC…" },
   }), {
     available: true,
+    requiresPassword: false,
     interfaces: {
       bitcoin: { node: "bitcoin", enabled: true },
       monero: { node: "monero", enabled: false },
@@ -30,7 +32,7 @@ test("credential status exposes only supported LAN RPC interfaces", () => {
     status: { state: "applying", node: "bitcoin", message: "Restarting Bitcoin RPC…" },
   });
   assert.deepEqual(credentialControlModel({ available: "true", state: "invented", status: "ignored" }), {
-    available: false, interfaces: {}, status: { state: "", node: "", message: "" },
+    available: false, requiresPassword: false, interfaces: {}, status: { state: "", node: "", message: "" },
   });
 });
 

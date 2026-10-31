@@ -27,6 +27,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/{node}/watch/{id}", a.apiFamilyWatchRemove)
 	mux.HandleFunc("GET /api/nodes", a.apiNodes)
 	mux.HandleFunc("POST /api/nodes/{node}/power", a.apiNodePower)
+	mux.HandleFunc("GET /api/settings/host", a.apiHostControlGet)
+	mux.HandleFunc("POST /api/settings/host", a.apiHostControlPost)
 	mux.HandleFunc("GET /api/monero/fees", a.apiMoneroFees)
 	mux.HandleFunc("GET /api/monero/watch", a.apiMoneroWatchList)
 	mux.HandleFunc("POST /api/monero/watch", a.apiMoneroWatchAdd)
@@ -183,7 +185,7 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entries := a.watch.Entries()
-	if !a.hasDashboardPassword() && !publicExampleOnly(entries) {
+	if !a.configurationAllowed(r) && !publicExampleOnly(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
 		return
 	}
@@ -191,6 +193,7 @@ func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
 	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
 	view := a.watch.ListWithChain(a.walletRPC, chain)
 	view["has_password"] = a.hasDashboardPassword()
+	view["can_configure"] = a.configurationAllowed(r)
 	writeJSON(w, view)
 }
 
@@ -202,11 +205,7 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if !a.hasDashboardPassword() {
-		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
-		return
-	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if a.watch.Err() != nil {
@@ -274,11 +273,7 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if !a.hasDashboardPassword() {
-		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
-		return
-	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if a.watch.Err() != nil {

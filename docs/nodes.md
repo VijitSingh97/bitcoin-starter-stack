@@ -109,41 +109,42 @@ last confirmed result and marks it **Stale** or **Error** rather than replacing 
 with zero. Litecoin and Bitcoin Cash public examples are excluded from personal totals. No chain falls
 back to an external block explorer.
 
-## Setup wizard
+## Default setup and adding nodes
 
-APT/deb installation does not start services or prompt during `apt install`.
-Run `sudo bitcoin-stack init` afterward. Source installs use `./stack init`.
-The wizard asks for:
+Package installation does not start services or prompt. Run
+`sudo bitcoin-stack init` for APT, `bitcoin-stack init` for Homebrew, or
+`./stack init` for source. A fresh setup starts Bitcoin only, downloads missing
+images, uses default data directories, and leaves node LAN interfaces closed.
+The dashboard has no password by default, chooses a private LAN address
+automatically, and prints its URL. Use it on a trusted LAN.
 
-1. A dashboard password and one or more chains.
-2. The dashboard's loopback or private-LAN address.
-3. A data directory for every selected node.
-4. Optional private-LAN RPC or gRPC exposure for each node, disabled by default.
-5. Bitcoin's recent-block budget and Monero's optional ZMQ endpoint.
-6. Whether to download missing images and start now.
+Use **Settings → Nodes → Install** to add a chain later. Installation uses
+versioned project images and the normal host Docker connection; it does not route the
+image download through a node container. It retains existing nodes and data.
+The node appears in the overview once the host confirms installation. Errors
+remain visible and can be corrected before retrying.
 
-Fresh package wizard installs use the `compact` profile: sync is uncapped, then
-the host timer waits for repeated healthy, current sync checks before applying
-the table's per-node ceiling with no extra swap. Source installs and existing
-profiles remain `off` unless configured. These are editable budgets, not claims
-that every chain has passed sustained operation within them.
+For another combination or storage location on first start, create
+`config.json` before `init`; see [first-start customization](getting-started.md#customize-before-first-start).
+Package data defaults to `/var/lib/bitcoin-starter-stack/data/<node>`; Homebrew
+uses user-owned Application Support/XDG data, and source uses `./data/<node>`.
 
-Package data defaults to `/var/lib/bitcoin-starter-stack/data/<node>`. Source
-installs default to `./data/<node>`. Choose a mounted SSD path in the wizard when
-the default disk is too small.
+Fresh managed installs use the `compact` resource profile: sync is uncapped,
+then repeated healthy, current sync checks activate the table's per-node
+ceiling with no extra swap. Source and existing profiles remain off unless
+configured. These are editable budgets, not claims that every chain has passed
+sustained operation within them.
 
-The wizard configures nodes and service logins. Monero and Tari view-only scans
-are optional advanced steps performed later in their dashboard cards. Keep node
-endpoint credentials separate from personal view-only material, and never enter
-a private spend key or seed phrase.
+View-only wallets are optional steps in their dashboard cards. Keep endpoint
+credentials separate from personal view-only material; never enter a seed
+phrase or private spend key. **Node controls**, after wallets, contains separate
+**Alerts** and **LAN access** sections followed by deactivation. Credential reveal
+and reset require a dashboard password; it can be added in global Settings.
+Monero ZMQ and Tari gRPC have no password controls.
 
-After setup, open a tower to manage that node. **Node controls** appears after
-its wallet section, with separate **Alerts** and **LAN access** sections above
-deactivation. LAN access includes credentials for enabled authenticated RPC. **Show password** is
-an explicit reveal. Credential reset requires typing `reset`, restarts affected
-services, and makes every external client update its saved password. It is not
-available while the node is inactive. Global Appearance, Dashboard password,
-Telegram, and Healthchecks remain in the gear menu.
+Global Settings also contains launch at boot/login, Appearance, Dashboard
+password, Telegram, and Healthchecks. Turning launch at boot/login off does not
+stop running nodes; it controls future starts.
 
 ## Private-LAN endpoints
 

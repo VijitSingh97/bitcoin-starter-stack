@@ -21,7 +21,7 @@ func settingsRequest(handler http.Handler, method, password, body string, csrf b
 
 func settingsRequestHost(handler http.Handler, method, password, body string, csrf bool, host string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
-	req.RemoteAddr = "192.0.2.10:12345"
+	req.RemoteAddr = "192.168.1.20:12345"
 	req.Host = host
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-Host", "mini-1.local")
@@ -121,7 +121,7 @@ func TestSettingsAppearanceScopeOmitsNotificationCredentials(t *testing.T) {
 	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid")
 	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
 	req := httptest.NewRequest(http.MethodGet, "/api/settings?scope=appearance", nil)
-	req.RemoteAddr = "192.0.2.10:12345"
+	req.RemoteAddr = "192.168.1.20:12345"
 	req.Host = "mini-1.local"
 	req.SetBasicAuth("dashboard", "dashboard-secret")
 	w := httptest.NewRecorder()

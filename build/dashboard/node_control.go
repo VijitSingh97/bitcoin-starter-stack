@@ -158,15 +158,19 @@ func (a *app) apiNodes(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) nodeControlAvailable() bool {
-	if !a.hasDashboardPassword() {
-		return false
-	}
 	info, err := os.Stat(a.nodeControlPath("capability"))
-	if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len("ready\n")) || time.Since(info.ModTime()) < 0 || time.Since(info.ModTime()) > nodeControlCapabilityAge {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 1024 || time.Since(info.ModTime()) < 0 || time.Since(info.ModTime()) > nodeControlCapabilityAge {
 		return false
 	}
 	b, err := os.ReadFile(a.nodeControlPath("capability"))
-	return err == nil && string(b) == "ready\n"
+	if err != nil {
+		return false
+	}
+	if string(b) == "ready\n" {
+		return true
+	}
+	_, ok := decodeHostControlCapability(b)
+	return ok
 }
 
 func (a *app) nodeControlPending() bool {
@@ -250,11 +254,7 @@ func decodeNodeControlInput(w http.ResponseWriter, r *http.Request) (nodeControl
 
 func (a *app) apiNodePower(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !a.hasDashboardPassword() {
-		http.Error(w, "a dashboard password is required for node control", http.StatusForbidden)
-		return
-	}
-	if rejectCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	id := normalizeNodeID(r.PathValue("node"))

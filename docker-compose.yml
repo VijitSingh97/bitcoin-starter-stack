@@ -9,7 +9,7 @@ x-logging: &logging
 services:
   tor:
     # Prebuilt release image; downloads use the host's Docker settings.
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/tor
     container_name: tor
     security_opt:
@@ -31,7 +31,7 @@ services:
       ZCASH_ACTIVE: ${ZCASH_ACTIVE:-1}
     volumes:
       - tor_data:/var/lib/tor
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 9050 && nc -z 127.0.0.1 8000"]
@@ -102,7 +102,7 @@ services:
         exec bitcoind -datadir=/data -conf=/data/bitcoin.conf -rpcauth="$$RPCAUTH" -dbcache="$$DBCACHE" -prune="$$PRUNE" -blockfilterindex="$$BLOCKFILTERINDEX" -maxconnections=125 -inboundrelaypercent=100 $$NET_ARGS $$ONION_ARGS
     stop_signal: SIGTERM
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       # Cookie auth: bitcoin-cli reads /data/.cookie, no credentials needed here
@@ -118,7 +118,7 @@ services:
       - 127.0.0.1
 
   monero:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}/build/monero
     container_name: monero
@@ -142,7 +142,7 @@ services:
       - ${MONERO_DATA_DIR:-./data/monero}:/data
     stop_signal: SIGTERM
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/monero-healthcheck"]
@@ -157,7 +157,7 @@ services:
       - 127.0.0.1
 
   monero-wallet:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}/build/monero
     container_name: monero-wallet
@@ -185,7 +185,7 @@ services:
     depends_on:
       monero:
         condition: service_healthy
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/monero-wallet-healthcheck"]
@@ -221,7 +221,7 @@ services:
     tmpfs: ["/tmp:size=64m,mode=0700,uid=1000,gid=1000"]
     entrypoint: ["/var/tari/config/entrypoint.sh"]
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "ps | grep '[m]inotari_node' >/dev/null"]
@@ -235,7 +235,7 @@ services:
     dns: ["127.0.0.1"]
 
   tari-wallet:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tari-wallet:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tari-wallet:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}
       dockerfile: build/tari-wallet/Dockerfile
@@ -262,7 +262,7 @@ services:
       tari:
         condition: service_healthy
     stop_grace_period: 1m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "test -r /tari-wallet/control/capability.json && find /tari-wallet/control/capability.json -mmin -1 | grep -q ."]
@@ -276,7 +276,7 @@ services:
     dns: ["127.0.0.1"]
 
   litecoin:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-litecoin:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-litecoin:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/litecoin
     container_name: litecoin
     profiles: ["litecoin"]
@@ -293,7 +293,7 @@ services:
       TOR_PROXY: 172.29.0.25:9050
     volumes: ["${LITECOIN_DATA_DIR:-./data/litecoin}:/data"]
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
@@ -307,7 +307,7 @@ services:
     dns: ["127.0.0.1"]
 
   dogecoin:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dogecoin:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dogecoin:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/dogecoin
     container_name: dogecoin
     profiles: ["dogecoin"]
@@ -324,7 +324,7 @@ services:
       TOR_PROXY: 172.29.0.25:9050
     volumes: ["${DOGECOIN_DATA_DIR:-./data/dogecoin}:/data"]
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
@@ -338,7 +338,7 @@ services:
     dns: ["127.0.0.1"]
 
   bitcoincash:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-bitcoincash:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-bitcoincash:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/bitcoincash
     container_name: bitcoincash
     profiles: ["bitcoincash"]
@@ -350,7 +350,7 @@ services:
     cap_drop: ["ALL"]
     volumes: ["${BITCOINCASH_DATA_DIR:-./data/bitcoincash}:/data"]
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
@@ -392,7 +392,7 @@ services:
       - ${STACK_ASSET_ROOT:-.}/build/zcash/healthcheck.sh:/usr/local/bin/node-stack-healthcheck:ro
     tmpfs: ["/tmp:size=16m"]
     stop_grace_period: 5m
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       test: ["CMD", "/usr/local/bin/node-stack-healthcheck"]
@@ -407,7 +407,7 @@ services:
 
   dashboard:
     # Prebuilt release image, with an explicit build target for development.
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:-latest}
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dashboard:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}
       dockerfile: build/dashboard/Dockerfile
@@ -534,7 +534,7 @@ services:
       # writable state (the saved watch-only wallet list); the chain stays read-only
       - dashboard_state:/state
       - tari_wallet:/tari-wallet
-    restart: unless-stopped
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
       # Any HTTP response means alive — 401 is expected when auth is enabled

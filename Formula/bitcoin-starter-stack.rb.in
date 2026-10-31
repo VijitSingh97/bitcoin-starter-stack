@@ -57,8 +57,8 @@ class BitcoinStarterStack < Formula
       Setup is explicit and does not run during installation:
         bitcoin-stack init
 
-      To supervise an already configured stack at login:
-        brew services start bitcoin-starter-stack
+      Setup starts the Homebrew host supervisor automatically. Launch at login
+      defaults off and can be enabled from Global Settings in the dashboard.
     EOS
   end
 
@@ -66,11 +66,6 @@ class BitcoinStarterStack < Formula
     ENV["HOME"] = testpath
     ENV["XDG_CONFIG_HOME"] = testpath/"xdg-config"
     ENV["XDG_DATA_HOME"] = testpath/"xdg-data"
-    input = "brewtestpassword1234567890\nbitcoin\n\n\nn\n\nn\n"
-    output = pipe_output("#{bin}/bitcoin-stack init", input)
-    assert_match "Wrote private config.json", output
-    assert_match "Later: bitcoin-stack pull && bitcoin-stack up", output
-
     config_path = if OS.mac?
       testpath/"Library/Application Support/bitcoin-starter-stack/config/config.json"
     else
@@ -81,10 +76,46 @@ class BitcoinStarterStack < Formula
     else
       testpath/"xdg-data/bitcoin-starter-stack/state"
     end
-    config = JSON.parse(config_path.read)
+    data_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/data"
+    else
+      testpath/"xdg-data/bitcoin-starter-stack/data"
+    end
+    config_path.dirname.mkpath
+    state_path.mkpath
+    data_path.mkpath
+    default_config = JSON.generate(
+      "bitcoin" => { "enabled" => true, "resource_profile" => "compact" },
+      "dashboard" => { "password" => "", "bind_ip" => "auto", "launch_at_boot" => false },
+    )
+    config_path.write(default_config)
+    ENV["BITCOIN_STACK_ROOT"] = libexec
+    ENV["BITCOIN_STACK_PACKAGE_MANAGED"] = "brew"
+    ENV["BITCOIN_STACK_CONFIG_DIR"] = config_path.dirname
+    ENV["BITCOIN_STACK_STATE_DIR"] = state_path
+    ENV["BITCOIN_STACK_DATA_DIR"] = data_path
+    ENV["BITCOIN_STACK_DEFAULT_BIND_IP"] = "192.168.1.116"
+    system libexec/"configure.sh"
+
+    rendered = (state_path/".env").read
     assert_predicate formula_opt_bin("openssl@3")/"openssl", :executable?
-    assert_equal "brewtestpassword1234567890", config.dig("dashboard", "password")
-    assert_equal 1, config.dig("bitcoin", "steady_cpus")
-    refute_path_exists state_path/".env"
+    assert_equal default_config, config_path.read
+    assert_match(/^DASHBOARD_PASSWORD=$/, rendered)
+    assert_match(/^DASHBOARD_BIND_IP=192\.168\.1\.116$/, rendered)
+    assert_match(/^COMPOSE_PROFILES=bitcoin$/, rendered)
+    assert_match(/^BITCOIN_RESOURCE_PROFILE=compact$/, rendered)
+    assert_match(/^STACK_RESTART_POLICY=on-failure:5$/, rendered)
+
+    preset_config = JSON.generate(
+      "bitcoin" => { "enabled" => false },
+      "monero" => { "enabled" => true, "data_dir" => data_path/"custom-monero" },
+      "dashboard" => { "password" => "presetdashboardpassword", "bind_ip" => "192.168.1.118" },
+    )
+    config_path.write(preset_config)
+    system libexec/"configure.sh"
+    assert_equal preset_config, config_path.read
+    rendered = (state_path/".env").read
+    assert_match(/^COMPOSE_PROFILES=monero$/, rendered)
+    assert_match(/^DASHBOARD_PASSWORD=presetdashboardpassword$/, rendered)
   end
 end

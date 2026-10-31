@@ -55,8 +55,9 @@ The rebuildable `watch_scan_cache.json` can be backed up and removed from the
 state volume to request a new scan; keep `wallets.json` and
 `balance_history.json` intact.
 
-Set `dashboard.password` in `config.json` to view personal wallets and add or remove
-entries. Fresh Bitcoin state includes one clearly marked public example; see
+Personal wallet views and add/remove controls are available on the trusted LAN.
+Add a dashboard password in Settings, or preset it in `config.json`, to restrict
+access. Fresh Bitcoin state includes one clearly marked public example; see
 [Bitcoin public example](#bitcoin-public-example-and-seeding-from-configjson).
 
 ## Litecoin and Bitcoin Cash addresses
@@ -314,8 +315,8 @@ Fresh installs start with one public example address disclosed by Binance in
 2022. It is labeled **Public example** and excluded from personal totals, so its
 balance cannot be mistaken for yours or for Binance's total reserves. It is one
 address, not proof of the exchange's solvency. Its first UTXO-set scan stays
-pending until complete. You can remove it after setting a dashboard
-password, or opt out before first start with `"wallets": []`. See Binance's
+pending until complete. You can remove it in the dashboard, or opt out before first start with
+`"wallets": []`. See Binance's
 [original address disclosure](https://www.binance.com/en-IN/blog/community/2895840147147652626).
 
 You can instead predeclare your own wallets in `config.json`, which seeds the

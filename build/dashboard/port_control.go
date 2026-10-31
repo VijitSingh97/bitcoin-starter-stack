@@ -182,9 +182,6 @@ func affectedPortServices() []string {
 }
 
 func (a *app) portControlAvailable() bool {
-	if !a.hasDashboardPassword() {
-		return false
-	}
 	path := a.portControlPath("capability")
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len("ready\n")) || time.Since(info.ModTime()) < 0 || time.Since(info.ModTime()) > portControlCapabilityAge {
@@ -338,11 +335,7 @@ func validatePortControlChanges(input portControlInput, ports []portControlPort)
 
 func (a *app) apiPortControlPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !a.hasDashboardPassword() {
-		http.Error(w, "a dashboard password is required for port control", http.StatusForbidden)
-		return
-	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if !a.portControlAvailable() {

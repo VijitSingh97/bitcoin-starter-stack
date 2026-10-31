@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-func (a *app) apiTariWatch(w http.ResponseWriter, _ *http.Request) {
+func (a *app) apiTariWatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	node, configured := a.cfg.nodes[nodeTari]
 	active := configured && node.Enabled && a.nodeWorkerRunnable(nodeTari, node.Enabled)
 	response := map[string]any{
-		"has_password": a.hasDashboardPassword(), "available": false, "active": active,
+		"has_password": a.hasDashboardPassword(), "can_configure": a.configurationAllowed(r), "available": false, "active": active,
 		"reason": "Tari watch-only wallet service is not configured.", "wallets": []TariWatchWallet{},
 	}
 	if !configured || !node.Enabled {
@@ -28,7 +28,7 @@ func (a *app) apiTariWatch(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	wallets := a.tariWatch.List()
-	if !a.hasDashboardPassword() && len(wallets) != 0 {
+	if !a.configurationAllowed(r) && len(wallets) != 0 {
 		http.Error(w, "set dashboard.password to access personal Tari watch-only wallets", http.StatusForbidden)
 		return
 	}
@@ -108,11 +108,7 @@ func (a *app) rejectTariWatchMutation(w http.ResponseWriter, r *http.Request) bo
 		http.Error(w, "Tari watch-only wallet service is not configured", http.StatusServiceUnavailable)
 		return true
 	}
-	if !a.hasDashboardPassword() {
-		http.Error(w, "set dashboard.password to manage Tari watch-only wallets", http.StatusForbidden)
-		return true
-	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return true
 	}
 	if !a.nodeWorkerRunnable(nodeTari, node.Enabled) {

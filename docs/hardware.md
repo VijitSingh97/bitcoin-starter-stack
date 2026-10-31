@@ -13,9 +13,9 @@ headroom budgets, not measured average consumption or hard minimums:
 | Bitcoin initial sync | Plan for 2 cores; validation can keep available cores busy. | Allow 4 GiB for headroom with the default 128 MiB cache. | No container CPU or RAM cap. |
 | Monero initial sync | Plan for 2 cores; additional cores can help validation. | Allow 4 GiB for headroom. | No container CPU or RAM cap. |
 | Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash initial sync | Plan for 2 cores per syncing node. | Allow 4 GiB per node as a starting budget. | No container CPU or RAM cap. Sync one at a time on a small host. |
-| Bitcoin after sync | 1 core of capacity; usually idle between validation and RPC work. | 2 GiB container budget. | Fresh APT/Homebrew wizard installs apply the cap after healthy sync checks. |
-| Monero after sync | 1 core of capacity; wallet/RPC activity adds work. | 2 GiB container budget, still experimental. | Fresh APT/Homebrew wizard installs apply the cap after healthy sync checks. |
-| Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash after sync | 1 core per node. | 4 GiB container budget per node. | Fresh APT/Homebrew wizard installs apply the cap after healthy sync checks; sustained operation remains unqualified. |
+| Bitcoin after sync | 1 core of capacity; usually idle between validation and RPC work. | 2 GiB container budget. | Fresh APT/Homebrew default installs apply the cap after healthy sync checks. |
+| Monero after sync | 1 core of capacity; wallet/RPC activity adds work. | 2 GiB container budget, still experimental. | Fresh APT/Homebrew default installs apply the cap after healthy sync checks. |
+| Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash after sync | 1 core per node. | 4 GiB container budget per node. | Fresh APT/Homebrew default installs apply the cap after healthy sync checks; sustained operation remains unqualified. |
 
 Smaller machines can work, with slower sync and less room for bursts. Uncapped
 sync can use more than the planning estimate; it does not reserve memory or
@@ -119,7 +119,7 @@ Docker, and the host operating system. The OOM killer is not a graceful
 shutdown. Bitcoin Core's pinned
 [memory-reduction guide](https://github.com/bitcoin/bitcoin/blob/v32.1/doc/reduce-memory.md)
 explains the cache tradeoff and other memory controls. The optional container
-memory setting is preserved for existing installations. Fresh package wizard
+memory setting is preserved for existing installations. Fresh package setup
 installs use the experimental `compact` resource profile: sync without limits,
 then apply the configured container limits (default 1 CPU / 2048 MiB) after
 repeated fresh, healthy sync checks. Explicit operator limits take precedence. See
@@ -137,5 +137,5 @@ Initial sync still pulls the whole historical chain, currently roughly 900 GB,
 through Tor and can take days. Steady state is a few GB per day. Bitcoin P2P
 needs no inbound host port; the optional inbound onion service is disabled by
 default. The dashboard uses port 80 for APT/source installs and 8080 for
-Homebrew installs. It binds to loopback by default, or to an explicit private
+Homebrew installs. It chooses a private LAN address automatically, or accepts an explicit private
 address for LAN access. Change `dashboard.port` to select another host port.

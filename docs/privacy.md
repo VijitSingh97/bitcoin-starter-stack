@@ -17,10 +17,12 @@ using clearnet.
 The existing Tor container forwards LAN HTTP to the dashboard's fixed internal
 address; the dashboard itself has no published port or external network.
 
-The dashboard binds to loopback by default. To allow your trusted LAN, set
-`dashboard.bind_ip` to the server's private IPv4 address, for example
-`192.168.1.117`, and run `./stack apply`. Wildcards, public IPs, and IPv6 bind
-addresses are rejected. Public dashboard access uses the optional onion service.
+The dashboard selects a private LAN IPv4 address by default and has no password
+unless one was configured. Anyone with access to that trusted LAN can view
+wallet information, edit saved notification secrets, and operate node controls.
+Add a dashboard password in Settings to restrict this access. Set
+`dashboard.bind_ip` to `127.0.0.1` for localhost only, or to a specific private
+host address. Wildcards, public IPs, and IPv6 bind addresses are rejected. Public dashboard access uses the optional onion service.
 LAN HTTP is unencrypted: use a trusted LAN, or access the onion service with Tor
 Browser. Do not forward the LAN dashboard through a router or reverse proxy.
 The host port is owned by the Tor container and forwarded to the dashboard's
@@ -44,7 +46,7 @@ non-root dashboard group. Treat the internal network as part of the trusted
 stack boundary because a compromised sibling container could still reach
 another internal service.
 
-Monero view-only monitoring does not publish another port. The password-protected
+Monero view-only monitoring does not publish another port. The
 dashboard sends a primary address and private view key to the internal wallet
 service at `172.29.0.31:18082`. That service stores only an encrypted watch-only
 wallet file in its private volume. Dashboard metadata is mode `600` and does not
@@ -81,9 +83,11 @@ pull` is the explicit download command and uses the Docker daemon's existing hos
 network settings. The stack neither requires a host proxy nor changes Docker's
 daemon configuration. An operator-configured Docker proxy continues to apply.
 
-The setup wizard runs `pull` only when the operator accepts its final download
-and start prompt and one or more images are missing. It then starts with the same
-`--pull never --no-build` policy used by routine `up` and `apply` commands.
+The explicit `init` command downloads missing images and starts the default or
+preconfigured stack without questions. A dashboard **Install node** request also
+authorizes the host helper to download that node's versioned images. Routine starts
+and applies retain the `--pull never --no-build` policy; logging in or rebooting
+does not authorize a new download.
 
 Source installs keep a separate upgrade rule: `./stack upgrade` fetches an HTTPS
 Git origin through the running stack's Tor proxy before downloading any missing
@@ -124,7 +128,7 @@ sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
 ```
 
 Install GnuPG before running this check. APT installation remains inert: it does
-not launch the wizard, download container images, or start the stack. Run
+not run setup, download container images, or start the stack. Run
 `sudo bitcoin-stack init` afterward. Release consumers use prebuilt images and do
 not compile on the node.
 

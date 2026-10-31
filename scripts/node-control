@@ -5,17 +5,15 @@ state_root=${BITCOIN_STACK_STATE_DIR:-$stack_root}
 config_root=${BITCOIN_STACK_CONFIG_DIR:-$state_root}
 env_file=$state_root/.env
 config_file=$config_root/config.json
+approved_config=$state_root/.approved-config.json
 docker_bin=${DOCKER_BIN:-docker}
 now=${NODE_CONTROL_NOW_EPOCH:-$(date +%s)}
-[ -r "$env_file" ] || exit 0
+package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+host_os=${NODE_CONTROL_OS:-$(uname -s)}
 mkdir -p "$state_root/node-control"
 chmod 700 "$state_root/node-control"
 exec 9>"$state_root/node-control/.lock"
 flock -n 9 || exit 0
-dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
-[ -n "$dashboard_id" ] || exit 0
-config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
-case ",$config_files," in *",$stack_root/docker-compose.yml,"*) ;; *) exit 0 ;; esac
 dashboard_exec() { "$docker_bin" exec -u 1000 dashboard "$@"; }
 write_status() {
   jq -nc --arg id "$1" --arg node "$2" --argjson active "$3" --arg state "$4" --arg message "$5" --arg error_code "${6:-}" \
@@ -23,21 +21,176 @@ write_status() {
     $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
 }
 clear_request() { dashboard_exec rm -f /state/node-control.processing >/dev/null 2>&1 || true; }
-dashboard_auth_configured() {
-  [ -n "$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$env_file" | tail -n 1)" ] && return 0
-  dashboard_auth=$(dashboard_exec cat /state/dashboard_auth.json 2>/dev/null || true)
-  printf '%s' "$dashboard_auth" | jq -e '
-    type == "object" and keys == ["hash", "iterations", "salt", "version"] and
-    .version == 1 and .iterations == 210000 and
-    (.salt | type == "string" and test("^[0-9a-f]{32}$")) and
-    (.hash | type == "string" and test("^[0-9a-f]{64}$"))
-  ' >/dev/null 2>&1
+write_host_status() {
+  jq -nc --arg id "$1" --arg action "$2" --arg state "$3" --arg message "$4" \
+    --arg node "${5:-}" --arg enabled "${6:-}" --arg error_code "${7:-}" '
+    {id:$id,action:$action,state:$state,message:$message} |
+    if $node=="" then . else .node=$node end |
+    if $enabled=="" then . else .enabled=($enabled=="true") end |
+    if $error_code=="" then . else .error_code=$error_code end' |
+    $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
 }
-if ! dashboard_auth_configured; then
-  dashboard_exec rm -f /state/node-control.capability >/dev/null 2>&1 || true
+canonical_config() {
+  source=$1
+  if [ -f "$source" ]; then jq -S -c . "$source" 2>/dev/null; else printf '{}\n'; fi
+}
+config_revision() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'; else shasum -a 256 | awk '{print $1}'; fi
+}
+approve_config() {
+  BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+    BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" approve-rendered-config >/dev/null 2>&1
+}
+install_transaction=$state_root/node-control/install-transaction
+install_recovery_status=$state_root/node-control/install-recovery.status
+restore_transaction_file() {
+  source=$1
+  destination=$2
+  present=$3
+  if [ "$present" = true ]; then
+    restore_tmp=$(mktemp "$(dirname "$destination")/.install-restore.XXXXXX")
+    cp "$source" "$restore_tmp"
+    chmod 600 "$restore_tmp"
+    mv "$restore_tmp" "$destination"
+  else
+    rm -f "$destination"
+  fi
+}
+restore_install_transaction() {
+  [ -d "$install_transaction" ] || return 0
+  transaction_meta=$install_transaction/meta.json
+  jq -e '
+    type=="object" and (.id|type=="string") and
+    (.node=="bitcoin" or .node=="monero" or .node=="tari" or .node=="litecoin" or .node=="dogecoin" or .node=="bitcoincash" or .node=="zcash") and
+    (.phase=="applying" or .phase=="applied") and
+    (.had_config|type=="boolean") and (.had_env|type=="boolean") and
+    (.had_approved_config|type=="boolean") and (.had_approved_env|type=="boolean")
+  ' "$transaction_meta" >/dev/null 2>&1 || return 1
+  transaction_phase=$(jq -r .phase "$transaction_meta")
+  transaction_id=$(jq -r .id "$transaction_meta")
+  transaction_node=$(jq -r .node "$transaction_meta")
+  if [ "$transaction_phase" = applied ]; then
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" up >/dev/null 2>&1 || return 1
+    return 2
+  fi
+  restore_transaction_file "$install_transaction/config.before" "$config_file" "$(jq -r .had_config "$transaction_meta")" || return 1
+  restore_transaction_file "$install_transaction/env.before" "$env_file" "$(jq -r .had_env "$transaction_meta")" || return 1
+  restore_transaction_file "$install_transaction/approved-config.before" "$approved_config" "$(jq -r .had_approved_config "$transaction_meta")" || return 1
+  restore_transaction_file "$install_transaction/approved-env.before" "$state_root/.approved.env" "$(jq -r .had_approved_env "$transaction_meta")" || return 1
+  if [ "$transaction_node" = monero ]; then
+    "$stack_root/stack" stop monero-wallet monero >/dev/null 2>&1 || true
+  elif [ "$transaction_node" = tari ]; then
+    "$stack_root/stack" stop tari-wallet tari >/dev/null 2>&1 || true
+  else
+    "$stack_root/stack" stop "$transaction_node" >/dev/null 2>&1 || true
+  fi
+  BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+    BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" up >/dev/null 2>&1 || return 1
+  rm -rf "$install_transaction"
+}
+if [ -d "$install_transaction" ]; then
+  exec 8>"$state_root/.config.lock"
+  flock 8
+  recovery_result=0
+  restore_install_transaction || recovery_result=$?
+  if [ "$recovery_result" = 2 ]; then
+    rm -f "$install_recovery_status"
+    install_recovery_applied=true
+  elif [ "$recovery_result" != 0 ]; then
+    recovery_id=$(jq -r '.id // ""' "$install_transaction/meta.json" 2>/dev/null || true)
+    recovery_node=$(jq -r '.node // ""' "$install_transaction/meta.json" 2>/dev/null || true)
+    recovery_status_tmp=$(mktemp "$state_root/node-control/.recovery-status.XXXXXX")
+    jq -nc --arg id "$recovery_id" --arg node "$recovery_node" \
+      '{id:$id,action:"install",state:"failed",message:"Interrupted installation could not be restored.",node:$node,error_code:"rollback_failed"}' >"$recovery_status_tmp"
+    chmod 600 "$recovery_status_tmp"
+    mv "$recovery_status_tmp" "$install_recovery_status"
+    install_recovery_failed=true
+  else
+    rm -f "$install_recovery_status"
+  fi
+fi
+[ "${install_recovery_failed:-false}" = true ] || [ -r "$env_file" ] || exit 0
+dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
+[ -n "$dashboard_id" ] || exit 0
+config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
+case ",$config_files," in *",$stack_root/docker-compose.yml,"*) ;; *) exit 0 ;; esac
+if [ -f "$install_recovery_status" ]; then
+  $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' <"$install_recovery_status" >/dev/null
+  rm -f "$install_recovery_status"
+  [ "${install_recovery_failed:-false}" != true ] || exit 0
+fi
+if [ "${install_recovery_applied:-false}" = true ]; then
+  transaction_id=$(jq -r .id "$install_transaction/meta.json")
+  transaction_node=$(jq -r .node "$install_transaction/meta.json")
+  write_host_status "$transaction_id" install applied "Node installed." "$transaction_node"
+  printf '%s\n' "$transaction_id" >>"$state_root/node-control/seen"
+  transaction_seen=$(mktemp "$state_root/node-control/.seen.XXXXXX")
+  tail -n 256 "$state_root/node-control/seen" >"$transaction_seen"
+  chmod 600 "$transaction_seen"
+  mv "$transaction_seen" "$state_root/node-control/seen"
+  clear_request
+  rm -rf "$install_transaction"
   exit 0
 fi
-dashboard_exec sh -c 'umask 077; printf "ready\n" > /state/.node-control.capability.tmp; mv /state/.node-control.capability.tmp /state/node-control.capability' >/dev/null
+restore_approved_runtime() {
+  [ -f "$approved_config" ] && [ -f "$state_root/.approved.env" ] || return 1
+  pending_copy=$(mktemp "$state_root/node-control/.pending-config.XXXXXX")
+  pending_had_config=0
+  if [ -f "$config_file" ]; then
+    cp "$config_file" "$pending_copy"
+    pending_had_config=1
+  fi
+  restore_config=$(mktemp "$config_root/.config.restore.XXXXXX")
+  restore_env=$(mktemp "$state_root/.env.restore.XXXXXX")
+  cp "$approved_config" "$restore_config"
+  cp "$state_root/.approved.env" "$restore_env"
+  chmod 600 "$restore_config" "$restore_env" "$pending_copy"
+  mv "$restore_config" "$config_file"
+  mv "$restore_env" "$env_file"
+  restored=0
+  BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+    BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" up >/dev/null 2>&1 && restored=1
+  if [ "$pending_had_config" = 1 ]; then
+    mv "$pending_copy" "$config_file"
+  else
+    rm -f "$config_file" "$pending_copy"
+  fi
+  [ "$restored" = 1 ]
+}
+config_pending() {
+  current=$(canonical_config "$config_file") || return 0
+  approved=$(canonical_config "$approved_config") || return 0
+  [ -f "$approved_config" ] && [ "$current" = "$approved" ] && return 1
+  return 0
+}
+host_platform=source
+boot_kind=unsupported
+boot_supported=false
+case "$package_managed:$host_os" in
+  1:Linux) host_platform=linux; boot_kind=boot; boot_supported=true ;;
+  brew:Darwin) host_platform=mac; boot_kind=login; boot_supported=true ;;
+  brew:Linux) host_platform=linux; boot_kind=login; boot_supported=true ;;
+esac
+boot_enabled=false
+restart_policy=$(sed -n 's/^STACK_RESTART_POLICY=//p' "$env_file" 2>/dev/null || true)
+if [ "$restart_policy" = unless-stopped ]; then
+  boot_enabled=true
+elif [ "$restart_policy" != no ] && [ -f "$approved_config" ] &&
+  [ "$(jq -r '.dashboard.launch_at_boot == true' "$approved_config" 2>/dev/null || true)" = true ]; then
+  boot_enabled=true
+fi
+pending=false
+revision=
+if config_pending; then
+  pending=true
+  revision=$(canonical_config "$config_file" | config_revision)
+fi
+jq -nc --argjson timestamp "$now" --arg platform "$host_platform" --arg boot_kind "$boot_kind" \
+  --argjson boot_supported "$boot_supported" --argjson boot_enabled "$boot_enabled" --argjson config_pending "$pending" \
+  --arg config_revision "$revision" \
+  '{timestamp:$timestamp,install_supported:true,boot_supported:$boot_supported,boot_enabled:$boot_enabled,config_pending:$config_pending,config_revision:$config_revision,platform:$platform,boot_kind:$boot_kind}' |
+  $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.capability.tmp; mv /state/.node-control.capability.tmp /state/node-control.capability' >/dev/null
 if ! dashboard_exec test -f /state/node-control.processing >/dev/null 2>&1; then
   dashboard_exec test -f /state/node-control.request >/dev/null 2>&1 || exit 0
   dashboard_exec mv /state/node-control.request /state/node-control.processing >/dev/null 2>&1 || exit 0
@@ -50,6 +203,194 @@ if [ "$size" -gt 2048 ]; then
   exit 0
 fi
 request=$(dashboard_exec cat /state/node-control.processing 2>/dev/null || true)
+host_seen_file=$state_root/node-control/seen
+host_remember_seen() {
+  printf '%s\n' "$host_id" >>"$host_seen_file"
+  host_seen_tmp=$(mktemp "$state_root/node-control/.seen.XXXXXX")
+  tail -n 256 "$host_seen_file" >"$host_seen_tmp"
+  chmod 600 "$host_seen_tmp"
+  mv "$host_seen_tmp" "$host_seen_file"
+}
+host_finish() {
+  write_host_status "$host_id" "$host_action" "$1" "$2" "${3:-}" "${4:-}" "${5:-}"
+  host_remember_seen
+  clear_request
+  [ -z "${host_cleanup_transaction:-}" ] || rm -rf "$host_cleanup_transaction"
+  exit 0
+}
+host_request=false
+if printf '%s' "$request" | jq -e --argjson now "$now" '
+  type=="object" and keys==["action","id","node","requested_at"] and .action=="install" and
+  (.id|type=="string" and test("^[0-9a-f]{32}$")) and
+  (.node=="bitcoin" or .node=="monero" or .node=="tari" or .node=="litecoin" or .node=="dogecoin" or .node=="bitcoincash" or .node=="zcash") and
+  (.requested_at|type=="number" and floor==. and . >= $now-300 and . <= $now+30)
+' >/dev/null 2>&1; then
+  host_request=true
+elif printf '%s' "$request" | jq -e --argjson now "$now" '
+  type=="object" and keys==["action","enabled","id","requested_at"] and .action=="launch_at_boot" and
+  (.id|type=="string" and test("^[0-9a-f]{32}$")) and (.enabled|type=="boolean") and
+  (.requested_at|type=="number" and floor==. and . >= $now-300 and . <= $now+30)
+' >/dev/null 2>&1; then
+  host_request=true
+elif printf '%s' "$request" | jq -e --argjson now "$now" '
+  type=="object" and keys==["action","config_revision","id","requested_at"] and .action=="apply_config" and
+  (.id|type=="string" and test("^[0-9a-f]{32}$")) and
+  (.config_revision|type=="string" and test("^[0-9a-f]{64}$")) and
+  (.requested_at|type=="number" and floor==. and . >= $now-300 and . <= $now+30)
+' >/dev/null 2>&1; then
+  host_request=true
+fi
+if [ "$host_request" = true ]; then
+  host_id=$(printf '%s' "$request" | jq -r .id)
+  host_action=$(printf '%s' "$request" | jq -r .action)
+  if [ -r "$host_seen_file" ] && grep -Fxq "$host_id" "$host_seen_file"; then
+    host_finish rejected "Request already processed." "$(printf '%s' "$request" | jq -r '.node // empty')" "$(printf '%s' "$request" | jq -r '.enabled // empty')" replayed
+  fi
+  mkdir -p "$config_root"
+  exec 8>"$state_root/.config.lock"
+  flock 8
+  if [ "$host_action" != apply_config ] && config_pending; then
+    host_finish rejected "Review the pending config change first." "$(printf '%s' "$request" | jq -r '.node // empty')" "$(printf '%s' "$request" | jq -r '.enabled // empty')" config_pending
+  fi
+  if [ "$host_action" = apply_config ]; then
+    requested_revision=$(printf '%s' "$request" | jq -r .config_revision)
+    current_revision=$(canonical_config "$config_file" | config_revision)
+    if ! config_pending || [ "$requested_revision" != "$current_revision" ]; then
+      host_finish rejected "The pending config changed; review it again." "" "" config_changed
+    fi
+    if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" apply >/dev/null 2>&1; then
+      restore_approved_runtime || host_finish failed "Config apply failed and the prior runtime could not be fully restored." "" "" rollback_failed
+      host_finish failed "Config could not be applied." "" "" apply_failed
+    fi
+    approved_revision=$(canonical_config "$approved_config" | config_revision)
+    [ "$approved_revision" = "$requested_revision" ] || host_finish failed "Config approval could not be verified." "" "" approval_failed
+    host_finish applied "Config applied."
+  fi
+  if [ "$host_action" = install ]; then
+    host_node=$(printf '%s' "$request" | jq -r .node)
+    current='{}'
+    [ -f "$config_file" ] && current=$(cat "$config_file")
+    configured=$(printf '%s' "$current" | jq -r --arg node "$host_node" 'if $node=="bitcoin" then ((.bitcoin//{}|has("enabled")|not) or .bitcoin.enabled==true) else .[$node].enabled==true end')
+    [ "$configured" != true ] || host_finish rejected "Node is already installed." "$host_node" "" already_installed
+    memory=4096
+    [ "$host_node" != bitcoin ] && [ "$host_node" != monero ] || memory=2048
+    candidate=$(mktemp "$config_root/.config.install.XXXXXX")
+    printf '%s' "$current" | jq --arg node "$host_node" --argjson memory "$memory" '
+      .[$node].enabled=true | .[$node].active=true |
+      .[$node].resource_profile //= "compact" |
+      .[$node].steady_cpus //= 1 | .[$node].steady_mem_limit_mb //= $memory |
+      if $node=="monero" then .[$node].rpc_expose=false | .[$node].zmq_expose=false
+      elif $node=="tari" then .[$node].grpc_expose=false
+      else .[$node].rpc_expose=false end' >"$candidate"
+    validate=$(mktemp -d "$state_root/node-control/.validate.XXXXXX")
+    cp "$candidate" "$validate/config.json"
+    if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate" \
+      BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+      rm -rf "$candidate" "$validate"
+      host_finish rejected "Node defaults are invalid." "$host_node" "" validation_failed
+    fi
+    rm -rf "$validate"
+    transaction_tmp=$(mktemp -d "$state_root/node-control/.install-transaction.XXXXXX")
+    had_config=false
+    had_env=false
+    had_approved_config=false
+    had_approved_env=false
+    if [ -f "$config_file" ]; then cp "$config_file" "$transaction_tmp/config.before"; had_config=true; fi
+    if [ -f "$env_file" ]; then cp "$env_file" "$transaction_tmp/env.before"; had_env=true; fi
+    if [ -f "$approved_config" ]; then cp "$approved_config" "$transaction_tmp/approved-config.before"; had_approved_config=true; fi
+    if [ -f "$state_root/.approved.env" ]; then cp "$state_root/.approved.env" "$transaction_tmp/approved-env.before"; had_approved_env=true; fi
+    jq -nc --arg id "$host_id" --arg node "$host_node" --arg phase applying \
+      --argjson had_config "$had_config" --argjson had_env "$had_env" \
+      --argjson had_approved_config "$had_approved_config" --argjson had_approved_env "$had_approved_env" \
+      '{id:$id,node:$node,phase:$phase,had_config:$had_config,had_env:$had_env,had_approved_config:$had_approved_config,had_approved_env:$had_approved_env}' >"$transaction_tmp/meta.json"
+    chmod 600 "$candidate" "$transaction_tmp"/*
+    mv "$transaction_tmp" "$install_transaction"
+    mv "$candidate" "$config_file"
+    if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" pull >/dev/null 2>&1 &&
+      BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" apply >/dev/null 2>&1; then
+      transaction_meta_tmp=$(mktemp "$install_transaction/.meta.XXXXXX")
+      jq '.phase="applied"' "$install_transaction/meta.json" >"$transaction_meta_tmp"
+      chmod 600 "$transaction_meta_tmp"
+      mv "$transaction_meta_tmp" "$install_transaction/meta.json"
+      host_cleanup_transaction=$install_transaction
+      host_finish applied "Node installed." "$host_node"
+    fi
+    restore_install_transaction ||
+      host_finish failed "Node installation failed and prior configuration could not be fully restored." "$host_node" "" rollback_failed
+    host_finish failed "Node installation failed; prior configuration restored." "$host_node" "" apply_failed
+  fi
+  if [ "$host_action" = launch_at_boot ]; then
+    [ "$boot_supported" = true ] || host_finish rejected "Launch at boot is not managed for source installs." "" "$(printf '%s' "$request" | jq -r .enabled)" unsupported
+    host_enabled=$(printf '%s' "$request" | jq -r .enabled)
+    current='{}'
+    [ -f "$config_file" ] && current=$(cat "$config_file")
+    old_enabled=false
+    [ "$(printf '%s' "$current" | jq -r '.dashboard.launch_at_boot == true')" != true ] || old_enabled=true
+    [ "$old_enabled" != "$host_enabled" ] || host_finish rejected "Launch setting is already in that state." "" "$host_enabled" unchanged
+    candidate=$(mktemp "$config_root/.config.boot.XXXXXX")
+    printf '%s' "$current" | jq --argjson enabled "$host_enabled" '.dashboard.launch_at_boot=$enabled' >"$candidate"
+    validate=$(mktemp -d "$state_root/node-control/.validate.XXXXXX")
+    cp "$candidate" "$validate/config.json"
+    if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate" \
+      BITCOIN_STACK_VALIDATE_ONLY=1 BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+      rm -rf "$candidate" "$validate"
+      host_finish rejected "Launch setting is invalid." "" "$host_enabled" validation_failed
+    fi
+    rm -rf "$validate"
+    policies=$(mktemp "$state_root/node-control/.restart-policies.XXXXXX")
+    for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
+      details=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}|{{.HostConfig.RestartPolicy.Name}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$service" 2>/dev/null || true)
+      [ -n "$details" ] || continue
+      case "${details%%|*}" in *"$stack_root/docker-compose.yml"*) ;; *) rm -f "$candidate" "$policies"; host_finish rejected "A running container belongs to another installation." "" "$host_enabled" ownership_conflict ;; esac
+      policy_details=${details#*|}
+      printf '%s|%s|%s\n' "$service" "${policy_details%%|*}" "${policy_details#*|}" >>"$policies"
+    done
+    backup=$(mktemp "$state_root/node-control/.config.backup.XXXXXX")
+    printf '%s' "$current" >"$backup"
+    chmod 600 "$candidate" "$backup" "$policies"
+    mv "$candidate" "$config_file"
+    policy=on-failure:5
+    [ "$host_enabled" != true ] || policy=unless-stopped
+    boot_failed=false
+    while IFS='|' read -r service old_policy old_retries; do
+      [ -n "$service" ] || continue
+      $docker_bin update --restart="$policy" "$service" >/dev/null 2>&1 || { boot_failed=true; break; }
+    done <"$policies"
+    if [ "$boot_failed" = false ] && BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
+      if approve_config; then
+        rm -f "$backup" "$policies"
+        host_finish applied "Launch setting saved." "" "$host_enabled"
+      fi
+    fi
+    launch_rollback_failed=false
+    mv "$backup" "$config_file" || launch_rollback_failed=true
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1 || launch_rollback_failed=true
+    while IFS='|' read -r service old_policy old_retries; do
+      [ -n "$service" ] || continue
+      restore_policy=${old_policy:-no}
+      if [ "$restore_policy" = on-failure ] && [ "${old_retries:-0}" -gt 0 ]; then
+        restore_policy=on-failure:$old_retries
+      fi
+      $docker_bin update --restart="$restore_policy" "$service" >/dev/null 2>&1 || launch_rollback_failed=true
+    done <"$policies"
+    rm -f "$policies"
+    [ "$launch_rollback_failed" != true ] ||
+      host_finish failed "Launch setting failed and its prior state could not be fully restored." "" "$host_enabled" rollback_failed
+    host_finish failed "Launch setting could not be changed; prior setting restored." "" "$host_enabled" apply_failed
+  fi
+fi
+if printf '%s' "$request" | jq -e 'type=="object" and (.action=="install" or .action=="launch_at_boot" or .action=="apply_config")' >/dev/null 2>&1; then
+  invalid_host_id=$(printf '%s' "$request" | jq -r 'if (.id|type)=="string" and (.id|test("^[0-9a-f]{32}$")) then .id else "" end')
+  invalid_host_action=$(printf '%s' "$request" | jq -r .action)
+  write_host_status "$invalid_host_id" "$invalid_host_action" rejected "Invalid request." "" "" invalid_request
+  clear_request
+  exit 0
+fi
 if ! printf '%s' "$request" | jq -e --argjson now "$now" '
   type=="object" and keys==["active","confirmation","id","node","requested_at"] and
   (.id|type=="string" and test("^[0-9a-f]{32}$")) and
@@ -81,6 +422,12 @@ remember_seen() {
 mkdir -p "$config_root"
 exec 8>"$state_root/.config.lock"
 flock 8
+if config_pending; then
+  write_status "$id" "$node" "$active" rejected "Review the pending config change first." config_pending
+  remember_seen
+  clear_request
+  exit 0
+fi
 current='{}'
 [ -f "$config_file" ] && current=$(cat "$config_file")
 if [ "$(printf '%s' "$current" | jq -r --arg node "$node" '.[$node].enabled // (if $node=="bitcoin" then true else false end)')" != true ]; then
@@ -178,6 +525,7 @@ fi
 if ! printf '%s\n' "$runtime" | $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null; then
   rollback 1
 fi
+approve_config || rollback 1
 rm -f "$backup"
 write_status "$id" "$node" "$active" applied "Node state applied."
 remember_seen
