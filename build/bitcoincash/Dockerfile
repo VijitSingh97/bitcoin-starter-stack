@@ -1,6 +1,7 @@
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libatomic1 && rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates=20250419~deb12u2 curl=7.88.1-10+deb12u15 libatomic1=12.2.0-14+deb12u1 && rm -rf /var/lib/apt/lists/* && \
     case "$TARGETARCH" in \
       amd64) archive=x86_64-linux-gnu; sha=23bbe9ff749136a9b832a2a59023ce76a5391322c1ea2f4f24b5b91f035081bc ;; \
       arm64) archive=aarch64-linux-gnu; sha=27e177e5a07dc78c2c0d18798ea2e3925111955509ecdc476e828e7ce8f46383 ;; \

@@ -37,7 +37,7 @@ printf '%s\n' "$*" >>"$FAKE_STACK_LOG"
 EOF
 chmod +x "$root/configure.sh" "$root/stack" "$root/scripts/node-control"
 cat >"$tmp/docker" <<'EOF'
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
 if [ "$1" = inspect ]; then
   case "$3" in
@@ -79,7 +79,12 @@ request '{"id":"11111111111111111111111111111111","node":"tari","active":false,"
 grep -qx 'stop tari' "$tmp/stack.log" || fail "Tari was not stopped gracefully"
 [ "$(status .state)" = applied ] || fail "deactivation status was not applied"
 [ "$(jq -r '.bitcoin,.monero,.tari' "$dashboard_state/node-runtime.json" | tr '\n' ' ')" = 'true true false ' ] || fail "runtime state map is wrong"
-[ "$(stat -f %Lp "$dashboard_state/node-runtime.json" 2>/dev/null || stat -c %a "$dashboard_state/node-runtime.json")" = 600 ] || fail "runtime state is not private"
+if [ "$(uname -s)" = Darwin ]; then
+  runtime_mode=$(stat -f %Lp "$dashboard_state/node-runtime.json")
+else
+  runtime_mode=$(stat -c %a "$dashboard_state/node-runtime.json")
+fi
+[ "$runtime_mode" = 600 ] || fail "runtime state is not private"
 
 request '{"id":"22222222222222222222222222222222","node":"tari","active":true,"confirmation":"","requested_at":1000}'
 "$root/scripts/node-control"
