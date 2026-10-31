@@ -112,6 +112,14 @@ export function overviewChoiceGeometry(width, anchor, diamondWidth, minAnchorGap
   return { top: towerTop + towerLabelTop - labelTop, height, shoulder: 0, labelTop };
 }
 
+export function overviewLabelPosition(width, ox, anchorY, tw) {
+  const diamondWidth = GRID * tw * 1.12;
+  const offset = width > 700 && width < WIDE_MIN && ox !== width / 2
+    ? Math.sign(ox - width / 2) * (diamondWidth / 2 - 8)
+    : 0;
+  return { left: ox + offset, top: Math.max(8, anchorY - GRID * (tw / 4) - 32) };
+}
+
 export function towerLayout(W, cols = GRID) {
   if (W < WIDE_MIN) {
     return { wide: false, ox: W / 2, tw: Math.max(30, Math.min(52, W / 22)) };
@@ -234,8 +242,9 @@ if (typeof document !== "undefined") {
       const number = element.querySelector("b");
       number.textContent = text.slice("loading block ".length);
       number.style.color = activeNode(node) ? NODE_COLORS[node] : NODE_COLORS.zcash;
-      element.style.left = `${ox}px`;
-      element.style.top = `${Math.max(8, anchorY - GRID * (tw / 4) - 32)}px`;
+      const position = overviewLabelPosition(W, ox, anchorY, tw);
+      element.style.left = `${position.left}px`;
+      element.style.top = `${position.top}px`;
       element.hidden = false;
     }
 

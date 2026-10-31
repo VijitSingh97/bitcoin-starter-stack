@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, overviewTransition, overviewHitWidth, overviewChoiceGeometry, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
+import { project, gridCell, isRollover, nextDisplayed, expectedFill, utcMinutes, smooth, nextHighlight, nextScene, overviewTransition, overviewHitWidth, overviewChoiceGeometry, overviewLabelPosition, towerLayout, overviewLayout, previewDepth, sceneDepth, overviewBlockLabels, GRID, PER_LAYER } from "./tower.js";
 
 test("a layer is 12x12 = 144 blocks (~one day)", () => {
   assert.equal(GRID, 12);
@@ -141,6 +141,22 @@ test("seven-tower mobile bouquet stays compact, contained, and selectable", () =
     assert.ok(targets.every(({ height }) => height >= 44));
     assert.ok(targets.slice(1).every(({ top }, index) => top >= targets[index].top + targets[index].height));
   }
+});
+
+test("intermediate overview block labels clear neighboring name cards", () => {
+  const width = 872;
+  const layout = overviewLayout(width, 7, 888);
+  const nodes = ["bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoincash", "zcash"];
+  const centers = Object.fromEntries(nodes
+    .map((node, index) => [node, overviewLabelPosition(width, layout.positions[index], layout.anchors[index], layout.tw).left]));
+  const labelWidth = 168;
+  const nameCardWidth = 112;
+  const clear = (labelNode, cardNode) => Math.abs(centers[labelNode] - layout.positions[nodes.indexOf(cardNode)]) >= (labelWidth + nameCardWidth) / 2;
+  assert.ok(clear("monero", "litecoin"));
+  assert.ok(clear("tari", "dogecoin"));
+  assert.ok(Object.values(centers).every((center) => center - labelWidth / 2 >= 0 && center + labelWidth / 2 <= width));
+  const towerHalfWidth = GRID * layout.tw * 1.12 / 2;
+  assert.ok(nodes.every((node, index) => Math.abs(centers[node] - layout.positions[index]) <= towerHalfWidth));
 });
 
 test("preview tower reaches the viewport bottom", () => {
