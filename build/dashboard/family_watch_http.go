@@ -36,7 +36,6 @@ func (a *app) apiFamilyWatchList(w http.ResponseWriter, r *http.Request) {
 	active := node.Enabled && a.nodeActive(id, node.Enabled)
 	response := map[string]any{"supported": supported, "enabled": node.Enabled, "active": active, "has_password": a.cfg.dashboardPassword != "", "reason": reason, "wallets": []familyWatchWalletView{}}
 	if !supported {
-		response["wallets"] = familyWatchReferences(id)
 		writeJSON(w, response)
 		return
 	}

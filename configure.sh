@@ -64,6 +64,9 @@ zcash_rpc_password=$(get '.zcash.node_password')
 monero_wallet_rpc_user=$(sed -n 's/^MONERO_WALLET_RPC_USER=//p' "$env_file" 2>/dev/null || true)
 monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$env_file" 2>/dev/null || true)
+tari_wallet_rpc_user=$(sed -n 's/^TARI_WALLET_RPC_USER=//p' "$env_file" 2>/dev/null || true)
+tari_wallet_rpc_password=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$env_file" 2>/dev/null || true)
+tari_wallet_password=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$env_file" 2>/dev/null || true)
 dashboard_password=$(get '.dashboard.password')
 dashboard_password_set=$(jq -r 'if ((.dashboard // {}) | has("password")) then 1 else 0 end' <<<"$config")
 had_env=0
@@ -84,6 +87,7 @@ had_env=0
 [ -n "$rpc_user" ] || rpc_user="admin"
 [ -n "$monero_rpc_user" ] || monero_rpc_user="admin"
 [ -n "$monero_wallet_rpc_user" ] || monero_wallet_rpc_user="admin"
+[ -n "$tari_wallet_rpc_user" ] || tari_wallet_rpc_user="admin"
 [ -n "$rpc_password" ] || rpc_password=$(openssl rand -hex 24)
 [ -n "$monero_rpc_password" ] || monero_rpc_password=$(openssl rand -hex 24)
 [ -n "$litecoin_rpc_password" ] || litecoin_rpc_password=$(openssl rand -hex 24)
@@ -92,6 +96,8 @@ had_env=0
 [ -n "$zcash_rpc_password" ] || zcash_rpc_password=$(openssl rand -hex 24)
 [ -n "$monero_wallet_rpc_password" ] || monero_wallet_rpc_password=$(openssl rand -hex 24)
 [ -n "$monero_wallet_password" ] || monero_wallet_password=$(openssl rand -hex 24)
+[ -n "$tari_wallet_rpc_password" ] || tari_wallet_rpc_password=$(openssl rand -hex 24)
+[ -n "$tari_wallet_password" ] || tari_wallet_password=$(openssl rand -hex 24)
 if [ "$had_env" = "0" ] && [ "$dashboard_password_set" = "0" ] && [ -z "$dashboard_password" ]; then
   dashboard_password=$(openssl rand -hex 24)
 fi
@@ -285,6 +291,9 @@ check_alnum "zcash node_password" "$zcash_rpc_password"
 check_alnum "monero wallet RPC username" "$monero_wallet_rpc_user"
 check_alnum "monero wallet RPC password" "$monero_wallet_rpc_password"
 check_alnum "monero wallet password" "$monero_wallet_password"
+check_alnum "tari wallet RPC username" "$tari_wallet_rpc_user"
+check_alnum "tari wallet RPC password" "$tari_wallet_rpc_password"
+check_alnum "tari wallet password" "$tari_wallet_password"
 check_alnum "dashboard password" "$dashboard_password"
 
 if [ "$rpc_expose" = "1" ] && ((${#rpc_password} < 24)); then
@@ -660,7 +669,12 @@ MONERO_STEADY_CPUS=$monero_steady_cpus
 MONERO_STEADY_MEM_LIMIT_MB=$monero_steady_mem_limit_mb
 TARI_ENABLED=$tari_enabled
 TARI_ACTIVE=$tari_active
+TARI_WALLET_ENABLED=$tari_enabled
 TARI_GRPC_URL=http://172.29.0.32:18142
+TARI_WALLET_GRPC_URL=http://172.29.0.37:18143
+TARI_WALLET_RPC_USER=$tari_wallet_rpc_user
+TARI_WALLET_RPC_PASSWORD=$tari_wallet_rpc_password
+TARI_WALLET_PASSWORD=$tari_wallet_password
 TARI_DATA_DIR=$tari_data_dir
 TARI_PRUNING_HORIZON=$tari_pruning_horizon
 TARI_GRPC_EXPOSE=$tari_grpc_expose

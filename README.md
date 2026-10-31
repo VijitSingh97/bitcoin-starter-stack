@@ -75,10 +75,16 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   synced local daemon scans its live UTXO set. Results are cached hourly with
   saved balance snapshots; pending or failed scans are never presented as zero.
   Sourced Linux Mint and Bitcoin Cash Node examples are excluded from personal totals.
-- 🔎 **Honest reference cards.** Dogecoin and Zcash show sourced public examples
-  without balances because their current pruned modes cannot supply arbitrary
-  address lookup. Tari needs a separate view-only wallet service, so it has no
-  bundled wallet example. The dashboard never falls back to an external explorer.
+- 🟣 **Tari view-only wallet.** Add one wallet with its public spend key, private
+  view key, and optional birthday. The native wallet runs beside the pruned node
+  without a private spend key or seed, so it can report funds but cannot sign or
+  send. Tari v6.1 stores the view key in plaintext inside its SQLite database;
+  use encrypted host storage if you require encryption at rest. Funded pruned full-sync
+  qualification is pending.
+- 🔎 **Unavailable means unavailable.** Dogecoin and Zcash say **Wallet balance
+  not available** because their current pruned modes cannot supply arbitrary
+  address lookup. They do not show a fake zero, public reference card, or external
+  explorer result.
 - 🔌 **Remote nodes for Pithead.** Independently enable Monero restricted RPC/ZMQ
   or Tari mining gRPC on your private LAN. Tari uses an explicit mining-method
   allowlist and needs no wallet, miner, or payout key on this server.
@@ -104,8 +110,11 @@ You need Linux with Docker Engine, or macOS with Docker Desktop, plus Compose
 see [disk and resource planning for every chain](docs/nodes.md#storage-and-resource-planning).
 The post-sync compact budgets are **1 CPU / 2 GiB per Bitcoin or Monero node**,
 and **1 CPU / 4 GiB per Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash node**.
-Tor, the dashboard, Docker, the operating system, and Monero's optional view-only
-wallet service need additional room. Initial sync is uncapped, so sync one chain
+Tor, the dashboard, Docker, the operating system, and the Monero and Tari
+view-only wallet services need additional room. Tari's wallet sidecar has its
+own 0.5 CPU / 512 MiB container ceiling; this is separate from the Tari node's
+1 CPU / 4 GiB post-sync budget and is not yet qualified under sustained load.
+Initial sync is uncapped, so sync one chain
 at a time on small hardware. These are editable container ceilings, not proven
 minimum VPS specifications; complete capped stability trials remain pending.
 See [Hardware Requirements](docs/hardware.md).
@@ -242,7 +251,9 @@ activity. Bitcoin's initial sync transfers roughly 900 GB through Tor and can ta
 See [Watch-only balances](docs/watch-only.md).
 Monero's initial sync also downloads and validates historical data before
 discarding the parts pruning does not retain. A pruned node saves disk, not
-the initial validation work. Neither chain has a fixed sync-time guarantee.
+the initial validation work. Tari's view-only wallet likewise waits for both the
+base node and native wallet scan; a blank birthday scans from genesis. No chain
+has a fixed sync-time guarantee.
 
 Containers use Docker's `unless-stopped` policy. They return after a reboot when
 Docker starts at boot, unless you explicitly stopped them. Day-to-day commands,
@@ -298,8 +309,9 @@ The Monero card has the same price, fee-history, status, disk, uptime, and walle
 sections. Its fees are native XMR-per-kB estimates. Monero wallet rows remain
 pending during their first scan; amounts are verified as current only when fresh,
 complete key-image coverage is present. Litecoin and Bitcoin Cash cards accept
-address-only confirmed-UTXO snapshots. Dogecoin and Zcash show reference-only
-examples without balances, and Tari has no wallet example.
+address-only confirmed-UTXO snapshots. Tari accepts one native view-only wallet
+and keeps confirmed, available, timelocked, and pending amounts distinct.
+Dogecoin and Zcash show **Wallet balance not available** with no address card.
 
 The status page, notification gear, and sourced public examples can be used without a
 password; when configured, the password protects the whole dashboard. Personal
@@ -319,7 +331,9 @@ flowchart LR
         Bitcoin["🟠 Bitcoin Core"]
         Monero["🟠 Monero"]
         MoneroWallet["👁️ Monero view-only wallet"]
-        OtherNodes["Tari · Litecoin · Dogecoin<br/>Bitcoin Cash · Zcash"]
+        Tari["🟣 Tari"]
+        TariWallet["👁️ Tari view-only wallet"]
+        OtherNodes["Litecoin · Dogecoin<br/>Bitcoin Cash · Zcash"]
         Tor["🧅 Tor"]
     end
 
@@ -329,15 +343,19 @@ flowchart LR
     Dashboard -.->|Internal Digest RPC| Monero
     Dashboard -.->|Internal authenticated RPC| MoneroWallet
     MoneroWallet -.->|Internal Digest RPC| Monero
+    Dashboard -.->|Internal authenticated gRPC| TariWallet
+    TariWallet -.->|Internal wallet query| Tari
     Dashboard -.->|Internal node APIs| OtherNodes
     Bitcoin ==>|SOCKS5| Tor
     Monero ==>|SOCKS5| Tor
+    Tari ==>|SOCKS5| Tor
+    TariWallet ==>|SOCKS5| Tor
     OtherNodes ==>|SOCKS / private Tor bridges| Tor
     Tor <==> Net
 ```
 
 Shared Tor and dashboard services add two containers to the selected daemons.
-Monero's optional view-only wallet service adds one more.
+Monero and Tari view-only wallet services add separate containers when used.
 Nodes and the Go dashboard share an internal network;
 only Tor joins an external network. The Tor container also forwards the private
 LAN dashboard port to its fixed internal destination.
@@ -353,7 +371,7 @@ covers downloads, DNS, and the limits of the guarantee.
 | [Supported nodes](docs/nodes.md) | All seven chains, storage and resource budgets, and Pithead remote-node settings. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |
-| [Watch-only](docs/watch-only.md) | Read-only Bitcoin, Monero, Litecoin, and Bitcoin Cash views, plus the limits of the other chains. |
+| [Watch-only](docs/watch-only.md) | Read-only Bitcoin, Monero, Tari, Litecoin, and Bitcoin Cash views, plus unavailable Dogecoin and Zcash balances. |
 | [Tor & Privacy](docs/privacy.md) | Enforced runtime routing, LAN access, and the host-download boundary. |
 | [Architecture](docs/architecture.md) | Services, network layout, and privacy model. |
 | [Operations](docs/operations.md) | Commands, health checks, upgrades, backup, troubleshooting. |

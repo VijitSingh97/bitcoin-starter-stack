@@ -45,6 +45,19 @@ func (a *app) startBackground(ctx context.Context) <-chan struct{} {
 	if a.cfg.moneroWalletEnabled {
 		start(func() { a.moneroWatch.run(ctx, func() bool { return a.nodeWorkerRunnable(nodeMonero, true) }) })
 	}
+	if a.cfg.tariWalletEnabled {
+		start(func() {
+			a.tariWatch.run(ctx, func() bool { return a.nodeWorkerRunnable(nodeTari, true) }, func(ctx context.Context) (tariWatchNodeSnapshot, error) {
+				node := a.cfg.nodes[nodeTari]
+				status, err := a.fetchTariStatus(ctx, node, genericNodeStatus{})
+				return tariWatchNodeSnapshot{
+					Ready:  status.Synced && status.LatestBlockAvailable && status.LatestBlockAgeSeconds <= int64(tariTipFreshFor/time.Second),
+					Height: uint64(max(0, status.Height)), TargetHeight: uint64(max(0, status.TargetHeight)),
+					Reason: "Waiting for the Tari node to sync.",
+				}, err
+			})
+		})
+	}
 	if a.cfg.moneroEnabled {
 		start(func() { a.runMoneroFees(ctx) })
 	}

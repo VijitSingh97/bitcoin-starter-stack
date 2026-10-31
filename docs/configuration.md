@@ -198,9 +198,9 @@ shows the overridable settings with their defaults:
 | `<node>.data_dir` | `./data/<node>` (source), managed data directory for APT/Homebrew | Host directory for that chain's data. APT uses `/var/lib/bitcoin-starter-stack/data/<node>`; Homebrew uses its platform data path above. |
 | `<node>.resource_profile` | `off`; `compact` for APT/Homebrew wizard selections | Syncs uncapped, then applies that node's steady ceiling after repeated healthy sync checks. |
 | `<node>.steady_cpus` | `1` | Independent post-sync CPU ceiling for Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash. |
-| `<node>.steady_mem_limit_mb` | `4096` | Independent post-sync memory-plus-swap ceiling for those nodes. This is a budget, not a qualified minimum. |
+| `<node>.steady_mem_limit_mb` | `4096` | Independent post-sync memory-plus-swap ceiling for those base nodes. Tari's separate wallet sidecar is not included. This is a budget, not a qualified minimum. |
 | `tari.pruning_horizon` | `10000` | Positive retained-block horizon for Minotari's pruned state. |
-| `tari.grpc_expose`, `grpc_bind_ip`, `grpc_port` | `false`, `""`, `18142` | Optional unauthenticated Tari gRPC for Pithead on a trusted private LAN or WireGuard link. |
+| `tari.grpc_expose`, `grpc_bind_ip`, `grpc_port` | `false`, `""`, `18142` | Optional unauthenticated Tari mining gRPC for Pithead on a trusted private LAN or WireGuard link. It is separate from the internal authenticated view-only wallet service. |
 | `litecoin.prune_mb`, `dogecoin.prune_mb`, `bitcoincash.prune_mb` | `10000` | Recent block-file target in MiB. Chainstate and other state are additional. |
 | `litecoin.rpc_port`, `dogecoin.rpc_port`, `bitcoincash.rpc_port` | `9332`, `22555`, `8332` | Default host port for each opt-in authenticated private-LAN RPC proxy. Each also has `rpc_expose` and `rpc_bind_ip`. |
 | `zcash.rpc_expose`, `rpc_bind_ip`, `rpc_port` | `false`, `""`, `8232` | Optional authenticated read-only dashboard proxy. Native cookie-authenticated Zakura RPC stays internal and is never published. |
@@ -224,9 +224,14 @@ Starting and applying use local images only. See [Tor-only networking](privacy.m
 for the boundary between host downloads and Tor-only runtime traffic.
 
 Fresh installs generate independent dashboard, Bitcoin RPC, Monero daemon RPC,
-Monero wallet RPC, and encrypted-wallet-file passwords. Read them locally from
-the mode-600 `.env`; upgrades preserve existing credentials instead of forcing
-a rotation. The wallet RPC is internal-only and is not a LAN connection endpoint.
+Monero wallet RPC, Tari wallet RPC, Monero wallet-file, and Tari native wallet
+startup passwords. Read them locally from the mode-600 `.env`; upgrades preserve
+existing credentials instead of forcing a rotation. `TARI_WALLET_RPC_USER` and `TARI_WALLET_RPC_PASSWORD`
+authenticate the dashboard to the internal wallet gRPC service, while
+`TARI_WALLET_PASSWORD` protects native wallet startup. None is a LAN connection
+credential, and the wallet port is not published. Tari v6.1 still stores the
+private view key in its native SQLite database, so the wallet password does not
+provide encryption at rest; use encrypted host storage when that is required.
 
 ## Resource caps
 
@@ -263,12 +268,15 @@ other settings. Then run:
 bitcoin-stack apply  # use sudo for an APT install
 ```
 
-Tari, Litecoin, Dogecoin, Bitcoin Cash, and Zcash use 4096 MiB by default;
+Tari, Litecoin, Dogecoin, Bitcoin Cash, and Zcash base nodes use 4096 MiB by default;
 Bitcoin and Monero use 2048 MiB. For example, `steady_cpus: 2` and
 `steady_mem_limit_mb: 3072` give that node a
 2-core, 3-GiB post-sync ceiling. Changing a cap recreates the affected container
 and rechecks sync before applying the new values. The chain data stays in its
 volume. Set `resource_profile` to `"off"` and apply to stop automatic capping.
+Tari's view-only wallet sidecar has a separate fixed 0.5 CPU / 512 MiB container
+ceiling. It is additional to the Tari node budget and has not completed sustained
+resource qualification.
 
 APT uses `bitcoin-starter-stack-resource-profile.timer`; Homebrew's user service
 runs the same helper. It never runs inside the dashboard or mounts the Docker
@@ -347,12 +355,22 @@ an optional restore height and signed key-image JSON. Never place a view key,
 private spend key, seed phrase, or key images in this tracked configuration.
 See [Watch-only balances](watch-only.md#monero-view-only-wallets).
 
+The Tari card manages one native view-only wallet outside `config.json`. Enter a
+name, 64-character public spend key, 64-character private view key, and optional
+`YYYY-MM-DD` birthday; blank scans from genesis. A seed and private spend key are
+rejected. The sidecar-only `tari_wallet_data` volume contains its owner-only native
+database and archived removals or failed imports. The shared `tari_wallet` volume
+contains only control files and public metadata. The dashboard keeps roster metadata in
+`/state/tari_watch.json` and removes the mode-600 key handoff after native wallet
+creation. Do not put either key in `config.json`, Git, a URL, or a shell command.
+
 Litecoin and Bitcoin Cash watch lists are also dashboard state rather than
 `config.json` settings. They accept one public address per row and persist their
 rosters, hourly confirmed-UTXO cache, and saved balance snapshots in the private
 dashboard state volume. Their sourced public examples are created automatically
 on fresh state and are excluded from personal totals. Dogecoin and Zcash show
-sourced reference addresses without balances; Tari has no bundled wallet example.
+**Wallet balance not available** and no public reference address. Tari has no
+bundled wallet example.
 
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials and LAN exposure, `inbound_onion`, and dashboard

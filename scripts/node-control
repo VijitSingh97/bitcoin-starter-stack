@@ -107,11 +107,15 @@ restore_services() {
   if [ "$old_active" = true ]; then
     if [ "$node" = monero ]; then
       "$stack_root/stack" up monero monero-wallet >/dev/null 2>&1
+    elif [ "$node" = tari ]; then
+      "$stack_root/stack" up tari tari-wallet >/dev/null 2>&1
     else
       "$stack_root/stack" up "$node" >/dev/null 2>&1
     fi
   elif [ "$node" = monero ]; then
     "$stack_root/stack" stop monero-wallet monero >/dev/null 2>&1
+  elif [ "$node" = tari ]; then
+    "$stack_root/stack" stop tari-wallet tari >/dev/null 2>&1
   else
     "$stack_root/stack" stop "$node" >/dev/null 2>&1
   fi
@@ -140,7 +144,11 @@ if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITC
 fi
 set -- "$node"
 [ "$node" = monero ] && set -- monero-wallet monero
-if [ "$active" = true ]; then action="up"; [ "$node" = monero ] && set -- monero monero-wallet
+[ "$node" = tari ] && set -- tari-wallet tari
+if [ "$active" = true ]; then
+  action="up"
+  [ "$node" = monero ] && set -- monero monero-wallet
+  [ "$node" = tari ] && set -- tari tari-wallet
 else action="stop"; fi
 if ! "$stack_root/stack" $action "$@" >/dev/null 2>&1; then
   rollback 1

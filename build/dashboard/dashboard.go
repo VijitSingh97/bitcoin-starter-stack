@@ -106,6 +106,7 @@ type app struct {
 	moneroWatch      *MoneroWatchStore
 	moneroFees       *MoneroFeeHistory
 	familyWatch      *familyWatchManager
+	tariWatch        *TariWatchStore
 	portControlMu    sync.Mutex
 	nodeControlMu    sync.Mutex
 	ctx              context.Context
@@ -140,6 +141,7 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	a.moneroWatch = NewMoneroWatchStore(cfg)
 	a.moneroFees = NewMoneroFeeHistory(cfg.stateDir)
 	a.familyWatch = newFamilyWatchManager(a)
+	a.tariWatch = NewTariWatchStore(cfg)
 	if a.moneroWatch.Err() != nil {
 		a.log.Print("Monero watch-only wallet state unavailable until the state file is repaired and the dashboard restarts")
 	}

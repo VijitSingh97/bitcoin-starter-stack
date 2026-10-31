@@ -70,7 +70,7 @@ compose() {
 guard_package_containers() {
   [ "$package_managed" != 0 ] || return 0
   local service config working_dir
-  for service in tor bitcoin monero monero-wallet tari litecoin dogecoin bitcoincash zcash dashboard; do
+  for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
     config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
     case ",$config," in
       *",$stack_root/docker-compose.yml,"*) ;;

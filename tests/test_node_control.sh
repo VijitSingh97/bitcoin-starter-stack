@@ -76,7 +76,7 @@ status() { jq -r "$1" "$dashboard_state/node-control.status"; }
 request '{"id":"11111111111111111111111111111111","node":"tari","active":false,"confirmation":"deactivate","requested_at":1000}'
 "$root/scripts/node-control"
 [ "$(jq -r .tari.active "$config/config.json")" = false ] || fail "Tari was not deactivated"
-grep -qx 'stop tari' "$tmp/stack.log" || fail "Tari was not stopped gracefully"
+grep -qx 'stop tari-wallet tari' "$tmp/stack.log" || fail "Tari wallet was not stopped before its node"
 [ "$(status .state)" = applied ] || fail "deactivation status was not applied"
 [ "$(jq -r '.bitcoin,.monero,.tari' "$dashboard_state/node-runtime.json" | tr '\n' ' ')" = 'true true false ' ] || fail "runtime state map is wrong"
 if [ "$(uname -s)" = Darwin ]; then
@@ -89,7 +89,7 @@ fi
 request '{"id":"22222222222222222222222222222222","node":"tari","active":true,"confirmation":"","requested_at":1000}'
 "$root/scripts/node-control"
 [ "$(jq -r .tari.active "$config/config.json")" = true ] || fail "Tari was not reactivated"
-grep -qx 'up tari' "$tmp/stack.log" || fail "Tari was not restarted"
+grep -qx 'up tari tari-wallet' "$tmp/stack.log" || fail "Tari node was not started before its wallet"
 
 request '{"id":"22222222222222222222222222222222","node":"tari","active":false,"confirmation":"deactivate","requested_at":1000}'
 "$root/scripts/node-control"

@@ -28,6 +28,7 @@ for required in stack configure.sh docker-compose.yml docker-compose.rpc.yml con
   build/monero/Dockerfile build/monero/entrypoint.sh build/monero/healthcheck.sh \
   build/monero/wallet-entrypoint.sh build/monero/wallet-healthcheck.sh \
   build/tari/entrypoint.sh build/tari/config.toml build/litecoin/Dockerfile build/dogecoin/Dockerfile \
+  build/tari-wallet/Dockerfile build/tari-wallet/go.mod build/tari-wallet/launcher.go build/tari-wallet/config.toml \
   build/bitcoincash/Dockerfile build/bitcoincash/entrypoint.sh build/bitcoincash/healthcheck.sh \
   build/zcash/zakurad.toml build/zcash/healthcheck.sh \
   docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml docker-compose.tari-grpc.yml \

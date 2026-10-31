@@ -51,6 +51,10 @@ for required in \
   bitcoin-starter-stack/build/bitcoin/bitcoin.conf \
   bitcoin-starter-stack/build/tari/config.toml \
   bitcoin-starter-stack/build/tari/entrypoint.sh \
+  bitcoin-starter-stack/build/tari-wallet/Dockerfile \
+  bitcoin-starter-stack/build/tari-wallet/go.mod \
+  bitcoin-starter-stack/build/tari-wallet/launcher.go \
+  bitcoin-starter-stack/build/tari-wallet/config.toml \
   bitcoin-starter-stack/build/zcash/zakurad.toml \
   bitcoin-starter-stack/build/zcash/healthcheck.sh \
   bitcoin-starter-stack/scripts/bitcoin-stack \

@@ -213,7 +213,7 @@
         <div class="footer"><span id="tari-updated">Updated: —</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </section>
-    <section class="card chain-wallet-card" data-family-watch="tari"><h2>Watch-only wallets</h2><p class="node-state" data-family-watch-status>Loading wallet capabilities…</p><div data-family-watch-list></div></section>
+    <section id="tari-watch" class="card chain-wallet-card watch-card"><h2>View-only wallet</h2><p class="node-state">Loading wallet service…</p></section>
     <section class="card node-power-card" style="--node-accent:#8f5cff">
       <h2>Node controls</h2>
       <p id="tari-power-status" class="node-state">Deactivate this node to free its CPU and memory. Stored blockchain data is kept.</p>
@@ -455,6 +455,7 @@
   <script type="module" src="/static/refresh.js"></script>
   <script type="module" src="/static/prices.js"></script>
   <script type="module" src="/static/monero-watch.js"></script>
+  <script type="module" src="/static/tari-watch.js"></script>
   <script type="module" src="/static/family-watch.js"></script>
   <script type="module" src="/static/settings.js"></script>
   {{if and .BitcoinEnabled (not .Loading)}}<script type="module" src="/static/watch.js"></script>

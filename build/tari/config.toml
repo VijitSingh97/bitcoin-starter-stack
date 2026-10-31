@@ -23,6 +23,11 @@ grpc_server_allow_methods = [
 pruning_horizon = __PRUNING_HORIZON__
 pruning_interval = 50
 
+[base_node.http_wallet_query_service]
+port = 9000
+listen_ip = "0.0.0.0"
+external_address = "http://tari:9000"
+
 [base_node.p2p]
 public_addresses = []
 

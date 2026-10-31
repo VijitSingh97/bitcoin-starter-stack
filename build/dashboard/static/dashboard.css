@@ -633,6 +633,9 @@ hr {
 .monero-wallet-entry { padding-block: 12px; }
 .monero-wallet-entry + .monero-wallet-entry { border-top: 1px solid var(--border); }
 .monero-wallet-entry input[type="file"] { display: block; max-width: 100%; margin-block: 8px; color: var(--muted); }
+.tari-wallet-metrics { margin-top:8px; }
+.tari-wallet-metrics .row { margin:6px 0; font-size:0.8rem; }
+.tari-watch-form[hidden] { display:none; }
 
 .chain-panel { --accent:var(--node-accent); }
 .chain-card h2 { color:var(--node-accent); }

@@ -1,18 +1,29 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
-func TestPublicReferencesDoNotClaimQueryableBalances(t *testing.T) {
+func TestUnavailableWalletBalancesAreExplicit(t *testing.T) {
 	for _, id := range []string{nodeDogecoin, nodeZcash} {
-		wallets := familyWatchReferences(id)
-		if len(wallets) != 1 || !wallets[0].Example || wallets[0].Amount != nil || wallets[0].State != "unavailable" || wallets[0].SourceURL == "" || len(wallets[0].History) != 0 {
-			t.Fatalf("%s reference must identify a public address without claiming a balance: %#v", id, wallets)
+		supported, reason := familyWatchCapability(id)
+		if supported || reason == "" {
+			t.Fatalf("%s capability = (%v, %q)", id, supported, reason)
 		}
-		if supported, _ := familyWatchCapability(id); supported {
-			t.Fatalf("%s must not offer address mutations through the reference card", id)
+		a := &app{cfg: config{nodes: map[string]nodeConfig{id: {ID: id, Enabled: true}}}}
+		request := httptest.NewRequest(http.MethodGet, "/api/"+id+"/watch", nil)
+		request.SetPathValue("node", id)
+		response := httptest.NewRecorder()
+		a.apiFamilyWatchList(response, request)
+		var body struct {
+			Supported bool                    `json:"supported"`
+			Wallets   []familyWatchWalletView `json:"wallets"`
 		}
-	}
-	if len(familyWatchReferences(nodeTari)) != 0 {
-		t.Fatal("Tari has no verified public view-key example")
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || body.Supported || len(body.Wallets) != 0 {
+			t.Fatalf("%s response = %d %s", id, response.Code, response.Body.String())
+		}
 	}
 }

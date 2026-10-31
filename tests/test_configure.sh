@@ -22,13 +22,18 @@ dashboard_password=$(sed -n 's/^DASHBOARD_PASSWORD=//p' "$tmp/.env")
 monero_password=$(sed -n 's/^MONERO_RPC_PASSWORD=//p' "$tmp/.env")
 monero_wallet_rpc_password=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
 monero_wallet_password=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
-if [ -z "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ]; then
+tari_wallet_rpc_password=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+tari_wallet_password=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$tmp/.env")
+if [ -z "$dashboard_password" ] || [ -z "$monero_password" ] || [ -z "$monero_wallet_rpc_password" ] || [ -z "$monero_wallet_password" ] || [ -z "$tari_wallet_rpc_password" ] || [ -z "$tari_wallet_password" ]; then
   fail "fresh install did not generate all passwords"
 fi
-passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" | sort -u | wc -l | tr -d ' ')
-[ "$passwords" = "5" ] || fail "fresh install did not separate service passwords"
+passwords=$(printf '%s\n' "$rpc_password" "$dashboard_password" "$monero_password" "$monero_wallet_rpc_password" "$monero_wallet_password" "$tari_wallet_rpc_password" "$tari_wallet_password" | sort -u | wc -l | tr -d ' ')
+[ "$passwords" = "7" ] || fail "fresh install did not separate service passwords"
 grep -q '^MONERO_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Monero wallet RPC user default is not admin"
 grep -q '^MONERO_WALLET_RPC_URL=http://172.29.0.31:18082$' "$tmp/.env" || fail "Monero wallet RPC URL is not internal"
+grep -q '^TARI_WALLET_RPC_USER=admin$' "$tmp/.env" || fail "Tari wallet RPC user default is not admin"
+grep -q '^TARI_WALLET_GRPC_URL=http://172.29.0.37:18143$' "$tmp/.env" || fail "Tari wallet gRPC URL is not internal"
+grep -q '^TARI_WALLET_ENABLED=0$' "$tmp/.env" || fail "Tari wallet integration did not follow the Tari default"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "zero-config install enabled an optional compose override"
 grep -q '^COMPOSE_PROFILES=bitcoin$' "$tmp/.env" || fail "zero-config install did not select only Bitcoin"
 grep -q '^BITCOIN_ENABLED=1$' "$tmp/.env" || fail "Bitcoin default is not enabled"
@@ -59,6 +64,8 @@ s1=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h1=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
 mw1=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
 wf1=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
+tw1=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+tf1=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$tmp/.env")
 (cd "$tmp" && ./configure.sh) >/dev/null
 u2=$(sed -n 's/^BITCOIN_RPC_USER=//p' "$tmp/.env")
 p2=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$tmp/.env")
@@ -66,6 +73,8 @@ s2=$(sed -n 's/^BITCOIN_RPCAUTH_SALT=//p' "$tmp/.env")
 h2=$(sed -n 's/^BITCOIN_RPCAUTH_HASH=//p' "$tmp/.env")
 mw2=$(sed -n 's/^MONERO_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
 wf2=$(sed -n 's/^MONERO_WALLET_PASSWORD=//p' "$tmp/.env")
+tw2=$(sed -n 's/^TARI_WALLET_RPC_PASSWORD=//p' "$tmp/.env")
+tf2=$(sed -n 's/^TARI_WALLET_PASSWORD=//p' "$tmp/.env")
 if [ "$u1" != "$u2" ] || [ "$p1" != "$p2" ]; then
   fail "credentials changed on re-run (not idempotent)"
 fi
@@ -74,6 +83,9 @@ if [ "$s1" != "$s2" ] || [ "$h1" != "$h2" ]; then
 fi
 if [ "$mw1" != "$mw2" ] || [ "$wf1" != "$wf2" ]; then
   fail "Monero wallet credentials changed on re-run"
+fi
+if [ "$tw1" != "$tw2" ] || [ "$tf1" != "$tf2" ]; then
+  fail "Tari wallet credentials changed on re-run"
 fi
 
 # Existing rendered settings remain authoritative when a new default is added.
@@ -168,6 +180,8 @@ grep -qE '^DASHBOARD_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "dashboard 
 grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
 grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"
 grep -qE '^MONERO_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet password was not generated"
+grep -qE '^TARI_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Tari wallet RPC password was not generated"
+grep -qE '^TARI_WALLET_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Tari wallet password was not generated"
 grep -q '^MONERO_DATA_DIR=./data/monero$' "$tmp/.env" || fail "Monero data_dir default not applied"
 grep -q '^DASHBOARD_ONION=0$' "$tmp/.env" || fail "dashboard onion default not applied"
 grep -q '^DASHBOARD_BIND_IP=127.0.0.1$' "$tmp/.env" || fail "dashboard bind default not applied"
@@ -447,6 +461,7 @@ grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "disabled nodes 
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Bitcoin retained stale RPC exposure"
 grep -q '^MONERO_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale RPC exposure"
 grep -q '^MONERO_ZMQ_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale ZMQ exposure"
+grep -q '^TARI_WALLET_ENABLED=1$' "$tmp/.env" || fail "Tari wallet integration did not follow Tari enablement"
 
 cat >"$tmp/config.json" <<'EOF'
 {"bitcoin":{"enabled":false},"monero":{"enabled":true,"node_username":"moneroadmin","node_password":"moneropassword1234567890123456","data_dir":"./monero-chain","rpc_expose":true,"rpc_bind_ip":"192.168.1.118","rpc_port":28081,"zmq_expose":true,"zmq_bind_ip":"192.168.1.118","zmq_port":28083}}

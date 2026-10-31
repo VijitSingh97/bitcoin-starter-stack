@@ -217,6 +217,13 @@ func (a *app) apiAdditionalNode(w http.ResponseWriter, r *http.Request) {
 		SteadyCPUs: node.SteadyCPUs, SteadyMemLimitMB: node.SteadyMemLimitMB, ResourceProfile: node.ResourceProfile,
 	}
 	status.WalletViewSupported, status.WalletViewReason = familyWatchCapability(id)
+	if id == nodeTari {
+		status.WalletViewSupported = a.cfg.tariWalletEnabled
+		status.WalletViewReason = ""
+		if !status.WalletViewSupported {
+			status.WalletViewReason = "Apply the updated stack to enable the Tari view-only wallet service."
+		}
+	}
 	if !node.Supported {
 		status.Error = "Unavailable until pruned node support exists"
 		writeJSON(w, status)

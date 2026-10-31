@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -41,6 +42,11 @@ type config struct {
 	moneroWalletRPCUser     string
 	moneroWalletRPCPassword string
 	moneroWalletPassword    string
+	tariWalletEnabled       bool
+	tariWalletURL           string
+	tariWalletDir           string
+	tariWalletRPCUser       string
+	tariWalletRPCPassword   string
 	bitcoinRPCEndpoint      string
 	moneroRPCEndpoint       string
 	moneroZMQEndpoint       string
@@ -131,6 +137,25 @@ func envConfig() (config, error) {
 	}
 	if err := loadAdditionalNodes(&cfg); err != nil {
 		return config{}, err
+	}
+	cfg.tariWalletEnabled = cfg.nodes[nodeTari].Enabled && enabled(os.Getenv("TARI_WALLET_ENABLED"))
+	cfg.tariWalletURL = strings.TrimSpace(envOr("TARI_WALLET_GRPC_URL", "http://172.29.0.37:18143"))
+	cfg.tariWalletDir = envOr("TARI_WALLET_DIR", "/tari-wallet")
+	cfg.tariWalletRPCUser = os.Getenv("TARI_WALLET_RPC_USER")
+	cfg.tariWalletRPCPassword = os.Getenv("TARI_WALLET_RPC_PASSWORD")
+	if cfg.tariWalletEnabled {
+		if err := validateInternalHTTPURL("TARI_WALLET_GRPC_URL", cfg.tariWalletURL); err != nil {
+			return config{}, err
+		}
+		if !filepath.IsAbs(cfg.tariWalletDir) {
+			return config{}, errors.New("TARI_WALLET_DIR must be an absolute path")
+		}
+		if cfg.tariWalletRPCUser == "" || cfg.tariWalletRPCPassword == "" {
+			return config{}, errors.New("TARI_WALLET_RPC_USER and TARI_WALLET_RPC_PASSWORD are required when TARI_WALLET_ENABLED is true")
+		}
+	}
+	if (cfg.tariWalletRPCUser == "") != (cfg.tariWalletRPCPassword == "") {
+		return config{}, errors.New("TARI_WALLET_RPC_USER and TARI_WALLET_RPC_PASSWORD must be set together")
 	}
 	if node := cfg.nodes[nodeZcash]; node.Enabled && node.RPCEndpoint != "" && (cfg.port == "18232" || cfg.settingsPort == "18232") {
 		return config{}, errors.New("PORT and SETTINGS_PORT must differ from the internal Zcash proxy port 18232")

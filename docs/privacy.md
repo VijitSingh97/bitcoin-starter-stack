@@ -1,6 +1,6 @@
 # Tor-only runtime networking
 
-Bitcoin, Monero and its wallet service, Tari, Litecoin, Dogecoin, Bitcoin Cash,
+Bitcoin, Monero and its wallet service, Tari and its wallet service, Litecoin, Dogecoin, Bitcoin Cash,
 Zcash through Zakura, and the dashboard have no direct external network route.
 Their Docker network is internal; only the Tor container also joins an external
 network. These services use numeric addresses for local services, and local DNS
@@ -52,6 +52,26 @@ retain the raw view key. A private spend key or seed is never accepted, so this
 path cannot sign or send. Treat the private view key and signed key images as
 sensitive: use the trusted LAN dashboard or its authenticated onion service, and
 do not put them in `config.json`, Git, URLs, or command lines.
+
+Tari view-only monitoring also publishes no port. The dashboard authenticates to
+the wallet sidecar's internal gRPC service at `172.29.0.37:18143`; the wallet
+queries the base node's internal HTTP service at `tari:9000`. Both remain on the
+internal network. Generated `TARI_WALLET_RPC_PASSWORD` and `TARI_WALLET_PASSWORD`
+values are separate from the dashboard password and optional LAN mining gRPC.
+
+Wallet creation accepts one public spend key and private view key, never a seed
+or private spend key. The view key crosses the shared owner-only `tari_wallet`
+volume in a mode-600 request file and that handoff is removed after creation.
+The dashboard metadata does not retain it. Tari v6.1 does store the private view
+key in plaintext inside its native SQLite wallet database, however; the wallet
+password does not provide encryption at rest. That database and its archives are
+isolated in the sidecar-only `tari_wallet_data` volume, which the dashboard cannot
+read. Protect the Docker data root and
+use encrypted host storage when encryption at rest is required. A view key can
+reveal funds and history but cannot sign a transaction. Removing the wallet
+archives that owner-only database rather than deleting it or the Tari base node.
+Failed imports are retained in the same private archive for recovery; removing a
+dashboard row does not erase archived view keys.
 
 ## Downloads and upgrades
 

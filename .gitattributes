@@ -18,6 +18,7 @@ build/dashboard/*_test.go export-ignore
 build/dashboard/*.proto export-ignore
 build/dashboard/static/*.test.mjs export-ignore
 build/dashboard/package.json export-ignore
+build/tari-wallet/*_test.go export-ignore
 AGENTS.md export-ignore
 docs/developer-bot.md export-ignore
 tools export-ignore

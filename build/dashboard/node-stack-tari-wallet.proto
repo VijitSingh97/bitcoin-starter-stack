@@ -1,0 +1,79 @@
+// Copyright 2020. The Tari Project
+//
+// Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+// following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+// disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following
+// disclaimer in the documentation and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+// products derived from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+// INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+// Minimal wire-compatible subset of Tari v6.1.0 applications/minotari_app_grpc/proto/wallet.proto.
+// Upstream: https://github.com/tari-project/tari/blob/v6.1.0/applications/minotari_app_grpc/proto/wallet.proto
+
+syntax = "proto3";
+
+package tari.rpc;
+
+option go_package = "github.com/VijitSingh97/bitcoin-starter-stack/dashboard;main";
+
+enum TariWalletConnectivityStatus {
+  TARI_WALLET_INITIALIZING = 0;
+  TARI_WALLET_ONLINE = 1;
+  TARI_WALLET_DEGRADED = 2;
+  TARI_WALLET_OFFLINE = 3;
+}
+
+message TariWalletEmpty {}
+message TariGetVersionRequest {}
+message TariGetVersionResponse { string version = 1; }
+message TariGetStateRequest {}
+message TariGetBalanceRequest {}
+
+message TariGetBalanceResponse {
+  uint64 available_balance = 1;
+  uint64 pending_incoming_balance = 2;
+  uint64 pending_outgoing_balance = 3;
+  uint64 timelocked_balance = 4;
+}
+
+message TariWalletNetworkStatusResponse {
+  TariWalletConnectivityStatus status = 1;
+  uint32 avg_latency_ms = 2;
+  uint32 num_node_connections = 3;
+}
+
+message TariGetStateResponse {
+  uint64 scanned_height = 1;
+  TariGetBalanceResponse balance = 2;
+  TariWalletNetworkStatusResponse network = 3;
+  bool has_done_initial_validation = 4;
+}
+
+message TariGetCompleteAddressResponse {
+  bytes interactive_address = 1;
+  bytes one_sided_address = 2;
+  string interactive_address_base58 = 3;
+  string one_sided_address_base58 = 4;
+  string interactive_address_emoji = 5;
+  string one_sided_address_emoji = 6;
+}
+
+service Wallet {
+  rpc GetVersion(TariGetVersionRequest) returns (TariGetVersionResponse);
+  rpc GetState(TariGetStateRequest) returns (TariGetStateResponse);
+  rpc GetCompleteAddress(TariWalletEmpty) returns (TariGetCompleteAddressResponse);
+  rpc GetBalance(TariGetBalanceRequest) returns (TariGetBalanceResponse);
+}

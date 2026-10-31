@@ -19,7 +19,7 @@ temporary compaction space, or future growth.
 |---|---:|---:|---:|---:|---|
 | Bitcoin Core | 10,000 MiB of block files | 30–60 GB total | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB | Short capped trial passed; 24-hour qualification pending |
 | Monero | Native pruned mode | 120–150 GiB; upstream reported about 105 GiB pruned on October 5, 2026 | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 2 GiB, plus its wallet service | Not yet qualified |
-| Tari | 10,000-block pruning horizon | No current measured total; use an expandable volume and measure after first sync | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Protocol and Tor startup proven; full sync not qualified |
+| Tari | 10,000-block pruning horizon | No current measured total; use an expandable volume and measure after first sync | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB for the node, plus a 0.5 CPU / 512 MiB view-only wallet sidecar | Node startup and native wallet lifecycle/authentication proven; funded pruned full-sync balance and sustained caps not qualified |
 | Litecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
 | Dogecoin | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Binary and runtime startup proven; full sync not qualified |
 | Bitcoin Cash Node | 10,000 MiB of block files | Provisional 30–60 GB; current full-sync total is not measured | Uncapped; plan around 2 CPU / 4 GiB RAM | 1 CPU / 4 GiB | Signed upstream binary and runtime startup proven; full sync not qualified |
@@ -46,9 +46,16 @@ keeping the live chainstate.
 Budgets apply **per node**. Bitcoin plus Monero in compact mode therefore needs
 up to 4 GiB for the daemons. Three of the newer nodes need up to 12 GiB. Add
 memory and CPU for Tor, the Go dashboard, Docker, filesystem cache, the operating
-system, and Monero's optional wallet service. Sync one chain at a time on a small
+system, and wallet sidecars. Tari's sidecar has its own 0.5 CPU / 512 MiB ceiling;
+it is not included in the Tari base node's 1 CPU / 4 GiB budget and is not yet
+qualified under sustained load. Sync one chain at a time on a small
 host. A container cap on a larger test machine does not qualify a real VPS with
 the same total RAM.
+
+Tari's native wallet database is owner-only but not encrypted by its wallet
+password: Tari v6.1 stores the private view key in plaintext SQLite data. Use an
+encrypted host disk or encrypted volume backing store when encryption at rest is
+required. The key cannot spend, but it reveals wallet funds and history.
 
 ## Dashboard data
 
@@ -72,16 +79,16 @@ Wallet capabilities differ by chain:
 | Monero | Primary address plus private view key, with optional signed key images. Without complete key images, the amount is received-only rather than a verified current balance. |
 | Litecoin | Address-only confirmed UTXO snapshots from the local node. |
 | Bitcoin Cash | Address-only confirmed UTXO snapshots from the local node. |
-| Dogecoin | A sourced public Dogecoin Foundation address is shown as a reference, without a balance. The current pruned daemon cannot discover an arbitrary address balance. |
-| Zcash / Zakura | A sourced Tor Project transparent address is shown as a reference, without a balance. Zakura's default checkpoint-pruned mode does not retain the address index needed for lookup. |
-| Tari | No wallet view. A view-only wallet needs a separate wallet service, public spend key, private view key, and birthday; no verified public example is bundled. |
+| Dogecoin | **Wallet balance not available.** The current pruned daemon cannot discover an arbitrary address balance. No public reference address is shown. |
+| Zcash / Zakura | **Wallet balance not available.** Zakura's default checkpoint-pruned mode does not retain the address index needed for lookup. No public reference address is shown. |
+| Tari | One native view-only wallet using a public spend key, private view key, and optional `YYYY-MM-DD` birthday. Blank birthday scans from genesis. No seed or private spend key is accepted. |
 
 Litecoin and Bitcoin Cash use their native `scantxoutset` RPC after sync. The
 dashboard caches the confirmed result for an hour and records balance snapshots;
 it does not reconstruct transaction history, spent outputs, or mempool activity.
 New entries stay **Pending** until a scan completes. A failed refresh keeps the
 last confirmed result and marks it **Stale** or **Error** rather than replacing it
-with zero. Public examples are excluded from personal totals. No chain falls
+with zero. Litecoin and Bitcoin Cash public examples are excluded from personal totals. No chain falls
 back to an external block explorer.
 
 ## Setup wizard
@@ -138,7 +145,9 @@ For Tari, enable gRPC on port 18142 and configure Pithead with `tari.mode:
 remote`, this host, and the gRPC port. Pithead's current mining client uses
 plaintext unauthenticated gRPC, so use only a trusted LAN or WireGuard link.
 The allowlist supports node status, mining-template creation, and block
-submission. The stack runs no miner, wallet, or payout key.
+submission. The stack runs no miner or payout key. Its separate internal
+view-only wallet service has no published port and is not part of the mining
+endpoint.
 
 Pithead's current settings are documented in its
 [remote-node configuration](https://github.com/p2pool-starter-stack/pithead/blob/develop/docs/configuration.md#remote-tari-node).

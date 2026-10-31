@@ -27,6 +27,10 @@ export MONERO_RPC_PASSWORD=moneropassword
 export MONERO_WALLET_RPC_USER=walletuser
 export MONERO_WALLET_RPC_PASSWORD=walletpassword
 export MONERO_WALLET_PASSWORD=walletfilepassword
+export TARI_WALLET_RPC_USER=tariwalletuser
+export TARI_WALLET_RPC_PASSWORD=tariwalletpassword
+export TARI_WALLET_PASSWORD=tariwalletfilepassword
+export TARI_WALLET_ENABLED=0
 export LITECOIN_RPC_USER=litecoinuser
 export LITECOIN_RPC_PASSWORD=litecoinpassword
 export DOGECOIN_RPC_USER=dogecoinuser
@@ -205,12 +209,23 @@ echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_
 echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_ZMQ_PORT: "28083"' || fail "dashboard did not receive Monero ZMQ port"
 [ "$(echo "$monero_lan" | grep -c 'published:' || true)" = "3" ] || fail "Monero overrides published an unexpected port"
 
-all_nodes=$(COMPOSE_PROFILES=bitcoin,monero,tari,litecoin,dogecoin,bitcoincash,zcash TARI_ENABLED=1 LITECOIN_ENABLED=1 DOGECOIN_ENABLED=1 BITCOINCASH_ENABLED=1 ZCASH_ENABLED=1 docker compose --env-file /dev/null config)
+all_nodes=$(COMPOSE_PROFILES=bitcoin,monero,tari,litecoin,dogecoin,bitcoincash,zcash TARI_ENABLED=1 TARI_WALLET_ENABLED=1 LITECOIN_ENABLED=1 DOGECOIN_ENABLED=1 BITCOINCASH_ENABLED=1 ZCASH_ENABLED=1 docker compose --env-file /dev/null config)
 for service in tari litecoin dogecoin bitcoincash zcash; do
   echo "$all_nodes" | grep -q "^  $service:" || fail "$service profile did not render"
   echo "$all_nodes" | sed -n "/^  $service:$/,/^  [a-z]/p" | grep -q '127.0.0.1' || fail "$service DNS is not fail-closed"
   echo "$all_nodes" | sed -n "/^  $service:$/,/^  [a-z]/p" | grep -q 'published:' && fail "$service publishes a port by default"
 done
+tari_wallet_rendered=$(echo "$all_nodes" | sed -n '/^  tari-wallet:$/,/^  [a-z][a-z-]*:$/p')
+echo "$tari_wallet_rendered" | grep -q 'ipv4_address: 172.29.0.37' || fail "Tari wallet fixed internal address changed"
+echo "$tari_wallet_rendered" | grep -q 'read_only: true' || fail "Tari wallet root filesystem is writable"
+echo "$tari_wallet_rendered" | grep -q 'source: tari_wallet' || fail "Tari wallet control volume is not persistent"
+echo "$tari_wallet_rendered" | grep -q 'source: tari_wallet_data' || fail "Tari wallet private data volume is not persistent"
+echo "$tari_wallet_rendered" | grep -q 'published:' && fail "Tari wallet gRPC is published to the host"
+echo "$all_nodes" | sed -n '/^  dashboard:$/,/^  dogecoin:$/p' | grep -q 'TARI_WALLET_GRPC_URL: http://172.29.0.37:18143' || fail "dashboard is not wired to Tari wallet gRPC"
+dashboard_nodes=$(echo "$all_nodes" | sed -n '/^  dashboard:$/,/^  [a-z][a-z-]*:$/p')
+echo "$dashboard_nodes" | grep -B2 -A2 'target: /tari-wallet' | grep -q 'source: tari_wallet' || fail "dashboard cannot write Tari wallet control requests"
+echo "$dashboard_nodes" | grep -q 'source: tari_wallet_data' && fail "dashboard can read Tari wallet private data"
+echo "$dashboard_nodes" | grep -q 'TARI_WALLET_ENABLED: "1"' || fail "dashboard did not enable Tari wallet integration"
 grep -q '^onlynet=onion$' build/litecoin/entrypoint.sh || fail "Litecoin is not Tor-only"
 grep -q '^onlynet=onion$' build/dogecoin/entrypoint.sh || fail "Dogecoin is not Tor-only"
 grep -q '^onlynet=onion$' build/bitcoincash/entrypoint.sh || fail "Bitcoin Cash is not Tor-only"

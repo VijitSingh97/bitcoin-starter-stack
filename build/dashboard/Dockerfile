@@ -14,7 +14,7 @@ COPY build/dashboard/index.html ./index.html
 COPY build/dashboard/static ./static
 COPY VERSION ./VERSION
 COPY build/dashboard/THIRD_PARTY_NOTICES ./THIRD_PARTY_NOTICES
-RUN mkdir -p /state && chown 1000:1000 /state
+RUN mkdir -p /state /tari-wallet && chown 1000:1000 /state /tari-wallet
 USER 1000:1000
 EXPOSE 8000
 STOPSIGNAL SIGTERM

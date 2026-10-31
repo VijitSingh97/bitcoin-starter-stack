@@ -33,7 +33,7 @@ jobs:
 
       - name: Lint Dockerfiles (hadolint)
         run: docker run --rm -v "$PWD":/repo -w /repo hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
-          hadolint build/tor/Dockerfile build/dashboard/Dockerfile build/monero/Dockerfile build/litecoin/Dockerfile build/dogecoin/Dockerfile build/bitcoincash/Dockerfile
+          hadolint build/tor/Dockerfile build/dashboard/Dockerfile build/monero/Dockerfile build/tari-wallet/Dockerfile build/litecoin/Dockerfile build/dogecoin/Dockerfile build/bitcoincash/Dockerfile
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -53,6 +53,12 @@ jobs:
           go test -race ./...
           go vet ./...
           go build -o /tmp/dashboard .
+
+      - name: Tari wallet launcher Go checks
+        run: |
+          cd build/tari-wallet
+          go test -race ./...
+          go vet ./...
 
       - name: Python reference + HTTP parity
         run: |
@@ -94,6 +100,12 @@ jobs:
           RUN_NATIVE_WALLET_SMOKE: "1"
           NATIVE_WALLET_CHAIN: ${{ matrix.chain }}
         run: tests/test_native_wallets.sh
+
+      - name: Verify native Tari watch-wallet lifecycle and gRPC authentication
+        if: matrix.chain == 'tari'
+        env:
+          RUN_TARI_WALLET_NATIVE_SMOKE: "1"
+        run: tests/test_tari_wallet_native.sh
 
   macos-host:
     runs-on: macos-latest

@@ -11,12 +11,13 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 archive="$tmp/bitcoin-starter-stack.tar.gz"
 payload="$tmp/bitcoin-starter-stack"
-mkdir -p "$payload/build/dashboard" "$payload/build/bitcoin" "$payload/build/tari" "$payload/build/zcash" "$payload/scripts"
+mkdir -p "$payload/build/dashboard" "$payload/build/bitcoin" "$payload/build/tari" "$payload/build/tari-wallet" "$payload/build/zcash" "$payload/scripts"
 for file in stack configure.sh VERSION docker-compose.yml; do
   printf 'fixture\n' >"$payload/$file"
 done
 printf 'fixture\n' >"$payload/build/dashboard/Dockerfile"
 for file in build/bitcoin/bitcoin.conf build/tari/config.toml build/tari/entrypoint.sh \
+  build/tari-wallet/Dockerfile build/tari-wallet/go.mod build/tari-wallet/launcher.go build/tari-wallet/config.toml \
   build/zcash/zakurad.toml build/zcash/healthcheck.sh; do
   printf 'fixture %s\n' "$file" >"$payload/$file"
 done

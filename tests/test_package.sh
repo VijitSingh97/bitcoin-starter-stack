@@ -56,6 +56,9 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tari/config.toml \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/launcher.go \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/config.toml \
   ./usr/lib/bitcoin-starter-stack/build/litecoin/Dockerfile \
   ./usr/lib/bitcoin-starter-stack/build/dogecoin/Dockerfile \
   ./usr/lib/bitcoin-starter-stack/build/bitcoincash/Dockerfile \
@@ -117,6 +120,9 @@ cat >"$fake/docker" <<'EOF'
 printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
 if [ "${1:-}" = inspect ]; then
   [ -n "${FAKE_EXISTING_CONFIG:-}" ] || exit 1
+  last=
+  for arg in "$@"; do last=$arg; done
+  [ -z "${FAKE_EXISTING_SERVICE:-}" ] || [ "$last" = "$FAKE_EXISTING_SERVICE" ] || exit 1
   printf '%s\n' "$FAKE_EXISTING_CONFIG"
 fi
 if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
@@ -248,6 +254,12 @@ grep -q '^BITCOIN_PRUNE=0$' "$env_file" || fail "existing full-node state was co
 FAKE_EXISTING_CONFIG=/source/bitcoin-starter-stack/docker-compose.yml "$wrapper" up >"$tmp/existing.out" 2>&1 && fail "package startup replaced a source-managed container"
 grep -q 'belongs to another installation' "$tmp/existing.out" || fail "existing deployment refusal is unclear"
 grep -q 'compose .* up ' "$log" && fail "existing deployment refusal reached Compose up"
+
+: >"$log"
+FAKE_EXISTING_SERVICE=tari-wallet FAKE_EXISTING_CONFIG=/source/bitcoin-starter-stack/docker-compose.yml \
+  "$wrapper" up >"$tmp/existing-tari-wallet.out" 2>&1 && fail "package startup replaced a source-managed Tari wallet container"
+grep -q 'Existing tari-wallet container belongs to another installation' "$tmp/existing-tari-wallet.out" || fail "Tari wallet deployment refusal is unclear"
+grep -q 'compose .* up ' "$log" && fail "Tari wallet deployment refusal reached Compose up"
 
 printf '%s\n' '{"dashboard":{"control":true}}' >"$config_dir/config.json"
 rm -f "$log"

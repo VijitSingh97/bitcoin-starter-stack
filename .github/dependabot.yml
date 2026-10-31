@@ -30,6 +30,16 @@ updates:
     schedule:
       interval: weekly
 
+  - package-ecosystem: docker
+    directory: /build/tari-wallet
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /build/tari-wallet
+    schedule:
+      interval: weekly
+
   - package-ecosystem: gomod
     directory: /build/dashboard
     schedule:
