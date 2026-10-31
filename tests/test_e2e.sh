@@ -160,7 +160,7 @@ if [ "$test_lan_rpc" = true ]; then
 fi
 
 # ...but the plaintext password is nowhere in the bitcoin container's config
-docker inspect bitcoin | grep -q "$rpc_pass" && fail "plaintext RPC password leaked into the bitcoin container"
+docker inspect bitcoin | grep "$rpc_pass" >/dev/null && fail "plaintext RPC password leaked into the bitcoin container"
 
 # Dashboard enforces basic auth when a password is set
 code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
@@ -170,11 +170,11 @@ code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
 body=""
 for _ in 1 2 3 4 5 6; do
   body=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url" || true)
-  echo "$body" | grep -q "Sync Progress" && break
+  grep -q "Sync Progress" <<<"$body" && break
   sleep 5
 done
-echo "$body" | grep -q "Sync Progress" || fail "dashboard never rendered live stats"
-echo "$body" | grep -q "Pruned" || fail "dashboard missing pruned badge on a pruned node"
+grep -q "Sync Progress" <<<"$body" || fail "dashboard never rendered live stats"
+grep -q "Pruned" <<<"$body" || fail "dashboard missing pruned badge on a pruned node"
 dashboard_monero=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/monero") ||
   fail "dashboard Monero health API was unavailable"
 printf '%s' "$dashboard_monero" | jq -e '.enabled == true and .available == true and (.version | length > 0) and .uptime_seconds > 0 and (.pruned | type == "boolean")' >/dev/null ||
@@ -411,7 +411,7 @@ sync_starts() { # $1: label for messages
   # vs. bitcoind not finding onion peers through a working Tor
   boot_ok=""
   for _ in $(seq 1 30); do
-    if docker logs tor 2>&1 | grep -q "Bootstrapped 100"; then
+    if docker logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
       boot_ok=1
       break
     fi
@@ -494,7 +494,7 @@ docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 bitcoi
 
 dashboard_url="http://$(sed -n 's/^DASHBOARD_BIND_IP=//p' .env):80"
 body=$(curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url" || true)
-echo "$body" | grep -q "Full" || fail "dashboard missing full-node badge in wallet stage"
+grep -q "Full" <<<"$body" || fail "dashboard missing full-node badge in wallet stage"
 rpc_user=$(sed -n 's/^BITCOIN_RPC_USER=//p' .env)
 rpc_pass=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' .env)
 BITCOIN_RPC_USER="$rpc_user" BITCOIN_RPC_PASSWORD="$rpc_pass" \
