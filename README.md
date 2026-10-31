@@ -77,7 +77,7 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   Sourced Linux Mint and Bitcoin Cash Node examples are excluded from personal totals.
 - 🟣 **Tari view-only wallet.** Add one wallet with its public spend key, private
   view key, and optional birthday. The native wallet runs beside the pruned node
-  without a private spend key or seed, so it can report funds but cannot sign or
+  without importing a private spend key or spending-wallet seed, so it can report funds but cannot sign or
   send. Tari v6.1 stores the view key in plaintext inside its SQLite database;
   use encrypted host storage if you require encryption at rest. Funded pruned full-sync
   qualification is pending.

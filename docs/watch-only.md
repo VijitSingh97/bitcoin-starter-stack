@@ -169,7 +169,9 @@ The private view key reveals wallet funds and history but cannot spend. During
 creation it crosses the shared private volume in a mode-600 request file, which
 is removed after the native wallet accepts it. Dashboard state keeps the name,
 public spend key, birthday, state, and balance snapshots, never the private view
-key. The native wallet runs without a private spend key or seed.
+key. No private spend key or spending-wallet seed is imported. Tari may generate
+its own internal master seed, but the imported view-only identity has no private
+spend key and cannot sign for the monitored funds.
 
 Tari v6.1 stores the private view key in plaintext inside its native SQLite
 `wallet.db`, even when a wallet password is configured. The `tari_wallet_data`
