@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/VijitSingh97/bitcoin-starter-stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
+![Platform: Linux and macOS](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-4B5563)
 ![Runtime: Tor-only](https://img.shields.io/badge/Runtime-Tor--only-7D4698?logo=torproject&logoColor=white)
 
 Run Bitcoin, Monero, Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash with a
@@ -36,11 +36,11 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   chain on a small machine; the [per-node sizing guide](docs/nodes.md) separates
   disk planning allowances from measured evidence.
 - 🧅 **Tor-only runtime networking.** P2P traffic goes through the Tor container.
-  Node containers and the dashboard cannot route directly to the internet,
+  Node containers and the dashboard cannot route directly to the public internet,
   and local DNS forwarding is disabled. Bitcoin uses onion peers; inbound connections use an onion
   service when enabled. See the [privacy model](docs/privacy.md).
 - 📊 **Live dashboard.** Sync progress, peers, uptime, pruned status, and disk usage (with a
-  low-space warning). Start on localhost, or bind port `80` to your private LAN IP;
+  low-space warning). Start on localhost, or bind its configurable port to your private LAN IP;
   add a password and an onion address for remote access. RPC is private by default,
   with optional authenticated access where the node supports it. Tari mining gRPC and Monero ZMQ assume a trusted LAN.
 - 🔑 **Separate generated logins.** Fresh installs generate different passwords for
@@ -90,8 +90,8 @@ names for upgrade compatibility while the broader Node Manager takes shape.
 
 ## 🚀 Fresh install
 
-You need Ubuntu Server 24.04, Docker Engine with Compose 2.33.1 or newer,
-`jq`, `openssl`, `curl`, and an SSD. Pick the nodes your machine has room for;
+You need Linux with Docker Engine, or macOS with Docker Desktop, plus Compose
+2.33.1 or newer and an SSD. Pick the nodes your machine has room for;
 see [disk and resource planning for every chain](docs/nodes.md#storage-and-resource-planning).
 The post-sync compact budgets are **1 CPU / 2 GiB per Bitcoin or Monero node**,
 and **1 CPU / 4 GiB per Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash node**.
@@ -114,6 +114,21 @@ wizard installs activate those caps after healthy sync checks; source installs
 leave automatic caps off. See [changing resource caps](docs/configuration.md#resource-caps).
 
 ### 1. Install, then run the wizard
+
+Homebrew support for macOS and Linux is prepared for the first release that
+contains this packaging. The formula is not published yet; current release
+`v1.31.1` does not include it. Once released:
+
+```bash
+brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
+brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
+bitcoin-stack init
+```
+
+Homebrew installation is inert and leaves Docker untouched. Install and start
+Docker Desktop on macOS, or Docker Engine with Compose on Linux, before running
+the wizard. See the [Homebrew guide](docs/homebrew.md) for data paths, the
+optional background service, and upgrade steps.
 
 The Ubuntu APT package is prepared for the next release. The feed and signing
 key are not public yet. When that release is published, first follow the
@@ -180,12 +195,13 @@ enter the server's private IPv4 address, such as `192.168.1.117`; wildcard and
 public addresses are rejected. The source wizard uses `./data/bitcoin` and also
 asks about the optional Upgrade button, which defaults to off.
 
-Fresh package wizard installs select the experimental compact resource profile:
-initial sync is uncapped, then a host timer checks for healthy, current sync
-before applying the configured caps, initially 1 CPU and 2 GiB to each node
-separately. The wizard writes these values to `config.json` so you can edit
-them and run `sudo bitcoin-stack apply`. Existing installs and
-source installs keep automatic limits off. This mechanism applies a budget;
+Fresh APT and Homebrew wizard installs select the experimental compact resource profile:
+initial sync is uncapped, then the managed host helper checks for healthy, current sync
+before applying the configured per-node caps: 1 CPU and 2 GiB for Bitcoin or
+Monero, and 1 CPU and 4 GiB for the other nodes. The wizard writes these values to `config.json` so you can edit
+them and run `bitcoin-stack apply` (`sudo` for APT). Existing installs and
+source installs keep automatic limits off. Homebrew's optional user service and
+APT's host timer enforce the handoff. This mechanism applies a budget;
 the longer stability tests still decide whether that budget is sufficient.
 
 If you answer **n** at the final question, start later with:
@@ -202,8 +218,9 @@ only and never build or download implicitly.
 
 ### 3. Open the dashboard and let your nodes sync
 
-Open `http://localhost` on the node. If you chose a private LAN address, open
-`http://<server-private-ip>` from a trusted device. Keep port 80 off the public
+Open `http://localhost` on an APT or source install. Homebrew defaults to
+`http://localhost:8080`. If you chose a private LAN address, use the same port
+on the server's private address. Keep the dashboard off the public
 internet. Click a tower to see that chain's progress. Check logs with
 `./stack logs bitcoin` or `./stack logs monero` for source installs; packages
 use `sudo bitcoin-stack logs bitcoin` or `sudo bitcoin-stack logs monero`.
@@ -224,7 +241,8 @@ and [Getting Started](docs/getting-started.md) has the fuller walkthrough.
 
 ## 📈 Monitoring
 
-Open `http://localhost` on the node. After setting a private LAN bind address,
+Open `http://localhost` on an APT/source node, or `http://localhost:8080` for
+Homebrew. After setting a private LAN bind address,
 use `http://<server-ip>` or `http://<hostname>.local` (`avahi-daemon` required).
 The landing page shows a gold Bitcoin tower and an orange Monero tower. Click
 one to zoom in and open its card; close it with **×**, Escape, or a click outside
@@ -273,7 +291,8 @@ complete key-image coverage is present. Notifications remain Bitcoin-only.
 The status page, notification gear, and public example can be used without a
 password; when configured, the password protects the whole dashboard. Personal
 wallet views, wallet changes, and upgrades require one. LAN HTTP is unencrypted:
-use a trusted LAN or the onion service, and keep port `80` off the public internet.
+use a trusted LAN or the onion service, and keep the configured dashboard port
+off the public internet.
 
 ## 🏗️ How it works
 
@@ -317,6 +336,7 @@ covers downloads, DNS, and the limits of the guarantee.
 | Guide | What's inside |
 |---|---|
 | [Getting Started](docs/getting-started.md) | Prerequisites, install, first start, what to expect during sync. |
+| [Homebrew](docs/homebrew.md) | macOS and Linuxbrew install, paths, background service, and upgrades. |
 | [Supported nodes](docs/nodes.md) | All seven chains, storage and resource budgets, and Pithead remote-node settings. |
 | [Hardware Requirements](docs/hardware.md) | CPU, RAM, disk sizing — with real numbers from a reference box. |
 | [Configuration](docs/configuration.md) | Every `config.json` key, applying changes, reusing an existing node. |

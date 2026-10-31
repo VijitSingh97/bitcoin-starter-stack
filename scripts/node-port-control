@@ -9,6 +9,10 @@ config_file=$config_root/config.json
 config_lock=$state_root/.config.lock
 docker_bin=${DOCKER_BIN:-docker}
 ss_bin=${SS_BIN:-ss}
+ip_bin=${IP_BIN:-ip}
+lsof_bin=${LSOF_BIN:-/usr/sbin/lsof}
+ifconfig_bin=${IFCONFIG_BIN:-/sbin/ifconfig}
+host_os=${PORT_CONTROL_OS:-$(uname -s)}
 control_state=$state_root/port-control
 request_path=/state/port-control.request
 processing_path=/state/port-control.processing
@@ -130,6 +134,84 @@ EOF
   done <<EOF
 $host_bindings
 EOF
+}
+
+host_tcp_listeners() {
+  case "$host_os" in
+    Linux)
+      output=$($ss_bin -H -ltn 2>/dev/null) || return 1
+      printf '%s\n' "$output" | awk '
+        NF == 0 { next }
+        NF < 4 { bad=1; next }
+        {
+          endpoint=$4
+          if (endpoint ~ /^\[/) {
+            sub(/^\[/, "", endpoint)
+            count=split(endpoint, parts, /\]:/)
+            if (count == 2 && parts[2] ~ /^[0-9]+$/) print parts[1] "\t" parts[2]
+            else bad=1
+          } else {
+            port=endpoint
+            sub(/^.*:/, "", port)
+            address=endpoint
+            sub(/:[^:]*$/, "", address)
+            if (port ~ /^[0-9]+$/ && address != "") print address "\t" port
+            else bad=1
+          }
+        }
+        END { exit bad }
+      '
+      ;;
+    Darwin)
+      output=$($lsof_bin -nP -iTCP -sTCP:LISTEN -F n 2>/dev/null) || return 1
+      printf '%s\n' "$output" | awk '
+        substr($0, 1, 1) != "n" { next }
+        {
+          endpoint=substr($0, 2)
+          if (endpoint ~ /^\[/) {
+            sub(/^\[/, "", endpoint)
+            count=split(endpoint, parts, /\]:/)
+            if (count == 2 && parts[2] ~ /^[0-9]+$/) print parts[1] "\t" parts[2]
+            else bad=1
+          } else {
+            port=endpoint
+            sub(/^.*:/, "", port)
+            address=endpoint
+            sub(/:[^:]*$/, "", address)
+            if (port ~ /^[0-9]+$/ && address != "") print address "\t" port
+            else bad=1
+          }
+        }
+        END { exit bad }
+      '
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+host_ipv4_addresses() {
+  case "$host_os" in
+    Linux)
+      output=$($ip_bin -o -4 addr show 2>/dev/null) || return 1
+      ;;
+    Darwin)
+      output=$($ifconfig_bin -a 2>/dev/null) || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  addresses=$(printf '%s\n' "$output" | awk '
+    {
+      for (i=1; i<=NF; i++) {
+        if ($i == "inet" && (i + 1) <= NF) {
+          address=$(i + 1)
+          sub(/\/.*/, "", address)
+          if (address ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print address
+        }
+      }
+    }
+  ')
+  [ -n "$addresses" ] || return 1
+  printf '%s\n' "$addresses"
 }
 
 password=$(env_get DASHBOARD_PASSWORD)
@@ -347,32 +429,36 @@ while [ "$attempt" -lt 3 ]; do
         other_bindings=$(printf '%s\n%s' "$other_bindings" "$bindings")
       fi
     done
-    if ! ss_output=$($ss_bin -H -ltn 2>/dev/null); then
+    if ! host_bindings=$(host_tcp_listeners); then
       inspection_ok=0
-      ss_output=
+      host_bindings=
     fi
-    if [ "$inspection_ok" = 1 ]; then
-      host_bindings=$(printf '%s\n' "$ss_output" | awk '
-        NF >= 4 {
-          endpoint=$4
-          if (endpoint ~ /^\[/) {
-            sub(/^\[/, "", endpoint)
-            count=split(endpoint, parts, /\]:/)
-            if (count == 2) print parts[1] "\t" parts[2]
-          } else {
-            port=endpoint
-            sub(/^.*:/, "", port)
-            address=endpoint
-            sub(/:[^:]*$/, "", address)
-            print address "\t" port
-          }
-        }')
+    if ! host_ipv4s=$(host_ipv4_addresses); then
+      inspection_ok=0
+      host_ipv4s=
     fi
     if [ "$inspection_ok" != 1 ]; then
       rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
       remember_seen
       clear_processing
       write_status "$request_id" failed "Port availability could not be checked." port_check_failed
+      exit 0
+    fi
+    unavailable_address_port=
+    while IFS="$(printf '\t')" read -r port bind_ip; do
+      [ -n "$port" ] || continue
+      if ! printf '%s\n' "$host_ipv4s" | grep -Fxq "$bind_ip"; then
+        unavailable_address_port=$port
+        break
+      fi
+    done <<EOF
+$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip] | @tsv')
+EOF
+    if [ -n "$unavailable_address_port" ]; then
+      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
+      remember_seen
+      clear_processing
+      write_status "$request_id" rejected "Selected LAN address is not assigned to this host." bind_address_unavailable "$unavailable_address_port"
       exit 0
     fi
     conflict_port=

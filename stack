@@ -8,6 +8,9 @@ config_file=$config_dir/config.json
 env_file=$state_dir/.env
 stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+project_name=${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-apt}
+[ "$package_managed" != brew ] || project_name=${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-brew}
+export BITCOIN_STACK_PROJECT_NAME="$project_name"
 config_lock_owned=0
 
 lock_config() {
@@ -58,15 +61,15 @@ compose() {
           ;;
       esac
     done
-    docker compose --project-name bitcoin-starter-stack-apt \
+    docker compose --project-name "$project_name" \
       --project-directory "$state_dir" --env-file "$env_file" \
       "${compose_args[@]}" "$@"
   fi
 }
 
 guard_package_containers() {
-  [ "$package_managed" = "1" ] || return 0
-  local service config
+  [ "$package_managed" != 0 ] || return 0
+  local service config working_dir
   for service in tor bitcoin monero monero-wallet tari litecoin dogecoin bitcoincash zcash dashboard; do
     config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
     case ",$config," in
@@ -77,6 +80,11 @@ guard_package_containers() {
         return 1
         ;;
     esac
+    working_dir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$service" 2>/dev/null) || return 1
+    if [ "$working_dir" != "$state_dir" ]; then
+      echo "Existing $service container belongs to another installation; this installation will not replace it." >&2
+      return 1
+    fi
   done
 }
 
@@ -91,7 +99,8 @@ Usage: $stack_command <command> [args]
   events                     Incident history (down/recovered, failed pings) — survives restarts
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
-  upgrade-agent              Watch for dashboard Upgrade-button requests (auto-managed)
+  upgrade-agent              Watch for source-install dashboard requests (auto-managed)
+  host-service               Supervise configured nodes and host controls (Homebrew service)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -176,7 +185,7 @@ init() {
   IFS=$old_ifs
   read -r -p "Dashboard bind address (loopback or private LAN) [$current_bind_ip]: " w_bind_ip
   [ -n "$w_bind_ip" ] || w_bind_ip=$current_bind_ip
-  if [ "$package_managed" = "1" ]; then
+  if [ "$package_managed" != "0" ]; then
     w_control=n
   else
     read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
@@ -239,11 +248,11 @@ init() {
     read -r -p "$label data directory [$default_node_data_dir]: " node_data_dir
     [ -n "$node_data_dir" ] || node_data_dir=$default_node_data_dir
     printf -v "w_${node}_data_dir" '%s' "$node_data_dir"
-    read -r -p "Expose $label ${kind^^} to trusted LAN apps? [y/N] " node_expose
+    read -r -p "Expose $label $(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]') to trusted LAN apps? [y/N] " node_expose
     printf -v "w_${node}_${kind}_expose" '%s' "$node_expose"
     if yes "$node_expose"; then
       read -r -p "Private LAN address assigned to this host [required]: " node_bind_ip
-      read -r -p "Host $label ${kind^^} port [$default_port]: " node_port
+      read -r -p "Host $label $(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]') port [$default_port]: " node_port
       printf -v "w_${node}_${kind}_bind_ip" '%s' "$node_bind_ip"
       printf -v "w_${node}_${kind}_port" '%s' "${node_port:-$default_port}"
     fi
@@ -269,7 +278,7 @@ init() {
     enabled=${!enabled_var}
     [ "$enabled" = 1 ] && cfg=$(jq --arg node "$node" '.[$node].steady_cpus=1 | .[$node].steady_mem_limit_mb=4096' <<<"$cfg")
   done
-  if [ "$package_managed" = "1" ]; then
+  if [ "$package_managed" != "0" ]; then
     [ "$w_bitcoin_enabled" = "1" ] && cfg=$(jq '.bitcoin.resource_profile="compact"' <<<"$cfg")
     [ "$w_monero_enabled" = "1" ] && cfg=$(jq '.monero.resource_profile="compact"' <<<"$cfg")
     for node in tari litecoin dogecoin bitcoincash zcash; do
@@ -411,14 +420,91 @@ sync_node_runtime() {
   return 1
 }
 
+prepare_linuxbrew_data_dirs() {
+  [ "$package_managed" = brew ] && [ "$(uname -s)" = Linux ] || return 0
+  local data_root=${BITCOIN_STACK_DATA_DIR:-} root_real node upper dir dir_real owner mode contents expected_owner expected_mode
+  local tor_image commands='' mounts=()
+  [ -n "$data_root" ] && [ -d "$data_root" ] && [ ! -L "$data_root" ] || {
+    echo "Linuxbrew data directory is missing or is a symbolic link: $data_root" >&2
+    return 1
+  }
+  root_real=$(readlink -f -- "$data_root") || return 1
+  [ "$root_real" = "$data_root" ] || {
+    echo "Linuxbrew data directory must use its canonical path: $root_real" >&2
+    return 1
+  }
+  case "$data_root" in *:* | *,* | *$'\n'*) echo "Linuxbrew data directory contains unsupported characters." >&2; return 1 ;; esac
+
+  for node in bitcoin monero tari litecoin dogecoin bitcoincash zcash; do
+    upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    dir=$(env_get "${upper}_DATA_DIR")
+    expected_owner=1000:1000
+    expected_mode=700
+    if [ "$node" = zcash ]; then
+      expected_owner=10001:1000
+      expected_mode=750
+    fi
+    if [ "$dir" != "$data_root/$node" ]; then
+      if [ ! -d "$dir" ] || [ -L "$dir" ] ||
+        [ "$(stat -c '%u:%g' "$dir" 2>/dev/null)" != "$expected_owner" ] ||
+        [ "$(stat -c '%a' "$dir" 2>/dev/null)" != "$expected_mode" ]; then
+        echo "Custom $node data needs owner $expected_owner and mode $expected_mode: $dir" >&2
+        printf 'Prepare it explicitly, then retry: sudo chown -R %s %q; sudo chmod %s %q\n' "$expected_owner" "$dir" "$expected_mode" "$dir" >&2
+        return 1
+      fi
+      continue
+    fi
+    [ -d "$dir" ] && [ ! -L "$dir" ] || {
+      echo "Default $node data directory is missing or is a symbolic link: $dir" >&2
+      return 1
+    }
+    dir_real=$(readlink -f -- "$dir") || return 1
+    [ "$dir_real" = "$root_real/$node" ] || {
+      echo "Default $node data directory escapes the managed data root." >&2
+      return 1
+    }
+    owner=$(stat -c '%u:%g' "$dir") || return 1
+    mode=$(stat -c '%a' "$dir") || return 1
+    [ "$owner" = "$expected_owner" ] && [ "$mode" = "$expected_mode" ] && continue
+    contents=$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || {
+      echo "Linuxbrew cannot inspect $node data ownership: $dir" >&2
+      return 1
+    }
+    if [ -n "$contents" ]; then
+      echo "Linuxbrew will not change ownership or permissions of non-empty $node data: $dir" >&2
+      printf 'Migrate it explicitly, then retry: sudo chown -R %s %q; sudo chmod %s %q\n' "$expected_owner" "$dir" "$expected_mode" "$dir" >&2
+      return 1
+    fi
+    mounts+=( --mount "type=bind,src=$dir,dst=/node-data/$node" )
+    commands+="chown $expected_owner /node-data/$node && chmod $expected_mode /node-data/$node && "
+  done
+  [ "${#mounts[@]}" -gt 0 ] || return 0
+  tor_image=$(compose config --format json | jq -er '.services.tor.image') || return 1
+  docker image inspect "$tor_image" >/dev/null 2>&1 || {
+    echo "The local Tor image is required before Linuxbrew can prepare node data; run: $stack_command pull" >&2
+    return 1
+  }
+  docker run --rm --network none --read-only --security-opt no-new-privileges \
+    --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add FOWNER \
+    --user 0:0 --entrypoint /bin/sh "${mounts[@]}" "$tor_image" -eu -c "${commands% && }" >/dev/null || {
+    echo "Linuxbrew could not prepare the default node data directories." >&2
+    return 1
+  }
+}
+
 offline_up() {
-  guard_package_containers
+  guard_package_containers || return 1
   for arg in "$@"; do
     case "$arg" in
       tor | bitcoin | monero | monero-wallet | tari | litecoin | dogecoin | bitcoincash | zcash | dashboard) ;;
       *) echo "up accepts service names only; image downloads are separate: $stack_command pull."; return 1 ;;
     esac
   done
+  images_available || {
+    echo "Start failed. Missing images? Run $stack_command pull, then retry."
+    return 1
+  }
+  prepare_linuxbrew_data_dirs || return 1
   compose up -d --pull never --no-build "$@" || {
     echo "Start failed. Missing images? Run $stack_command pull, then retry."
     return 1
@@ -627,12 +713,24 @@ do_restore() {
 # One-command upgrade: fetch the latest release tag and apply it. Backs up
 # first, only ever moves forward (never downgrades), and prints a rollback line.
 do_upgrade() {
+  if [ "$package_managed" = brew ]; then
+    cat <<EOF
+This installation is managed by Homebrew. Upgrade manually:
+  $stack_command backup
+  brew update
+  brew upgrade bitcoin-starter-stack
+  $stack_command pull
+  $stack_command apply
+EOF
+    return 0
+  fi
   if [ "$package_managed" = "1" ]; then
     cat <<EOF
 This installation is managed by APT. Upgrade manually:
   $stack_command backup
   sudo apt update
   sudo apt install --only-upgrade bitcoin-starter-stack
+  $stack_command pull
   $stack_command apply
 EOF
     return 0
@@ -707,8 +805,8 @@ EOF
 # privileges. up/apply manage it automatically via ensure_agent below; running
 # it by hand just watches in the foreground.
 upgrade_agent() {
-  if [ "$package_managed" = "1" ]; then
-    echo "The dashboard upgrade agent is unavailable for APT installations." >&2
+  if [ "$package_managed" != "0" ]; then
+    echo "Use the package manager to upgrade this installation." >&2
     exit 1
   fi
   echo "upgrade-agent: watching for dashboard host-control requests (Ctrl-C to stop)."
@@ -738,7 +836,15 @@ upgrade_agent() {
 # ponytail: cron can't restart a crashed agent until reboot — use the systemd
 # unit if that matters to you.
 ensure_agent() {
+  if [ "$package_managed" = brew ]; then
+    echo "Host controls and automatic post-sync caps: brew services start bitcoin-starter-stack"
+    return 0
+  fi
   [ "$package_managed" = "1" ] && return 0
+  if [ "$(uname -s)" = Darwin ]; then
+    echo "For persistent host controls on macOS, use the Homebrew installation; foreground: ./stack host-service"
+    return 0
+  fi
   if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
     return 0 # managed by systemd — stay out of its way
   fi
@@ -759,6 +865,39 @@ ensure_agent() {
       echo "upgrade-agent: stopped (dashboard password is empty)"
     fi
   fi
+}
+
+host_service() {
+  umask 077
+  exec 7>"$state_dir/.host-service.lock"
+  flock -n 7 || { echo "Another host service is already running." >&2; return 1; }
+  trap 'exit 0' TERM INT
+  local started=0 ticks=0 helper
+  echo "host-service: waiting for saved configuration and Docker."
+  while true; do
+    if [ -r "$config_file" ] && docker info >/dev/null 2>&1; then
+      if [ "$started" = 0 ]; then
+        if (lock_config; "$stack_root/configure.sh" || exit 1; offline_up || exit 1; unlock_config); then
+          started=1
+          echo "host-service: supervising node controls and post-sync limits."
+        fi
+      fi
+      if [ "$started" = 1 ]; then
+        guard_package_containers || return 1
+        for helper in node-control node-port-control; do
+          BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+            "$stack_root/scripts/$helper" || echo "host-service: $helper check failed; will retry."
+        done
+        if [ "$ticks" = 0 ]; then
+          BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" \
+            "$stack_root/scripts/node-resource-profile" || echo "host-service: resource check failed; will retry."
+        fi
+        ticks=$(((ticks + 1) % 6))
+      fi
+    fi
+    sleep 10 &
+    wait $! || true
+  done
 }
 
 cmd=${1:-help}
@@ -805,10 +944,13 @@ case "$cmd" in
     ;;
   upgrade) do_upgrade ;;
   pull)
-    [ -f "$env_file" ] || "$stack_root/configure.sh"
+    lock_config
+    "$stack_root/configure.sh"
     pull_images
+    unlock_config
     ;;
   upgrade-agent) upgrade_agent ;;
+  host-service) host_service ;;
   status) status ;;
   doctor) doctor ;;
   backup) guard_package_containers && do_backup ;;

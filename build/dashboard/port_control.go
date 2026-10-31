@@ -316,11 +316,15 @@ func validatePortControlChanges(input portControlInput, ports []portControlPort)
 		desired[change.Port] = next
 		changes = append(changes, change)
 	}
+	dashboardPort, err := strconv.Atoi(os.Getenv("DASHBOARD_PORT"))
+	if err != nil || dashboardPort < 1 || dashboardPort > 65535 {
+		dashboardPort = 80
+	}
 	for _, change := range changes {
 		if !change.Enabled {
 			continue
 		}
-		if change.HostPort == 80 && change.BindIP == strings.TrimSpace(os.Getenv("DASHBOARD_BIND_IP")) {
+		if change.HostPort == dashboardPort && change.BindIP == strings.TrimSpace(os.Getenv("DASHBOARD_BIND_IP")) {
 			return nil, fmt.Errorf("Selected port for %s is already in use.", portControlLabel(change.Port))
 		}
 		for _, port := range desired {

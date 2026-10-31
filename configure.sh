@@ -5,6 +5,7 @@
 # Usually run for you by `./stack up`; safe to run directly and to re-run.
 set -euo pipefail
 stack_root=${BITCOIN_STACK_ROOT:-$(cd "$(dirname "$0")" && pwd)}
+asset_root=${BITCOIN_STACK_ASSET_ROOT:-$stack_root}
 state_dir=${BITCOIN_STACK_STATE_DIR:-$stack_root}
 config_dir=${BITCOIN_STACK_CONFIG_DIR:-$state_dir}
 config_file=$config_dir/config.json
@@ -222,6 +223,11 @@ dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboa
 [ -n "$dashboard_onion" ] || dashboard_onion=0
 dashboard_control=$(flag '.dashboard.control')
 dashboard_bind_ip=$(get '.dashboard.bind_ip' '127.0.0.1')
+dashboard_default_port=80
+[ "$package_managed" != brew ] || dashboard_default_port=8080
+dashboard_port=$(jq -r '.dashboard.port // empty' <<<"$config")
+[ -n "$dashboard_port" ] || dashboard_port=$(sed -n 's/^DASHBOARD_PORT=//p' "$env_file" 2>/dev/null || true)
+[ -n "$dashboard_port" ] || dashboard_port=$dashboard_default_port
 telegram_bot_token=$(get '.notifications.telegram_bot_token')
 telegram_chat_id=$(get '.notifications.telegram_chat_id')
 healthchecks_url=$(get '.notifications.healthchecks_url')
@@ -232,14 +238,14 @@ alert_new_block_litecoin=$(flag '.notifications.alert_new_block_litecoin')
 alert_new_block_dogecoin=$(flag '.notifications.alert_new_block_dogecoin')
 alert_new_block_bitcoincash=$(flag '.notifications.alert_new_block_bitcoincash')
 alert_new_block_zcash=$(flag '.notifications.alert_new_block_zcash')
-if [ "$package_managed" = "1" ] && [ "$dashboard_control" = "1" ]; then
-  echo "dashboard.control is unavailable for APT installations; use $stack_command backup, apt upgrade, then $stack_command apply." >&2
+if [ "$package_managed" != "0" ] && [ "$dashboard_control" = "1" ]; then
+  echo "dashboard.control is unavailable for package installations; use your package manager, then $stack_command apply." >&2
   exit 1
 fi
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
 default_wallets='[{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}]'
-if [ "$package_managed" = "1" ] && [ "$prune" != "0" ]; then
+if [ "$package_managed" != "0" ] && [ "$prune" != "0" ]; then
   default_wallets='[]'
 fi
 watch_wallets_b64=$(jq -cej --argjson defaults "$default_wallets" '
@@ -317,6 +323,11 @@ check_bind_ip() {
   fi
 }
 check_bind_ip dashboard.bind_ip "$dashboard_bind_ip" 1
+case "$dashboard_port" in '' | 0* | *[!0-9]*) echo "dashboard.port must be a whole number from 1 to 65535."; exit 1 ;; esac
+if ((${#dashboard_port} > 5 || 10#$dashboard_port > 65535)); then
+  echo "dashboard.port must be a whole number from 1 to 65535."
+  exit 1
+fi
 
 if [ -n "$rpc_bind_ip" ]; then
   check_bind_ip bitcoin.rpc_bind_ip "$rpc_bind_ip" 0
@@ -333,8 +344,8 @@ if ((${#rpc_port} > 5 || 10#$rpc_port > 65535)); then
   echo "bitcoin.rpc_port must be a whole number from 1 to 65535."
   exit 1
 fi
-if [ "$rpc_expose" = "1" ] && [ "$rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$rpc_port" = "80" ]; then
-  echo "bitcoin.rpc_port conflicts with the dashboard on $rpc_bind_ip:80."
+if [ "$rpc_expose" = "1" ] && [ "$rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$rpc_port" = "$dashboard_port" ]; then
+  echo "bitcoin.rpc_port conflicts with the dashboard on $rpc_bind_ip:$dashboard_port."
   exit 1
 fi
 
@@ -406,24 +417,28 @@ for port_config in \
   if [ "$exposed" = 1 ]; then
     [ -n "$bind_ip" ] || { echo "$node.${kind}_bind_ip is required when $node.${kind}_expose is true."; exit 1; }
     check_bind_ip "$node.${kind}_bind_ip" "$bind_ip" 0
-    if [ "$bind_ip" = "$dashboard_bind_ip" ] && [ "$port" = 80 ]; then
-      echo "$node.${kind}_port conflicts with the dashboard on $bind_ip:80."
+    if [ "$bind_ip" = "$dashboard_bind_ip" ] && [ "$port" = "$dashboard_port" ]; then
+      echo "$node.${kind}_port conflicts with the dashboard on $bind_ip:$dashboard_port."
       exit 1
     fi
   fi
 done
-declare -A exposed_listeners=()
+exposed_listener_keys=()
+exposed_listener_names=()
 register_listener() {
-  local name=$1 enabled=$2 bind_ip=$3 port=$4 key
+  local name=$1 enabled=$2 bind_ip=$3 port=$4 key index
   [ "$enabled" = 1 ] || return 0
   key=$bind_ip:$port
-  if [ -n "${exposed_listeners[$key]+set}" ]; then
-    echo "$name conflicts with ${exposed_listeners[$key]} on $key."
-    exit 1
-  fi
-  exposed_listeners[$key]=$name
+  for ((index=0; index<${#exposed_listener_keys[@]}; index++)); do
+    if [ "${exposed_listener_keys[$index]}" = "$key" ]; then
+      echo "$name conflicts with ${exposed_listener_names[$index]} on $key."
+      exit 1
+    fi
+  done
+  exposed_listener_keys+=("$key")
+  exposed_listener_names+=("$name")
 }
-register_listener dashboard 1 "$dashboard_bind_ip" 80
+register_listener dashboard 1 "$dashboard_bind_ip" "$dashboard_port"
 register_listener bitcoin.rpc_port "$rpc_expose" "$rpc_bind_ip" "$rpc_port"
 register_listener monero.rpc_port "$monero_rpc_expose" "$monero_rpc_bind_ip" "$monero_rpc_port"
 register_listener monero.zmq_port "$monero_zmq_expose" "$monero_zmq_bind_ip" "$monero_zmq_port"
@@ -448,12 +463,12 @@ if [ "$monero_zmq_expose" = "1" ]; then
   [ -n "$monero_zmq_bind_ip" ] || { echo "monero.zmq_bind_ip is required when monero.zmq_expose is true."; exit 1; }
   check_bind_ip monero.zmq_bind_ip "$monero_zmq_bind_ip" 0
 fi
-if [ "$monero_rpc_expose" = "1" ] && [ "$monero_rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$monero_rpc_port" = "80" ]; then
-  echo "monero.rpc_port conflicts with the dashboard on $monero_rpc_bind_ip:80."
+if [ "$monero_rpc_expose" = "1" ] && [ "$monero_rpc_bind_ip" = "$dashboard_bind_ip" ] && [ "$monero_rpc_port" = "$dashboard_port" ]; then
+  echo "monero.rpc_port conflicts with the dashboard on $monero_rpc_bind_ip:$dashboard_port."
   exit 1
 fi
-if [ "$monero_zmq_expose" = "1" ] && [ "$monero_zmq_bind_ip" = "$dashboard_bind_ip" ] && [ "$monero_zmq_port" = "80" ]; then
-  echo "monero.zmq_port conflicts with the dashboard on $monero_zmq_bind_ip:80."
+if [ "$monero_zmq_expose" = "1" ] && [ "$monero_zmq_bind_ip" = "$dashboard_bind_ip" ] && [ "$monero_zmq_port" = "$dashboard_port" ]; then
+  echo "monero.zmq_port conflicts with the dashboard on $monero_zmq_bind_ip:$dashboard_port."
   exit 1
 fi
 if [ "$monero_rpc_expose" = "1" ] && [ "$monero_zmq_expose" = "1" ] && [ "$monero_rpc_bind_ip:$monero_rpc_port" = "$monero_zmq_bind_ip:$monero_zmq_port" ]; then
@@ -575,7 +590,8 @@ rpcauth_hash=$(printf '%s' "$rpc_password" | openssl dgst -sha256 -hmac "$rpcaut
 # (or an unpacked release tarball, which has no git), otherwise branch-commit so
 # dev builds are identifiable rather than masquerading as the release.
 version=$(cat "$stack_root/VERSION" 2>/dev/null || echo dev)
-if git -C "$stack_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+git_root=$(git -C "$stack_root" rev-parse --show-toplevel 2>/dev/null || true)
+if [ "$git_root" = "$(cd "$stack_root" && pwd -P)" ]; then
   head=$(git -C "$stack_root" rev-parse HEAD 2>/dev/null || echo)
   # ^{commit} dereferences the (annotated) release tag to its commit; without it
   # the tag-object sha never equals HEAD and every deploy looks like a dev build.
@@ -708,6 +724,7 @@ DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
 DASHBOARD_CONTROL=$dashboard_control
 DASHBOARD_BIND_IP=$dashboard_bind_ip
+DASHBOARD_PORT=$dashboard_port
 TELEGRAM_BOT_TOKEN=$telegram_bot_token
 TELEGRAM_CHAT_ID=$telegram_chat_id
 HEALTHCHECKS_URL=$healthchecks_url
@@ -721,6 +738,7 @@ ALERT_NEW_BLOCK_ZCASH=$alert_new_block_zcash
 NODE_NAME=$(hostname)
 STACK_VERSION=$stack_version
 STACK_ROOT=$stack_root
+STACK_ASSET_ROOT=$asset_root
 WATCH_WALLETS_B64=$watch_wallets_b64
 EOF
 chmod 600 "$env_tmp"

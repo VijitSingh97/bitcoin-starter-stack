@@ -2,14 +2,12 @@
 
 ## Prerequisites
 
-- **Ubuntu Server 24.04** (other Docker-capable Linux works, but this is
-  what's tested).
-- **[Docker Engine](https://docs.docker.com/engine/install/ubuntu/)** and
-  Docker Compose **2.33.1 or newer**, with the
-  [post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
-  so your user can run `docker` without sudo.
-- **`jq`, `openssl`, and `curl`** — configuration and downloads.
-- **`iproute2`** — checks host port availability before LAN port changes.
+- **Linux** with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
+  or **macOS** with Docker Desktop. Docker Compose **2.33.1 or newer** must be
+  available to the account running Node Manager.
+- APT/source installs need `jq`, `openssl`, `curl`, and `iproute2`. Homebrew
+  installs bring their command-line dependencies with the formula; Docker is
+  still installed separately.
 - Hardware per [Hardware Requirements](hardware.md) — Bitcoin plans for
   30–60 GB SSD space and Monero for 120–150 GiB. The other nodes need expandable
   storage until their current full-sync totals are measured. Bitcoin and Monero
@@ -20,13 +18,57 @@
   estimates, not minimum requirements or measured average usage. More resources
   can shorten validation; Tor and SSD performance also affect sync time.
 
-Optional: after setting `dashboard.bind_ip` to this host's private address,
+Optional on Linux: after setting `dashboard.bind_ip` to this host's private address,
 `avahi-daemon` lets you reach it at `http://<hostname>.local` from other
 machines on your LAN.
 
-Install `jq`, `openssl`, `curl`, `iproute2`, and optionally `avahi-daemon` with APT.
+On Ubuntu, install `jq`, `openssl`, `curl`, `iproute2`, and optionally
+`avahi-daemon` with APT.
 
 ## Install
+
+### Homebrew on macOS or Linux
+
+Homebrew support starts with the first release that contains the formula;
+current release `v1.31.1` does not include it and the tap is not live yet. Once
+published, install it with:
+
+```bash
+brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
+brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
+bitcoin-stack init
+```
+
+Installation is inert. The explicit `init` command runs the same wizard and
+can pull images and start your selected nodes. Homebrew stores configuration
+and chain data outside its Cellar so upgrades preserve them:
+
+| Host | Configuration | Generated state and chain data |
+|---|---|---|
+| macOS | `~/Library/Application Support/bitcoin-starter-stack/config/config.json` | `~/Library/Application Support/bitcoin-starter-stack/state/` and `data/<node>/` |
+| Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` and `data/<node>/` |
+
+Before first Linuxbrew startup, Node Manager uses an already downloaded local
+image to give each empty default data directory the UID expected by its
+container (`1000:1000`, or `10001:1000` for Zcash). It never changes a non-empty
+directory or a custom data path automatically. If an existing/custom path has
+the wrong ownership, startup stops and prints the exact migration command so
+you can inspect the path before running it.
+
+After setup, `brew services start bitcoin-starter-stack` keeps the host-side
+controls and post-sync resource handoff running after login. It waits for both
+configuration and Docker, and never runs setup or pulls images itself. On a
+Mac, enable Docker Desktop's start-at-login option; a per-user launch agent
+cannot start containers before login. Stopping the Homebrew service stops its
+supervisor but leaves nodes running; use `bitcoin-stack down` to stop them.
+
+Homebrew defaults the dashboard to `http://localhost:8080`. See the complete
+[Homebrew guide](homebrew.md), including local formula testing and upgrades.
+Host-path and control tests run on macOS and Ubuntu CI. The local container
+proof used Apple Silicon; a full initial sync and post-sync cap trial on an
+Intel Mac has not been completed.
+
+### APT on Ubuntu
 
 The Ubuntu 24.04 APT package will become available with the next release, after
 matching amd64 and arm64 dashboard images are published. It installs the
@@ -60,6 +102,8 @@ The wizard lets you select any combination of the supported nodes, downloads mis
 settings, and starts the stack when you accept its final default. Docker keeps
 image layers in its own managed storage. Neither package installation nor the
 wizard changes the Docker daemon or its proxy settings.
+
+### Release tarball on Linux
 
 For the current release-tarball installation:
 
@@ -108,7 +152,9 @@ Everything is optional. Two ways to customize:
 
 The full key reference is in [Configuration](configuration.md).
 
-A default source-install wizard run includes these choices:
+A default source-install wizard run includes these choices. The dashboard port
+is not another prompt; source/APT use port 80 and Homebrew uses 8080 unless you
+set `dashboard.port` in `config.json`:
 
 ```text
 Dashboard password (letters/numbers) [Enter = strong random]:
@@ -134,18 +180,19 @@ Every other selected chain asks for its data directory and optional private-LAN
 RPC or gRPC listener. The wizard prints credentials only for selected nodes. See
 [Pithead remote-node setup](nodes.md#monero-as-a-remote-node-for-pithead).
 
-Fresh package wizard installs select `resource_profile: compact` for each
-chosen node. A host timer waits for three spaced, healthy, current sync checks
+Fresh APT and Homebrew wizard installs select `resource_profile: compact` for each
+chosen node. The managed host helper waits for three spaced, healthy, current sync checks
 before applying 1 CPU and 2048 MiB for Bitcoin/Monero or 4096 MiB for the other
-nodes, with no extra swap. Existing installs and
+nodes, with no extra swap. Homebrew performs the same checks through its
+optional background service. Existing installs and
 source installs leave automatic resource limits off. The profile remains
 experimental until sustained capped operation is qualified; it is not a claim
 that a whole 2 GB VPS can host multiple nodes.
 
 The wizard writes `steady_cpus: 1` and the chain-specific memory budget into
-each selected node's `config.json` section. To change a budget, edit
-`/etc/bitcoin-starter-stack/config.json` and run `sudo bitcoin-stack apply`.
-Initial sync stays uncapped; the timer uses the edited values after its sync
+each selected node's `config.json` section. To change a budget, edit the
+installation's `config.json` and run `bitcoin-stack apply` (`sudo` for APT).
+Initial sync stays uncapped; the helper uses the edited values after its sync
 checks pass. See [resource caps](configuration.md#resource-caps).
 
 ## First start: what to expect
@@ -167,12 +214,14 @@ checks pass. See [resource caps](configuration.md#resource-caps).
    listener. An internal view-only wallet service supports dashboard monitoring;
    it has no host port and cannot spend. No miner starts.
 
-4. **The dashboard** at `http://localhost` shows two towers. Click a tower to
+4. **The dashboard** at `http://localhost` (or `http://localhost:8080` for
+   Homebrew) shows the configured towers. Click a tower to
    open its chain's card. It shows a connecting state until RPC comes up,
    then sync progress. A disabled node says **Not configured**.
 
 To open it to your private LAN, set `dashboard.bind_ip` to this host's RFC1918
-address and run `./stack apply`. Wildcard and public binds are rejected.
+address and run `bitcoin-stack apply` or `./stack apply`. Wildcard and public
+binds are rejected.
 
 The node downloads and validates the whole historical chain, currently hundreds
 of GB (roughly 900 GB), even though it later retains only 10 GB of block files.
@@ -186,6 +235,7 @@ its RPC is warmed up.
 ```bash
 ./stack status        # source install
 sudo bitcoin-stack status  # package install
+bitcoin-stack status  # Homebrew install
 ```
 
 If something looks wrong, see

@@ -40,6 +40,7 @@ restarts containers or changes node data. Run:
 sudo bitcoin-stack backup
 sudo apt update
 sudo apt install --only-upgrade bitcoin-starter-stack
+sudo bitcoin-stack pull
 sudo bitcoin-stack apply
 ```
 

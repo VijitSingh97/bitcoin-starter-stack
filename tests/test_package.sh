@@ -127,7 +127,8 @@ if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
 fi
 case " $* " in
   *' config --images '*) printf 'example.invalid/stack:test\n' ;;
-  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_DOCKER_LOG.images-ready" ]; exit ;;
+  *' pull '*) touch "$FAKE_DOCKER_LOG.images-ready" ;;
 esac
 EOF
 chmod +x "$fake/docker"

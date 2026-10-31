@@ -109,3 +109,23 @@ Release, and deploys the feed to Pages.
 - Running stacks learn about new releases from the dashboard's daily
   update check (badge + optional Telegram 🆕 alert) — see
   [Notifications](notifications.md).
+
+## Homebrew formula
+
+The release uploads a generated `bitcoin-starter-stack.rb` beside the runtime
+archive. The formula pins that exact archive's SHA-256; it is not a development
+checkout. After both the release and its multi-architecture container images
+publish, the developer bot opens a PR updating `Formula/bitcoin-starter-stack.rb`
+on `main`. Review and merge that PR to make the version available from the tap.
+The job uses the same `DEVELOPER_BOT_APP_ID` variable and
+`DEVELOPER_BOT_PRIVATE_KEY` secret as dependency updates; until configured,
+the formula asset is still generated but no tap-update PR is opened.
+
+To generate the same formula manually from a downloaded release archive:
+
+```bash
+scripts/build-homebrew-formula.sh bitcoin-starter-stack.tar.gz
+```
+
+The output is `dist/Formula/bitcoin-starter-stack.rb`. Never point a public
+formula at a local test archive or publish a new formula before its images exist.

@@ -41,16 +41,19 @@ jobs:
           git archive --format=tar.gz --prefix=bitcoin-starter-stack/ \
             -o bitcoin-starter-stack.tar.gz "$GITHUB_REF_NAME"
 
+      - name: Build Homebrew formula
+        run: scripts/build-homebrew-formula.sh bitcoin-starter-stack.tar.gz
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" bitcoin-starter-stack.tar.gz \
+          gh release create "$GITHUB_REF_NAME" bitcoin-starter-stack.tar.gz dist/Formula/bitcoin-starter-stack.rb \
             --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
 
   # Publish prebuilt multi-arch images (amd64 + arm64/Pi) to GHCR so end users
   # pull instead of building. Independent of `publish`: a registry hiccup here
-  # won't block the source release, and compose falls back to a local build.
+  # won't publish a package or tap update until all runtime images exist.
   images:
     needs: gate
     runs-on: ubuntu-latest
@@ -88,6 +91,48 @@ jobs:
             -t "$base-dogecoin:$v" -t "$base-dogecoin:latest" --push ./build/dogecoin
           docker buildx build --platform linux/amd64,linux/arm64 \
             -t "$base-bitcoincash:$v" -t "$base-bitcoincash:latest" --push ./build/bitcoincash
+
+  homebrew:
+    needs: [publish, images]
+    if: vars.DEVELOPER_BOT_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BSS_DEVELOPER_BOT_APP_ID: ${{ vars.DEVELOPER_BOT_APP_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure developer bot
+        env:
+          PRIVATE_KEY: ${{ secrets.DEVELOPER_BOT_PRIVATE_KEY }}
+        run: |
+          : "${PRIVATE_KEY:?set the DEVELOPER_BOT_PRIVATE_KEY repository secret}"
+          key="$RUNNER_TEMP/developer-bot.pem"
+          printf '%s' "$PRIVATE_KEY" >"$key"
+          chmod 600 "$key"
+          tools/developer-bot.py configure "$BSS_DEVELOPER_BOT_APP_ID" "$key"
+      - name: Propose Homebrew release update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          branch="codex/homebrew-v$version"
+          existing=$(tools/developer-bot.py gh pr list --state all --head "$branch" --json number --jq length)
+          test "$existing" = 0 || exit 0
+          gh release download "$GITHUB_REF_NAME" --pattern bitcoin-starter-stack.tar.gz --dir "$RUNNER_TEMP"
+          PACKAGE_VERSION="$version" scripts/build-homebrew-formula.sh \
+            --output Formula/bitcoin-starter-stack.rb "$RUNNER_TEMP/bitcoin-starter-stack.tar.gz"
+          git add Formula/bitcoin-starter-stack.rb
+          git diff --cached --quiet && exit 0
+          git switch -c "$branch"
+          tools/developer-bot.py git commit -m "Update Homebrew formula to v$version"
+          tools/developer-bot.py git push "HEAD:$branch"
+          body="$RUNNER_TEMP/homebrew-pr.md"
+          printf '%s\n' "Installs the published v$version runtime archive with its SHA-256 pin through Homebrew on macOS and Linux. Container images have finished publishing; installation remains inert and setup is explicit." >"$body"
+          tools/developer-bot.py gh pr create --base main --head "$branch" --title "Update Homebrew formula to v$version" --body-file "$body"
 
   apt:
     needs: [publish, images]

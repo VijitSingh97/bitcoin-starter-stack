@@ -72,6 +72,29 @@ jobs:
       - name: Stack tests
         run: tests/run.sh
 
+  macos-host:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install host dependencies
+        run: |
+          brew install bash flock jq
+          {
+            echo "$(brew --prefix bash)/bin"
+            echo "$(brew --prefix flock)/bin"
+            echo "$(brew --prefix jq)/bin"
+          } >> "$GITHUB_PATH"
+
+      - name: Test macOS and Homebrew host paths
+        run: |
+          tests/test_cli.sh
+          tests/test_homebrew.sh
+          tests/test_host_install.sh
+          tests/test_brew_data.sh
+          tests/test_port_control.sh
+
   package:
     runs-on: ubuntu-latest
     container: ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c
@@ -80,15 +103,18 @@ jobs:
       - name: Install package test tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends apt-utils ca-certificates git gnupg jq openssl shellcheck
+          apt-get install -y --no-install-recommends apt-utils ca-certificates git gnupg jq openssl ruby shellcheck
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Trust the container checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build and test the package
         run: |
-          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/node-resource-profile scripts/node-port-control scripts/node-control tests/test_package.sh tests/test_apt.sh tests/test_resource_profile.sh tests/test_port_control.sh tests/test_node_control.sh
+          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/build-homebrew-formula.sh scripts/node-resource-profile scripts/node-port-control scripts/node-control tests/test_package.sh tests/test_apt.sh tests/test_homebrew.sh tests/test_host_install.sh tests/test_brew_data.sh tests/test_resource_profile.sh tests/test_port_control.sh tests/test_node_control.sh
           tests/test_package.sh
           tests/test_apt.sh
+          tests/test_homebrew.sh
+          tests/test_host_install.sh
+          tests/test_brew_data.sh
           tests/test_resource_profile.sh
           tests/test_port_control.sh
           tests/test_node_control.sh

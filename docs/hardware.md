@@ -124,5 +124,6 @@ parallelizes across CPUs during initial sync; after that the node mostly idles.
 Initial sync still pulls the whole historical chain, currently roughly 900 GB,
 through Tor and can take days. Steady state is a few GB per day. Bitcoin P2P
 needs no inbound host port; the optional inbound onion service is disabled by
-default. The dashboard binds port 80 to
-loopback by default, or to an explicit private address for LAN access.
+default. The dashboard uses port 80 for APT/source installs and 8080 for
+Homebrew installs. It binds to loopback by default, or to an explicit private
+address for LAN access. Change `dashboard.port` to select another host port.

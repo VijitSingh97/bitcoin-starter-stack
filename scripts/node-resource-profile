@@ -32,7 +32,7 @@ env_get() {
 compose() {
   "$docker_bin" compose \
     --project-directory "$state_root" \
-    --project-name bitcoin-starter-stack-apt \
+    --project-name "${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-apt}" \
     --env-file "$env_file" \
     -f "$stack_root/docker-compose.yml" "$@"
 }

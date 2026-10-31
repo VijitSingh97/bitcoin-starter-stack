@@ -153,7 +153,7 @@ grep -q '^COMPOSE_PROFILES=monero$' "$monero_wizard/.env" || fail "init: Monero-
 # stubbed onto PATH so the real machine is never modified.
 stub=$tmp/stubs
 mkdir -p "$stub"
-export FAKE_CRON="$tmp/fake-crontab" FAKE_LOG="$tmp/stub-calls.log"
+export FAKE_CRON="$tmp/fake-crontab" FAKE_LOG="$tmp/stub-calls.log" FAKE_IMAGES_READY="$tmp/images-ready"
 cat >"$stub/crontab" <<'EOS'
 #!/usr/bin/env bash
 if [ "${1:-}" = "-l" ]; then [ -f "$FAKE_CRON" ] && cat "$FAKE_CRON" || exit 1; else cat >"$FAKE_CRON"; fi
@@ -163,8 +163,8 @@ cat >"$stub/docker" <<'EOS'
 echo "docker $*" >>"$FAKE_LOG"
 case " $* " in
   *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
-  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
-  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ]; exit ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_IMAGES_READY" ]; exit ;;
+  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
   *' inspect --format {{.State.Running}} dashboard '*) printf 'true\n' ;;
 esac
 exit 0
@@ -185,6 +185,10 @@ cat >"$stub/systemctl" <<'EOS'
 #!/usr/bin/env bash
 exit 1
 EOS
+cat >"$stub/uname" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_UNAME:-Linux}"
+EOS
 cat >"$stub/flock" <<'EOS'
 #!/usr/bin/env bash
 echo "flock $*" >>"$FAKE_LOG"
@@ -196,8 +200,12 @@ mkdir "$wizard"
 cp stack configure.sh "$wizard/"
 printf '1.2.3\n' >"$wizard/VERSION"
 rm -f "$FAKE_LOG"
+rm -f "$FAKE_IMAGES_READY"
 (cd "$wizard" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
-  FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null)
+  FAKE_IMAGES_MISSING=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >"$tmp/wizard-init.log" 2>&1) || {
+  cat "$tmp/wizard-init.log"
+  fail "init failed with mocked Linux host controls"
+}
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "init did not pull missing images"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
 
@@ -216,6 +224,7 @@ mkdir "$wizard_failed"
 cp stack configure.sh "$wizard_failed/"
 printf '1.2.3\n' >"$wizard_failed/VERSION"
 rm -f "$FAKE_LOG"
+rm -f "$FAKE_IMAGES_READY"
 (cd "$wizard_failed" && printf 'wizardpassword1234567890\nbitcoin\n\nn\n\nn\n\ny\n' |
   FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init ignored a missing-image pull failure"
@@ -294,6 +303,15 @@ out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 grep -q "stack upgrade-agent" "$FAKE_CRON" && fail "ensure_agent: cron entry not removed"
 grep -q "pkill" "$FAKE_LOG" || fail "ensure_agent: agent not stopped"
 printf '%s' "$out" | grep -q "upgrade-agent: stopped" || fail "ensure_agent: stop not reported"
+
+# Source installs on macOS must not install a Linux cron/setsid agent.
+rm -f "$FAKE_CRON" "$FAKE_LOG"
+echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
+out=$(FAKE_UNAME=Darwin HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+[ ! -f "$FAKE_CRON" ] || fail "ensure_agent: macOS source install wrote a cron entry"
+grep -q '^setsid ' "$FAKE_LOG" 2>/dev/null && fail "ensure_agent: macOS source install launched setsid"
+printf '%s' "$out" | grep -q 'Homebrew installation' || fail "ensure_agent: macOS source install omitted Homebrew guidance"
+printf '%s' "$out" | grep -q './stack host-service' || fail "ensure_agent: macOS source install omitted foreground guidance"
 
 # systemd unit enabled -> stack stays out of the way entirely
 cat >"$stub/systemctl" <<'EOS'

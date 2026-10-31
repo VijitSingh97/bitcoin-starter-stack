@@ -251,3 +251,20 @@ func TestPortControlNamesConflictingService(t *testing.T) {
 		t.Fatalf("host conflict = %#v", view.Status)
 	}
 }
+
+func TestPortControlCustomDashboardPort(t *testing.T) {
+	a, _ := testApp(t, &rpcFixture{}, "dashboard-secret")
+	a.cfg.moneroEnabled = true
+	t.Setenv("MONERO_RPC_BIND_IP", "192.168.1.50")
+	t.Setenv("DASHBOARD_BIND_IP", "192.168.1.50")
+	t.Setenv("DASHBOARD_PORT", "8080")
+	enablePortControl(t, a)
+	response := portControlHTTP(a.routes(), http.MethodPost, "dashboard-secret", `{"changes":[{"port":"monero_rpc","enabled":true,"host_port":8080}]}`, true)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "already in use") {
+		t.Fatalf("custom dashboard conflict = %d %s", response.Code, response.Body.String())
+	}
+	response = portControlHTTP(a.routes(), http.MethodPost, "dashboard-secret", `{"changes":[{"port":"monero_rpc","enabled":true,"host_port":80}]}`, true)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("unused default dashboard port = %d %s", response.Code, response.Body.String())
+	}
+}

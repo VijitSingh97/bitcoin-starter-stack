@@ -47,7 +47,7 @@ rm -f "$root/build/dashboard/.coverage" "$root/build/dashboard/.coveragerc" \
   "$root/build/dashboard/package.json"
 install -m 644 README.md CHANGELOG.md SECURITY.md "$docs/"
 install -m 644 LICENSE "$docs/copyright"
-for guide in README architecture configuration getting-started hardware nodes notifications operations privacy watch-only; do
+for guide in README architecture configuration getting-started homebrew hardware nodes notifications operations privacy watch-only; do
   install -m 644 "docs/$guide.md" "$docs/docs/"
 done
 install -m 644 config.example.json "$share/"

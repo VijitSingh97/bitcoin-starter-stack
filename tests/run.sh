@@ -12,6 +12,9 @@ fi
 
 tests/test_configure.sh
 tests/test_cli.sh
+tests/test_host_install.sh
+tests/test_homebrew.sh
+tests/test_brew_data.sh
 tests/test_release.sh
 tests/test_package.sh
 tests/test_resource_profile.sh

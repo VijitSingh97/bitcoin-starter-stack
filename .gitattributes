@@ -3,10 +3,8 @@
 .gitattributes export-ignore
 .gitleaks.toml export-ignore
 CONTRIBUTING.md export-ignore
-scripts/bitcoin-stack export-ignore
 scripts/build-apt.sh export-ignore
 scripts/build-deb.sh export-ignore
-scripts/node-resource-profile export-ignore
 scripts/release-notes.sh export-ignore
 scripts/release.sh export-ignore
 packaging export-ignore
@@ -23,3 +21,5 @@ build/dashboard/package.json export-ignore
 AGENTS.md export-ignore
 docs/developer-bot.md export-ignore
 tools export-ignore
+Formula export-ignore
+scripts/build-homebrew-formula.sh export-ignore
