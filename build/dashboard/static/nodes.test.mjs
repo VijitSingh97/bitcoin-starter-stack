@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { applyHover, formatBytes, formatCompactBytes, formatHashrate, formatMoneroFees, formatUpdated, formatUptime, moneroView, selectionController } from "./nodes.js";
 
 function dashboard() {
-  const overview = { hidden: false };
-  const bitcoinClose = { focused: 0, focus() { this.focused++; } };
-  const moneroClose = { focused: 0, focus() { this.focused++; } };
+  const overview = { hidden: false, scrollTop: 0, scrollLeft: 0 };
+  const viewport = { scrollX: 0, scrollY: 0, scrollTo(left, top) { this.scrollX = left; this.scrollY = top; } };
+  const focusTarget = () => ({ focused: 0, focus(options) { this.focused++; if (!options?.preventScroll) viewport.scrollY = 600; } });
+  const bitcoinClose = focusTarget();
+  const moneroClose = focusTarget();
   const panels = [
     { hidden: true, dataset: { nodePanel: "bitcoin" } },
     { hidden: true, dataset: { nodePanel: "monero" } },
@@ -13,7 +15,7 @@ function dashboard() {
   const choices = ["bitcoin", "monero"].map((node) => ({ dataset: { selectNode: node },
     setAttribute(name, value) { this[name] = value; } }));
   return {
-    body: { dataset: { node: "" } }, overview, panels, choices, bitcoinClose, moneroClose,
+    body: { dataset: { node: "" }, scrollTop: 0, scrollLeft: 0 }, scrollingElement: { scrollTop: 0, scrollLeft: 0 }, documentElement: { scrollTop: 0, scrollLeft: 0 }, defaultView: viewport, overview, panels, choices, bitcoinClose, moneroClose,
     getElementById: (id) => id === "node-overview" ? overview : null,
     querySelectorAll: (selector) => selector === "[data-node-panel]" ? panels : choices,
     querySelector: (selector) => selector.includes("bitcoin") ? bitcoinClose : moneroClose,
@@ -44,6 +46,30 @@ test("tower selection opens one panel, survives refresh, and closes to the chose
   assert.deepEqual(doc.choices.map((choice) => choice["aria-expanded"]), ["false", "false"]);
   assert.equal(bitcoinChoice.focused, 1);
   assert.deepEqual(events, ["bitcoin", ""]);
+});
+
+test("returning from scrolled panels recenters the overview without moving its horizontal position", () => {
+  const doc = dashboard();
+  const controller = selectionController(doc);
+  doc.overview.scrollLeft = 140;
+  for (const node of ["bitcoin", "monero", "bitcoin", "monero"]) {
+    const choice = { focus(options) { if (!options?.preventScroll) doc.overview.scrollTop = 400; } };
+    doc.defaultView.scrollY = 900;
+    controller.open(node, choice);
+    assert.equal(doc.defaultView.scrollY, 0);
+    doc.defaultView.scrollY = 1200;
+    for (const root of [doc.scrollingElement, doc.documentElement, doc.body]) root.scrollTop = 1200;
+    doc.overview.scrollTop = 450;
+    controller.refresh();
+    assert.equal(doc.defaultView.scrollY, 1200);
+    assert.equal(doc.scrollingElement.scrollTop, 1200);
+    controller.close();
+    assert.equal(doc.body.dataset.node, "");
+    assert.equal(doc.defaultView.scrollY, 0);
+    for (const root of [doc.scrollingElement, doc.documentElement, doc.body]) assert.equal(root.scrollTop, 0);
+    assert.equal(doc.overview.scrollTop, 0);
+    assert.equal(doc.overview.scrollLeft, 140);
+  }
 });
 
 test("tower hover only records supported nodes", () => {

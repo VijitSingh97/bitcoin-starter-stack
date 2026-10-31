@@ -7,6 +7,34 @@ const nodePortIDs = {
   bitcoin: ["bitcoin_rpc"], monero: ["monero_rpc", "monero_zmq"], tari: ["tari_grpc"],
   litecoin: ["litecoin_rpc"], dogecoin: ["dogecoin_rpc"], bitcoincash: ["bitcoincash_rpc"], zcash: ["zcash_rpc"],
 };
+const globalAlertDefaults = {
+  alert_monitor_online: true,
+  alert_node_down: true,
+  alert_node_recovered: true,
+  alert_sync_complete: true,
+  alert_low_disk: true,
+  alert_updates: true,
+  node_down_after_minutes: 3,
+  low_disk_gib: 50,
+};
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= minimum && number <= maximum ? number : fallback;
+}
+
+export function alertPreferenceModel(data = {}) {
+  return {
+    alert_monitor_online: data.alert_monitor_online !== false,
+    alert_node_down: data.alert_node_down !== false,
+    alert_node_recovered: data.alert_node_recovered !== false,
+    alert_sync_complete: data.alert_sync_complete !== false,
+    alert_low_disk: data.alert_low_disk !== false,
+    alert_updates: data.alert_updates !== false,
+    node_down_after_minutes: boundedInteger(data.node_down_after_minutes, globalAlertDefaults.node_down_after_minutes, 1, 60),
+    low_disk_gib: boundedInteger(data.low_disk_gib, globalAlertDefaults.low_disk_gib, 1, 1048576),
+  };
+}
 
 export function notificationPayload(values) {
   const payload = {
@@ -17,6 +45,7 @@ export function notificationPayload(values) {
     alert_new_block_monero: !!values.alert_new_block_monero,
     tower_labels: !!values.tower_labels,
     default_currency: normalizeDefaultCurrency(values.default_currency),
+    ...alertPreferenceModel(values),
   };
   for (const node of extraNodes) payload[`alert_new_block_${node}`] = !!values[`alert_new_block_${node}`];
   const token = String(values.telegram_bot_token || "").trim();
@@ -31,9 +60,11 @@ export function configurationAccess(data) {
 }
 
 export function notificationChanged(saved, payload) {
+  const savedAlertPreferences = alertPreferenceModel(saved);
   return Object.entries(payload).some(([field, value]) => {
     const previous = field === "alert_new_block" ? saved?.alert_new_block_bitcoin ?? saved?.alert_new_block
       : field === "default_currency" ? normalizeDefaultCurrency(saved?.default_currency)
+      : Object.hasOwn(globalAlertDefaults, field) ? savedAlertPreferences[field]
       : saved?.[field];
     return value !== previous;
   });
@@ -175,6 +206,16 @@ export function applyAppearance(data, root = typeof document === "undefined" ? u
   return detail;
 }
 
+export function splitNodeControlSections(alerts, target = document) {
+  alerts.querySelector("summary").textContent = "Alerts";
+  const lan = target.createElement("details");
+  lan.className = "node-lan-settings";
+  const summary = target.createElement("summary");
+  summary.textContent = "LAN access";
+  lan.append(summary, ...alerts.querySelectorAll(".settings-port"));
+  return lan;
+}
+
 if (typeof document !== "undefined") {
   const byId = (id) => document.getElementById(`settings-${id}`);
   const dialog = byId("dialog");
@@ -184,6 +225,16 @@ if (typeof document !== "undefined") {
   const chat = byId("telegram-chat");
   const url = byId("healthchecks-url");
   const telegramEnabled = byId("telegram-enabled");
+  const alertPreferences = {
+    alert_monitor_online: byId("alert-monitor-online"),
+    alert_node_down: byId("alert-node-down"),
+    alert_node_recovered: byId("alert-node-recovered"),
+    alert_sync_complete: byId("alert-sync-complete"),
+    alert_low_disk: byId("alert-low-disk"),
+    alert_updates: byId("alert-updates"),
+  };
+  const nodeDownAfterMinutes = byId("node-down-after-minutes");
+  const lowDiskGiB = byId("low-disk-gib");
   const healthchecksEnabled = byId("healthchecks-enabled");
   const bitcoinNewBlock = byId("bitcoin-new-block");
   const moneroNewBlock = byId("monero-new-block");
@@ -192,20 +243,15 @@ if (typeof document !== "undefined") {
   const defaultCurrency = byId("default-currency");
   const save = byId("save");
   const reset = byId("reset");
-  const nodeAccents = { bitcoin: "#f2a900", monero: "#ff6600", tari: "#8f5cff", litecoin: "#4d8fd8", dogecoin: "#b88746", bitcoincash: "#36a852", zcash: "#d69c35" };
   const nodeViews = {};
   for (const node of allNodes) {
     const details = byId(`${node}-alerts`);
     const panel = document.querySelector(`[data-node-panel="${node}"]`);
     const power = panel?.querySelector(".node-power-card");
     if (!details || !power) continue;
-    details.querySelector("summary").textContent = "Alerts and LAN access";
-    const card = document.createElement("section");
-    card.className = "card node-settings-card";
-    card.style.setProperty("--node-accent", nodeAccents[node]);
-    const heading = document.createElement("h2");
-    heading.textContent = "Node settings";
+    const lan = splitNodeControlSections(details);
     const nodeForm = document.createElement("form");
+    nodeForm.className = "node-settings-form";
     nodeForm.dataset.nodeSettingsForm = node;
     const nodeStatus = document.createElement("p");
     nodeStatus.className = "settings-note";
@@ -221,11 +267,9 @@ if (typeof document !== "undefined") {
     nodeSave.type = "submit";
     nodeSave.textContent = "Save";
     actions.append(nodeSave);
-    details.append(nodeStatus, impact, actions);
-    nodeForm.append(details);
-    card.append(heading, nodeForm);
-    power.before(card);
-    nodeViews[node] = { card, form: nodeForm, status: nodeStatus, impact, save: nodeSave };
+    nodeForm.append(details, lan, nodeStatus, impact, actions);
+    power.querySelector("h2").after(nodeForm);
+    nodeViews[node] = { form: nodeForm, status: nodeStatus, impact, save: nodeSave };
   }
   byId("port-status")?.remove();
   byId("port-impact")?.remove();
@@ -340,6 +384,8 @@ if (typeof document !== "undefined") {
   const clearSecrets = () => { token.value = ""; chat.value = ""; url.value = ""; };
   const updateInputs = () => {
     token.disabled = chat.disabled = !allowed || !telegramEnabled.checked;
+    for (const input of Object.values(alertPreferences)) input.disabled = !allowed || !telegramEnabled.checked;
+    nodeDownAfterMinutes.disabled = lowDiskGiB.disabled = !allowed || !telegramEnabled.checked;
     url.disabled = !allowed || !healthchecksEnabled.checked;
     chat.required = allowed && telegramEnabled.checked;
     token.required = chat.required && !saved.telegram_bot_token;
@@ -351,13 +397,17 @@ if (typeof document !== "undefined") {
     if (scope === "global") {
       telegramEnabled.checked = !!data.telegram_enabled;
       healthchecksEnabled.checked = !!data.healthchecks_enabled;
+      const preferences = alertPreferenceModel(data);
+      for (const [field, input] of Object.entries(alertPreferences)) input.checked = preferences[field];
+      nodeDownAfterMinutes.value = preferences.node_down_after_minutes;
+      lowDiskGiB.value = preferences.low_disk_gib;
     }
     if (Object.hasOwn(data, "alert_new_block_bitcoin") || Object.hasOwn(data, "alert_new_block")) bitcoinNewBlock.checked = !!(data.alert_new_block_bitcoin ?? data.alert_new_block);
     if (Object.hasOwn(data, "alert_new_block_monero")) moneroNewBlock.checked = !!data.alert_new_block_monero;
     const nodes = configuredNodeVisibility(data);
     for (const node of allNodes) {
       byId(`${node}-alerts`).hidden = !nodes[node];
-      if (nodeViews[node]) nodeViews[node].card.hidden = !nodes[node];
+      if (nodeViews[node]) nodeViews[node].form.hidden = !nodes[node];
     }
     for (const [node,input] of Object.entries(extraNewBlock)) {
       if (Object.hasOwn(data, `alert_new_block_${node}`)) input.checked = !!data[`alert_new_block_${node}`];
@@ -429,6 +479,8 @@ if (typeof document !== "undefined") {
     allowed = false;
     save.disabled = reset.disabled = true;
     telegramEnabled.disabled = healthchecksEnabled.disabled = bitcoinNewBlock.disabled = moneroNewBlock.disabled = towerLabels.disabled = defaultCurrency.disabled = true;
+    for (const input of Object.values(alertPreferences)) input.disabled = true;
+    nodeDownAfterMinutes.disabled = lowDiskGiB.disabled = true;
     updateInputs();
     updatePortPlan();
     for (const input of Object.values(extraNewBlock)) input.disabled = true;
@@ -463,6 +515,9 @@ if (typeof document !== "undefined") {
       healthchecks_url: url.value,
       tower_labels: towerLabels.checked,
       default_currency: defaultCurrency.value,
+      ...Object.fromEntries(Object.entries(alertPreferences).map(([field, input]) => [field, input.checked])),
+      node_down_after_minutes: Number(nodeDownAfterMinutes.value),
+      low_disk_gib: Number(lowDiskGiB.value),
     } : { [scope === "bitcoin" ? "alert_new_block" : `alert_new_block_${scope}`]:
       (scope === "bitcoin" ? bitcoinNewBlock : scope === "monero" ? moneroNewBlock : extraNewBlock[scope]).checked });
 

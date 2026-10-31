@@ -137,9 +137,9 @@ are optional advanced steps performed later in their dashboard cards. Keep node
 endpoint credentials separate from personal view-only material, and never enter
 a private spend key or seed phrase.
 
-After setup, open a tower to manage that node. Its settings appear after its
-wallet section and before deactivation, and contain the new-block alert, LAN
-listeners, and credentials for enabled authenticated RPC. **Show password** is
+After setup, open a tower to manage that node. **Node controls** appears after
+its wallet section, with separate **Alerts** and **LAN access** sections above
+deactivation. LAN access includes credentials for enabled authenticated RPC. **Show password** is
 an explicit reveal. Credential reset requires typing `reset`, restarts affected
 services, and makes every external client update its saved password. It is not
 available while the node is inactive. Global Appearance, Dashboard password,

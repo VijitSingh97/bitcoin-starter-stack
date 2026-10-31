@@ -393,6 +393,16 @@
         <label class="settings-check"><input id="settings-telegram-enabled" type="checkbox"> Enable Telegram alerts</label>
         <label>Bot token<input id="settings-telegram-token" type="text" autocomplete="off" maxlength="256"></label>
         <label>Chat or channel ID<input id="settings-telegram-chat" type="text" autocomplete="off" maxlength="100"></label>
+        <details id="settings-alert-preferences"><summary>Alert preferences</summary>
+          <label class="settings-check"><input id="settings-alert-monitor-online" type="checkbox"> Monitor starts</label>
+          <label class="settings-check"><input id="settings-alert-node-down" type="checkbox"> Node offline</label>
+          <label class="settings-check"><input id="settings-alert-node-recovered" type="checkbox"> Node recovered</label>
+          <label class="settings-check"><input id="settings-alert-sync-complete" type="checkbox"> Sync complete</label>
+          <label class="settings-check"><input id="settings-alert-low-disk" type="checkbox"> Low disk</label>
+          <label class="settings-check"><input id="settings-alert-updates" type="checkbox"> Dashboard update</label>
+          <label>Send offline alert after (minutes)<input id="settings-node-down-after-minutes" type="number" min="1" max="60" step="1" required></label>
+          <label>Low disk threshold (free GiB)<input id="settings-low-disk-gib" type="number" min="1" max="1048576" step="1" required></label>
+        </details>
       </fieldset>
       <fieldset id="settings-healthchecks">
         <legend>Healthchecks</legend>
@@ -402,14 +412,16 @@
       <fieldset id="settings-node-alerts" hidden>
         <legend>Node settings</legend>
         <details id="settings-bitcoin-alerts"><summary>Bitcoin</summary>
-          <label class="settings-check"><input id="settings-bitcoin-new-block" type="checkbox"> Alert on each new block (about 144 per day)</label>
+          <label class="settings-check"><input id="settings-bitcoin-new-block" type="checkbox"> Alert on new blocks (up to about 144 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-bitcoin-rpc" class="settings-port" data-credential-node="bitcoin">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
             <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
           </div>
         </details>
         <details id="settings-monero-alerts"><summary>Monero</summary>
-          <label class="settings-check"><input id="settings-monero-new-block" type="checkbox"> Alert on each new block (about 720 per day)</label>
+          <label class="settings-check"><input id="settings-monero-new-block" type="checkbox"> Alert on new blocks (up to about 720 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-monero-rpc" class="settings-port" data-credential-node="monero">
             <label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label>
             <div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div>
@@ -420,23 +432,28 @@
           </div>
         </details>
         <details id="settings-tari-alerts"><summary>Tari</summary>
-          <label class="settings-check"><input id="settings-tari-new-block" type="checkbox"> Alert on each new block</label>
+          <label class="settings-check"><input id="settings-tari-new-block" type="checkbox"> Alert on new blocks (up to about 720 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-tari-grpc" class="settings-port"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose gRPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-litecoin-alerts"><summary>Litecoin</summary>
-          <label class="settings-check"><input id="settings-litecoin-new-block" type="checkbox"> Alert on each new block</label>
+          <label class="settings-check"><input id="settings-litecoin-new-block" type="checkbox"> Alert on new blocks (up to about 576 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-litecoin-rpc" class="settings-port" data-credential-node="litecoin"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-dogecoin-alerts"><summary>Dogecoin</summary>
-          <label class="settings-check"><input id="settings-dogecoin-new-block" type="checkbox"> Alert on each new block</label>
+          <label class="settings-check"><input id="settings-dogecoin-new-block" type="checkbox"> Alert on new blocks (up to about 1440 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-dogecoin-rpc" class="settings-port" data-credential-node="dogecoin"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-bitcoincash-alerts"><summary>Bitcoin Cash</summary>
-          <label class="settings-check"><input id="settings-bitcoincash-new-block" type="checkbox"> Alert on each new block</label>
+          <label class="settings-check"><input id="settings-bitcoincash-new-block" type="checkbox"> Alert on new blocks (up to about 144 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-bitcoincash-rpc" class="settings-port" data-credential-node="bitcoincash"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
         <details id="settings-zcash-alerts"><summary>Zcash</summary>
-          <label class="settings-check"><input id="settings-zcash-new-block" type="checkbox"> Alert on each new block</label>
+          <label class="settings-check"><input id="settings-zcash-new-block" type="checkbox"> Alert on new blocks (up to about 1152 alerts/day)</label>
+          <p class="settings-note">Several blocks found together share one alert.</p>
           <div id="settings-port-zcash-rpc" class="settings-port" data-credential-node="zcash"><label class="settings-check"><input type="checkbox" data-port-enabled> Expose read-only RPC on private LAN</label><div class="settings-port-fields"><label>Port<input type="number" min="1" max="65535" step="1" data-port-number></label></div></div>
         </details>
       </fieldset>

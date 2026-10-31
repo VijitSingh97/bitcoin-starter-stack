@@ -203,7 +203,7 @@ func TestMultiNodeSyncAndDiskAlertsIdentifyMonero(t *testing.T) {
 	m.tickNodes(t.Context(), bitcoin, map[string]any{"initialblockdownload": false, "blocks": float64(200)})
 	want := []string{
 		"[alice] Monero: ✅ initial sync complete at height 200",
-		"[alice] Monero: 💾 disk low: 40 GB free",
+		"[alice] Monero: 💾 disk low: 40 GiB free",
 	}
 	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("messages = %#v, want %#v", messages, want)
@@ -612,11 +612,106 @@ func TestDiskAlertRetriesUntilDelivered(t *testing.T) {
 	free = 40
 	m.tick(t.Context(), info, nil)
 	if got, want := strings.Join(messages, "\n"), strings.Join([]string{
-		"[alice] 💾 disk low: 40 GB free",
-		"[alice] 💾 disk low: 40 GB free",
-		"[alice] 💾 disk low: 40 GB free",
+		"[alice] 💾 disk low: 40 GiB free",
+		"[alice] 💾 disk low: 40 GiB free",
+		"[alice] 💾 disk low: 40 GiB free",
 	}, "\n"); got != want {
 		t.Fatalf("disk retry messages:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestGlobalAlertClassesSuppressEpisodesAndReenable(t *testing.T) {
+	var messages []string
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		var payload struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		messages = append(messages, payload.Text)
+		return response(http.StatusOK, `{"ok":true}`), nil
+	})
+	m.diskFreeGB = func(string) (float64, error) { return 100, nil }
+	m.settings.AlertNewBlock = false
+	m.settings.AlertNodeDown = false
+	m.settings.AlertNodeRecovered = false
+	m.settings.AlertSyncComplete = false
+	m.settings.AlertLowDisk = false
+	m.settings.NodeDownAfterMinutes = 2
+	m.settings.LowDiskGiB = 30
+
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.diskFreeGB = func(string) (float64, error) { return 20, nil }
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	if len(messages) != 0 || m.state.downAlerted || m.state.syncPending || !m.state.diskAlerted {
+		t.Fatalf("disabled alert classes messages=%#v state=%#v", messages, m.state)
+	}
+
+	m.settings.AlertNodeDown = true
+	m.settings.AlertNodeRecovered = true
+	m.settings.AlertSyncComplete = true
+	m.settings.AlertLowDisk = true
+	m.diskFreeGB = func(string) (float64, error) { return 100, nil }
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), nil, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": true, "blocks": float64(100)}, nil)
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+	m.diskFreeGB = func(string) (float64, error) { return 20, nil }
+	m.tick(t.Context(), map[string]any{"initialblockdownload": false, "blocks": float64(100)}, nil)
+
+	want := []string{
+		"[alice] 🔴 node down — RPC unreachable for 2 minutes",
+		"[alice] 🟢 node recovered — RPC is answering again",
+		"[alice] ✅ initial sync complete at height 100",
+		"[alice] 💾 disk low: 20 GiB free",
+	}
+	if strings.Join(messages, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("reenabled alerts:\n%s\nwant:\n%s", strings.Join(messages, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestMonitorOnlineAndUpdateAlertTogglesKeepMonitoring(t *testing.T) {
+	var messages []string
+	release := "1.3.0"
+	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host {
+		case "api.github.com":
+			return response(http.StatusOK, `{"tag_name":"v`+release+`"}`), nil
+		case "api.telegram.org":
+			var payload struct {
+				Text string `json:"text"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			messages = append(messages, payload.Text)
+			return response(http.StatusOK, `{"ok":true}`), nil
+		default:
+			t.Fatalf("unexpected host %q", r.URL.Host)
+			return nil, nil
+		}
+	})
+	m.settings.AlertMonitorOnline = false
+	if pending := m.announceOnline(t.Context(), "Bitcoin", &m.state, map[string]any{"initialblockdownload": false}, true); pending {
+		t.Fatal("online announcement remained pending after a confirmed node response")
+	}
+	m.settings.AlertUpdates = false
+	m.checkUpdates(t.Context())
+	if len(messages) != 0 || m.UpdateNote() == "" || m.state.notifiedStack != release {
+		t.Fatalf("disabled alerts messages=%#v note=%q notified=%q", messages, m.UpdateNote(), m.state.notifiedStack)
+	}
+
+	m.settings.AlertMonitorOnline = true
+	m.announceOnline(t.Context(), "Bitcoin", &monitorState{}, map[string]any{"initialblockdownload": false}, true)
+	m.settings.AlertUpdates = true
+	release = "1.4.0"
+	m.checkUpdates(t.Context())
+	if len(messages) != 2 || messages[0] != "[alice] Bitcoin: 🚀 monitor online" || !strings.Contains(messages[1], "stack v1.4.0 available") {
+		t.Fatalf("reenabled monitor/update alerts = %#v", messages)
 	}
 }
 
@@ -654,6 +749,7 @@ func TestHealthchecksRetriesThenThrottlesAndUsesFailEndpoint(t *testing.T) {
 	m := NewMonitor("dev", t.TempDir(), t.TempDir())
 	m.diskFreeGB = func(string) (float64, error) { return 1000, nil }
 	m.output = io.Discard
+	m.settings.NodeDownAfterMinutes = 60
 	var paths []string
 	attempt := 0
 	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

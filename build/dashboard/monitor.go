@@ -22,7 +22,6 @@ const (
 	pingEveryTicks       = 5
 	downAfterTicks       = 3
 	updateCheckEveryTick = 1440
-	diskWarnFreeGB       = 50
 	eventLogCap          = 1_000_000
 )
 
@@ -179,7 +178,7 @@ func (m *Monitor) Run(ctx context.Context, blockchain func() map[string]any, net
 		if onlinePending && info != nil {
 			if ibd, ok := info["initialblockdownload"].(bool); ok {
 				onlinePending = false
-				if !ibd {
+				if !ibd && m.notificationSettings().AlertMonitorOnline {
 					m.sendTelegram(ctx, "🚀 node monitor online")
 				}
 			}
@@ -257,7 +256,7 @@ func (m *Monitor) announceOnline(ctx context.Context, chain string, state *monit
 		return pending
 	}
 	if ibd, ok := info["initialblockdownload"].(bool); ok {
-		if !ibd && !state.ibd && !state.syncPending {
+		if !ibd && !state.ibd && !state.syncPending && m.notificationSettings().AlertMonitorOnline {
 			m.sendTelegram(ctx, chain+": 🚀 monitor online")
 		}
 		return false
@@ -473,6 +472,15 @@ func (m *Monitor) tickConfiguredNodes(ctx context.Context, infos map[string]map[
 }
 
 func (m *Monitor) tickNode(ctx context.Context, state *monitorState, chain, dataDir string, alertNewBlock bool, info map[string]any) (bool, bool, bool) {
+	settings := m.notificationSettings()
+	downAfterMinutes := settings.NodeDownAfterMinutes
+	if downAfterMinutes < 1 {
+		downAfterMinutes = defaultNodeDownAfterMinutes
+	}
+	lowDiskGiB := settings.LowDiskGiB
+	if lowDiskGiB < 1 {
+		lowDiskGiB = defaultLowDiskGiB
+	}
 	healthy := info != nil
 	ibd, hasIBD := false, false
 	if healthy {
@@ -485,12 +493,12 @@ func (m *Monitor) tickNode(ctx context.Context, state *monitorState, chain, data
 			state.ibd = ibd
 		}
 		if state.downAlerted && hasIBD && !ibd {
-			if m.sendOperationalTelegram(ctx, chainAlert(chain, "🟢 node recovered — RPC is answering again")) {
+			if m.sendOperationalAlert(ctx, settings.AlertNodeRecovered, chainAlert(chain, "🟢 node recovered — RPC is answering again")) {
 				state.downAlerted = false
 			}
 		}
 		state.fails = 0
-		if state.syncPending && hasIBD && !ibd && m.sendOperationalTelegram(ctx, chainAlert(chain, "✅ initial sync complete at height "+valueString(info["blocks"]))) {
+		if state.syncPending && hasIBD && !ibd && m.sendOperationalAlert(ctx, settings.AlertSyncComplete, chainAlert(chain, "✅ initial sync complete at height "+valueString(info["blocks"]))) {
 			state.syncPending = false
 		}
 
@@ -512,18 +520,18 @@ func (m *Monitor) tickNode(ctx context.Context, state *monitorState, chain, data
 			m.writeOutput("Monitor tick failed: disk usage unavailable")
 			return healthy, hasIBD, ibd
 		}
-		if free < diskWarnFreeGB && hasIBD && !ibd {
+		if free < float64(lowDiskGiB) && hasIBD && !ibd {
 			if !state.diskAlerted {
-				state.diskAlerted = m.sendOperationalTelegram(ctx, chainAlert(chain, fmt.Sprintf("💾 disk low: %.0f GB free", free)))
+				state.diskAlerted = m.sendOperationalAlert(ctx, settings.AlertLowDisk, chainAlert(chain, fmt.Sprintf("💾 disk low: %.0f GiB free", free)))
 			}
 		} else {
 			state.diskAlerted = false
 		}
 	} else {
 		state.fails++
-		if state.fails >= downAfterTicks && !state.downAlerted && state.chainKnown && !state.ibd {
-			message := fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterTicks)
-			state.downAlerted = m.sendOperationalTelegram(ctx, chainAlert(chain, message))
+		if state.fails >= downAfterMinutes && !state.downAlerted && state.chainKnown && !state.ibd {
+			message := fmt.Sprintf("🔴 node down — RPC unreachable for %d minutes", downAfterMinutes)
+			state.downAlerted = m.sendOperationalAlert(ctx, settings.AlertNodeDown, chainAlert(chain, message))
 		}
 	}
 	return healthy, hasIBD, ibd

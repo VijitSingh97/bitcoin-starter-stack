@@ -18,6 +18,11 @@ const maxSettingsBody = 16 << 10
 
 const defaultPriceCurrency = "USD"
 
+const (
+	defaultNodeDownAfterMinutes = 3
+	defaultLowDiskGiB           = 50
+)
+
 var allowedPriceCurrencies = map[string]bool{
 	"USD": true, "EUR": true, "GBP": true, "INR": true, "CAD": true,
 	"AUD": true, "JPY": true, "RUB": true, "CNY": true,
@@ -43,6 +48,14 @@ type notificationSettings struct {
 	AlertNewBlockDogecoin    bool   `json:"alert_new_block_dogecoin"`
 	AlertNewBlockBitcoinCash bool   `json:"alert_new_block_bitcoincash"`
 	AlertNewBlockZcash       bool   `json:"alert_new_block_zcash"`
+	AlertMonitorOnline       bool   `json:"alert_monitor_online"`
+	AlertNodeDown            bool   `json:"alert_node_down"`
+	AlertNodeRecovered       bool   `json:"alert_node_recovered"`
+	AlertSyncComplete        bool   `json:"alert_sync_complete"`
+	AlertLowDisk             bool   `json:"alert_low_disk"`
+	AlertUpdates             bool   `json:"alert_updates"`
+	NodeDownAfterMinutes     int    `json:"node_down_after_minutes"`
+	LowDiskGiB               int    `json:"low_disk_gib"`
 	TowerLabels              bool   `json:"tower_labels"`
 	DefaultCurrency          string `json:"default_currency"`
 }
@@ -61,6 +74,14 @@ type settingsUpdate struct {
 	AlertNewBlockDogecoin    *bool   `json:"alert_new_block_dogecoin,omitempty"`
 	AlertNewBlockBitcoinCash *bool   `json:"alert_new_block_bitcoincash,omitempty"`
 	AlertNewBlockZcash       *bool   `json:"alert_new_block_zcash,omitempty"`
+	AlertMonitorOnline       *bool   `json:"alert_monitor_online,omitempty"`
+	AlertNodeDown            *bool   `json:"alert_node_down,omitempty"`
+	AlertNodeRecovered       *bool   `json:"alert_node_recovered,omitempty"`
+	AlertSyncComplete        *bool   `json:"alert_sync_complete,omitempty"`
+	AlertLowDisk             *bool   `json:"alert_low_disk,omitempty"`
+	AlertUpdates             *bool   `json:"alert_updates,omitempty"`
+	NodeDownAfterMinutes     *int    `json:"node_down_after_minutes,omitempty"`
+	LowDiskGiB               *int    `json:"low_disk_gib,omitempty"`
 	TowerLabels              *bool   `json:"tower_labels,omitempty"`
 	DefaultCurrency          *string `json:"default_currency,omitempty"`
 	present                  map[string]bool
@@ -83,6 +104,14 @@ func notificationSettingsFromEnv() notificationSettings {
 		AlertNewBlockDogecoin:    enabled(os.Getenv("ALERT_NEW_BLOCK_DOGECOIN")),
 		AlertNewBlockBitcoinCash: enabled(os.Getenv("ALERT_NEW_BLOCK_BITCOINCASH")),
 		AlertNewBlockZcash:       enabled(os.Getenv("ALERT_NEW_BLOCK_ZCASH")),
+		AlertMonitorOnline:       true,
+		AlertNodeDown:            true,
+		AlertNodeRecovered:       true,
+		AlertSyncComplete:        true,
+		AlertLowDisk:             true,
+		AlertUpdates:             true,
+		NodeDownAfterMinutes:     defaultNodeDownAfterMinutes,
+		LowDiskGiB:               defaultLowDiskGiB,
 		DefaultCurrency:          defaultPriceCurrency,
 	}
 }
@@ -98,7 +127,17 @@ func loadNotificationSettings(path string, baseline notificationSettings) (notif
 	if err != nil {
 		return notificationSettings{}, false, err
 	}
-	settings := notificationSettings{DefaultCurrency: defaultPriceCurrency}
+	settings := notificationSettings{
+		AlertMonitorOnline:   true,
+		AlertNodeDown:        true,
+		AlertNodeRecovered:   true,
+		AlertSyncComplete:    true,
+		AlertLowDisk:         true,
+		AlertUpdates:         true,
+		NodeDownAfterMinutes: defaultNodeDownAfterMinutes,
+		LowDiskGiB:           defaultLowDiskGiB,
+		DefaultCurrency:      defaultPriceCurrency,
+	}
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&settings); err != nil {
@@ -126,6 +165,12 @@ func loadNotificationSettings(path string, baseline notificationSettings) (notif
 func validateStoredSettings(settings notificationSettings) error {
 	if !allowedPriceCurrencies[settings.DefaultCurrency] {
 		return errors.New("invalid default currency")
+	}
+	if settings.NodeDownAfterMinutes < 1 || settings.NodeDownAfterMinutes > 60 {
+		return errors.New("node down delay must be between 1 and 60 minutes")
+	}
+	if settings.LowDiskGiB < 1 || settings.LowDiskGiB > 1_048_576 {
+		return errors.New("low disk threshold must be between 1 and 1048576 GiB")
 	}
 	if settings.TelegramEnabled {
 		if err := validateSecret(settings.TelegramBotToken, 10, 256); err != nil {
@@ -232,6 +277,30 @@ func (update settingsUpdate) apply(current notificationSettings) (notificationSe
 	if update.AlertNewBlockZcash != nil {
 		next.AlertNewBlockZcash = *update.AlertNewBlockZcash
 	}
+	if update.AlertMonitorOnline != nil {
+		next.AlertMonitorOnline = *update.AlertMonitorOnline
+	}
+	if update.AlertNodeDown != nil {
+		next.AlertNodeDown = *update.AlertNodeDown
+	}
+	if update.AlertNodeRecovered != nil {
+		next.AlertNodeRecovered = *update.AlertNodeRecovered
+	}
+	if update.AlertSyncComplete != nil {
+		next.AlertSyncComplete = *update.AlertSyncComplete
+	}
+	if update.AlertLowDisk != nil {
+		next.AlertLowDisk = *update.AlertLowDisk
+	}
+	if update.AlertUpdates != nil {
+		next.AlertUpdates = *update.AlertUpdates
+	}
+	if update.NodeDownAfterMinutes != nil {
+		next.NodeDownAfterMinutes = *update.NodeDownAfterMinutes
+	}
+	if update.LowDiskGiB != nil {
+		next.LowDiskGiB = *update.LowDiskGiB
+	}
 	if update.TowerLabels != nil {
 		next.TowerLabels = *update.TowerLabels
 	}
@@ -286,6 +355,14 @@ func (m *Monitor) settingsView(canConfigure bool) (map[string]any, error) {
 		"alert_new_block_dogecoin":    m.settings.AlertNewBlockDogecoin,
 		"alert_new_block_bitcoincash": m.settings.AlertNewBlockBitcoinCash,
 		"alert_new_block_zcash":       m.settings.AlertNewBlockZcash,
+		"alert_monitor_online":        m.settings.AlertMonitorOnline,
+		"alert_node_down":             m.settings.AlertNodeDown,
+		"alert_node_recovered":        m.settings.AlertNodeRecovered,
+		"alert_sync_complete":         m.settings.AlertSyncComplete,
+		"alert_low_disk":              m.settings.AlertLowDisk,
+		"alert_updates":               m.settings.AlertUpdates,
+		"node_down_after_minutes":     m.settings.NodeDownAfterMinutes,
+		"low_disk_gib":                m.settings.LowDiskGiB,
 		"bitcoin_enabled":             m.bitcoinEnabled,
 		"monero_enabled":              m.moneroEnabled,
 		"tari_enabled":                m.extraEnabled[nodeTari],

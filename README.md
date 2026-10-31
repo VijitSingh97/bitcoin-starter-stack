@@ -345,8 +345,8 @@ difficulty, estimated network hashrate, and view-only balances. Unavailable
 metrics show a dash.
 The **Open ports** section shows configured LAN RPC/ZMQ access or **Disabled**;
 it does not scan ports or expose the internal administration listener.
-After the wallet section, the selected tower's settings let an authenticated
-user change its block alert and LAN listeners. An enabled authenticated RPC
+After the wallet section, **Node controls** has separate **Alerts** and **LAN
+access** sections for that tower's block alerts and LAN listeners. An enabled authenticated RPC
 listener also has an explicit **Show password** action. Resetting it requires
 typing `reset`, generates a new password, restarts the affected services, and
 requires every external client to use the new login. Credential reset is

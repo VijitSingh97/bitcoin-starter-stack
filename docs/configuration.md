@@ -322,8 +322,22 @@ workload fits; see [hardware estimates and test evidence](hardware.md).
 The gear menu contains the global **Appearance**, **Dashboard password**,
 **Telegram**, and **Healthchecks** settings. Appearance and notifications use
 **Save**. Block alerts and LAN endpoints belong to each node instead: open a
-tower and find its settings after the wallet section and before deactivation.
+tower and find separate **Alerts** and **LAN access** sections under **Node
+controls**, after the wallet section and before deactivation.
 Block alerts are off by default.
+
+Under **Telegram → Alert preferences**, choose whether to notify when the monitor
+starts, a node goes offline or recovers, synchronization completes, disk space
+is low, or a dashboard update is available. These alerts default to enabled.
+The offline delay defaults to 3 minutes (1–60); the free-space threshold defaults
+to 50 GiB (1–1,048,576). Changes are saved in the dashboard volume and survive
+reboots. Initial sync remains quiet until completion. Healthchecks and dashboard
+update discovery continue independently of these Telegram preferences.
+
+New-block options include approximate daily notification volumes: Bitcoin and
+Bitcoin Cash 144, Monero and Tari 720, Litecoin 576, Dogecoin 1,440, and Zcash
+1,152. These use each chain's target block interval; several blocks found in a
+single check share one alert, so actual message totals can be lower.
 
 Changing the dashboard password requires the current password, a new password,
 and the new password again. The new value must contain 12–128 characters and no

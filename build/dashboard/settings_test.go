@@ -274,6 +274,53 @@ func TestSettingsLoadOldOverrideDefaultsTowerLabelsOff(t *testing.T) {
 	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false || view["tower_labels"] != false || view["default_currency"] != "USD" {
 		t.Fatalf("old override view = %#v, %v", view, err)
 	}
+	for _, field := range []string{"alert_monitor_online", "alert_node_down", "alert_node_recovered", "alert_sync_complete", "alert_low_disk", "alert_updates"} {
+		if view[field] != true {
+			t.Fatalf("old override %s = %#v, want true", field, view[field])
+		}
+	}
+	if view["node_down_after_minutes"] != 3 || view["low_disk_gib"] != 50 {
+		t.Fatalf("old override thresholds = down %#v disk %#v", view["node_down_after_minutes"], view["low_disk_gib"])
+	}
+}
+
+func TestGlobalAlertSettingsValidateAndPreserveScopedValues(t *testing.T) {
+	m := NewMonitor("dev", t.TempDir(), t.TempDir())
+	if err := m.updateSettingsScope(settingsUpdate{
+		AlertLowDisk:         boolPointer(false),
+		AlertNodeRecovered:   boolPointer(false),
+		NodeDownAfterMinutes: intPointer(7),
+		LowDiskGiB:           intPointer(25),
+		present: map[string]bool{
+			"alert_low_disk": true, "alert_node_recovered": true,
+			"node_down_after_minutes": true, "low_disk_gib": true,
+		},
+	}, "global"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.updateSettingsScope(settingsUpdate{
+		AlertNewBlockMonero: boolPointer(true),
+		present:             map[string]bool{"alert_new_block_monero": true},
+	}, "nodes"); err != nil {
+		t.Fatal(err)
+	}
+	got := m.notificationSettings()
+	if got.AlertLowDisk || got.AlertNodeRecovered || got.NodeDownAfterMinutes != 7 || got.LowDiskGiB != 25 || !got.AlertNewBlockMonero || !got.AlertNodeDown || !got.AlertUpdates {
+		t.Fatalf("scoped settings = %#v", got)
+	}
+	for _, test := range []settingsUpdate{
+		{NodeDownAfterMinutes: intPointer(0), present: map[string]bool{"node_down_after_minutes": true}},
+		{NodeDownAfterMinutes: intPointer(61), present: map[string]bool{"node_down_after_minutes": true}},
+		{LowDiskGiB: intPointer(0), present: map[string]bool{"low_disk_gib": true}},
+		{LowDiskGiB: intPointer(1_048_577), present: map[string]bool{"low_disk_gib": true}},
+	} {
+		if err := m.updateSettingsScope(test, "global"); !errors.Is(err, ErrSettingsInvalid) {
+			t.Fatalf("invalid thresholds accepted: %#v: %v", test, err)
+		}
+	}
+	if after := m.notificationSettings(); after != got {
+		t.Fatalf("invalid update changed settings: %#v", after)
+	}
 }
 
 func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
@@ -450,3 +497,4 @@ func TestSettingsBodyLimit(t *testing.T) {
 
 func boolPointer(value bool) *bool       { return &value }
 func stringPointer(value string) *string { return &value }
+func intPointer(value int) *int          { return &value }

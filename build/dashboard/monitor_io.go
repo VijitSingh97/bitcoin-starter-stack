@@ -63,6 +63,14 @@ func (m *Monitor) sendOperationalTelegram(ctx context.Context, text string) bool
 	return m.sendTelegram(ctx, text)
 }
 
+func (m *Monitor) sendOperationalAlert(ctx context.Context, enabled bool, text string) bool {
+	if !enabled {
+		m.logEvent(text)
+		return true
+	}
+	return m.sendOperationalTelegram(ctx, text)
+}
+
 func (m *Monitor) pingHealthchecks(ctx context.Context, healthy bool) bool {
 	settings := m.notificationSettings()
 	if !settings.HealthchecksEnabled || settings.HealthchecksURL == "" {

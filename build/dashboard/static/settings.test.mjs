@@ -1,13 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload } from "./settings.js";
+import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel } from "./settings.js";
+
+const alertDefaults = {
+  alert_monitor_online: true,
+  alert_node_down: true,
+  alert_node_recovered: true,
+  alert_sync_complete: true,
+  alert_low_disk: true,
+  alert_updates: true,
+  node_down_after_minutes: 3,
+  low_disk_gib: 50,
+};
 
 test("settings remain read-only unless the server confirms configuration access", () => {
   assert.equal(configurationAccess({ can_configure: true }), true);
   for (const data of [undefined, {}, { can_configure: false }, { can_configure: "true" }]) {
     assert.equal(configurationAccess(data), false);
   }
+});
+
+test("global alert preferences default on and accept only bounded thresholds", () => {
+  assert.deepEqual(alertPreferenceModel(), alertDefaults);
+  assert.deepEqual(alertPreferenceModel({
+    alert_node_down: false,
+    alert_updates: false,
+    node_down_after_minutes: "12",
+    low_disk_gib: 250,
+  }), { ...alertDefaults, alert_node_down: false, alert_updates: false, node_down_after_minutes: 12, low_disk_gib: 250 });
+  assert.deepEqual(alertPreferenceModel({ node_down_after_minutes: 0, low_disk_gib: 1048577 }), alertDefaults);
 });
 
 test("a port-only save does not create an unnecessary notification override", () => {
@@ -117,6 +139,7 @@ test("blank secret fields keep saved secrets without copying them into the reque
     alert_new_block_tari:false, alert_new_block_litecoin:false, alert_new_block_dogecoin:false, alert_new_block_bitcoincash:false, alert_new_block_zcash:false,
     tower_labels: false,
     default_currency: "USD",
+    ...alertDefaults,
   });
 });
 
@@ -129,6 +152,7 @@ test("disabled services do not send stale secrets or chat IDs", () => {
     alert_new_block_tari:false, alert_new_block_litecoin:false, alert_new_block_dogecoin:false, alert_new_block_bitcoincash:false, alert_new_block_zcash:false,
     tower_labels: false,
     default_currency: "USD",
+    ...alertDefaults,
   });
 });
 
@@ -171,6 +195,14 @@ test("node and global saves use independent HTTP scopes and payloads", async () 
     tower_labels: true,
     default_currency: "CNY",
     alert_new_block_monero: true,
+    alert_monitor_online: false,
+    alert_node_down: true,
+    alert_node_recovered: false,
+    alert_sync_complete: true,
+    alert_low_disk: false,
+    alert_updates: true,
+    node_down_after_minutes: 8,
+    low_disk_gib: 75,
   });
   await requestSettings("global", "POST", globalPayload, fetcher);
   assert.deepEqual(requests[0], { url: "/api/settings?scope=nodes", method: "GET", body: undefined });
@@ -182,6 +214,16 @@ test("node and global saves use independent HTTP scopes and payloads", async () 
   assert.equal(requests[2].body.healthchecks_url, "https://example.com/ping");
   assert.equal(requests[2].body.tower_labels, true);
   assert.equal(requests[2].body.default_currency, "CNY");
+  assert.deepEqual(Object.fromEntries(Object.keys(alertDefaults).map((field) => [field, requests[2].body[field]])), {
+    alert_monitor_online: false,
+    alert_node_down: true,
+    alert_node_recovered: false,
+    alert_sync_complete: true,
+    alert_low_disk: false,
+    alert_updates: true,
+    node_down_after_minutes: 8,
+    low_disk_gib: 75,
+  });
   assert.equal(Object.keys(requests[2].body).some((field) => field.startsWith("alert_new_block")), false);
   await assert.rejects(
     requestSettings("bitcoin", "POST", { alert_new_block: true }, async () => ({ ok: false, text: async () => "node settings rejected" })),
@@ -189,13 +231,38 @@ test("node and global saves use independent HTTP scopes and payloads", async () 
   );
 });
 
-test("node settings move into each tower ahead of node deactivation", async () => {
+test("node controls split alerts from LAN access and stay ahead of deactivation", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("./settings.js", import.meta.url), "utf8");
+  const ports = [{ className: "settings-port" }, { className: "settings-port" }];
+  const alerts = {
+    summary: { textContent: "Bitcoin" },
+    querySelector(selector) { return selector === "summary" ? this.summary : undefined; },
+    querySelectorAll(selector) { return selector === ".settings-port" ? ports : []; },
+  };
+  const target = { createElement(tag) {
+    const element = { tag, className: "", textContent: "", children: [], append(...children) { this.children.push(...children); } };
+    return element;
+  } };
+  const lan = splitNodeControlSections(alerts, target);
+  assert.equal(alerts.summary.textContent, "Alerts");
+  assert.equal(lan.className, "node-lan-settings");
+  assert.equal(lan.children[0].textContent, "LAN access");
+  assert.deepEqual(lan.children.slice(1), ports);
   assert.match(html, /<fieldset id="settings-node-alerts" hidden>/);
-  assert.match(source, /card\.className = "card node-settings-card"/);
+  assert.doesNotMatch(source, /node-settings-card|Alerts and LAN access|power\.before/);
+  assert.match(source, /nodeForm\.className = "node-settings-form"/);
   assert.match(source, /nodeForm\.dataset\.nodeSettingsForm = node/);
-  assert.match(source, /details\.append\(nodeStatus, impact, actions\)/);
-  assert.match(source, /power\.before\(card\)/);
+  assert.match(source, /nodeForm\.append\(details, lan, nodeStatus, impact, actions\)/);
+  assert.match(source, /power\.querySelector\("h2"\)\.after\(nodeForm\)/);
   assert.match(source, /saveScope\(node, view\.form, view\.status, view\.save\)/);
+});
+
+test("every node shows its approximate maximum alert volume and coalescing behavior", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const estimates = { bitcoin: 144, monero: 720, tari: 720, litecoin: 576, dogecoin: 1440, bitcoincash: 144, zcash: 1152 };
+  for (const [node, count] of Object.entries(estimates)) {
+    assert.match(html, new RegExp(`id="settings-${node}-new-block"[^>]*> Alert on new blocks \\(up to about ${count} alerts/day\\)`));
+  }
+  assert.equal(html.match(/Several blocks found together share one alert\./g)?.length, 7);
 });

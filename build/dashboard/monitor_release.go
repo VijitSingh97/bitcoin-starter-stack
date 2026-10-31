@@ -22,7 +22,7 @@ func (m *Monitor) checkUpdatesWithNotification(ctx context.Context, notify bool)
 	if releaseVersion.MatchString(m.releaseBaseline) && latestStack != "" && newer(latestStack, m.releaseBaseline) {
 		note = fmt.Sprintf("stack v%s available (running v%s)", latestStack, m.releaseBaseline)
 		if notify && m.state.notifiedStack != latestStack {
-			if m.sendTelegram(ctx, "🆕 "+note) {
+			if !m.notificationSettings().AlertUpdates || m.sendTelegram(ctx, "🆕 "+note) {
 				m.state.notifiedStack = latestStack
 				m.saveState()
 			}

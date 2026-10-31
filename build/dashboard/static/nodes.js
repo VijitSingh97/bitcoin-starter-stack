@@ -140,22 +140,32 @@ export function applySelection(doc, node, focus = true) {
   const target = selected
     ? doc.querySelector(`[data-node-panel="${selected}"] [data-close-node]`)
     : doc.querySelector("[data-select-node]:not([hidden])");
-  target?.focus();
+  target?.focus({ preventScroll: true });
   return selected;
 }
 
 export function selectionController(doc, onChange = () => {}) {
   let lastChoice = null;
+  const resetScroll = () => {
+    doc.defaultView?.scrollTo(0, 0);
+    for (const root of [doc.scrollingElement, doc.documentElement, doc.body]) {
+      if (root) root.scrollTop = root.scrollLeft = 0;
+    }
+    const overview = doc.getElementById("node-overview");
+    if (overview) overview.scrollTop = 0;
+  };
   return {
     open(node, choice) {
       lastChoice = choice || lastChoice;
       const selected = applySelection(doc, node);
+      resetScroll();
       onChange(selected);
       return selected;
     },
     close() {
       applySelection(doc, "", false);
-      lastChoice?.focus();
+      lastChoice?.focus({ preventScroll: true });
+      resetScroll();
       onChange("");
     },
     refresh() {
