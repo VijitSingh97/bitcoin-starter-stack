@@ -29,7 +29,7 @@ package tari.rpc;
 
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/VijitSingh97/bitcoin-starter-stack/dashboard;main";
+option go_package = "github.com/VijitSingh97/node-manager/dashboard;main";
 
 enum BaseNodeState {
   START_UP = 0;

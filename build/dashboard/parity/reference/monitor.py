@@ -25,7 +25,7 @@ TOR_PROXY = "socks5h://172.29.0.25:9050"  # socks5h: DNS resolves through Tor to
 PROXIES = {"http": TOR_PROXY, "https": TOR_PROXY}
 
 STACK_VERSION = os.environ.get("STACK_VERSION", "")
-STACK_RELEASES_URL = "https://api.github.com/repos/VijitSingh97/bitcoin-starter-stack/releases/latest"
+STACK_RELEASES_URL = "https://api.github.com/repos/VijitSingh97/node-manager/releases/latest"
 CORE_RELEASES_URL = "https://api.github.com/repos/bitcoin/bitcoin/releases/latest"
 
 EVENTS_LOG = os.environ.get("EVENTS_LOG", "/state/events.log")

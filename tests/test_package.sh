@@ -105,10 +105,12 @@ root=$tmp/root
 dpkg-deb -x "$deb" "$root"
 [ "$(cat "$root/usr/lib/bitcoin-starter-stack/VERSION")" = "$PACKAGE_VERSION" ] || fail "payload VERSION does not match package metadata"
 privacy=$root/usr/share/doc/bitcoin-starter-stack/docs/privacy.md
-grep -q '^expected=UNPUBLISHED$' "$privacy" || fail "unreleased feed key is not fail-closed"
+grep -q "^expected='72FD656754BD7534E274360A37070C2730C0B4EA'$" "$privacy" || fail "published feed fingerprint is missing"
 grep -q 'bitcoin-starter-stack.asc' "$privacy" || fail "feed key download is missing"
 grep -q -- '--proxy' "$privacy" && fail "feed key download forces a host proxy"
 grep -q -- 'gpg --batch --show-keys --with-colons' "$privacy" || fail "feed key fingerprint is not verified"
+grep -q 'primary_keys++' "$privacy" || fail "feed key check does not reject extra primary keys"
+grep -Fq "1:\$expected" "$privacy" || fail "feed key check does not bind the only primary key to the fingerprint"
 if [ "$(id -u)" -ne 0 ]; then
   echo "PASS: test_package.sh artifact checks"
   echo "SKIP: test_package.sh lifecycle checks require root; the dedicated package CI job runs them"

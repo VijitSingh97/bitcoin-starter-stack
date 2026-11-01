@@ -231,7 +231,7 @@ def test_ping_treats_http_error_as_failure(monkeypatch):
 
 def _patch_releases(monkeypatch, stack_tag, core_tag):
     def fake(url):
-        return stack_tag if "bitcoin-starter-stack" in url else core_tag
+        return stack_tag if url == "https://api.github.com/repos/VijitSingh97/node-manager/releases/latest" else core_tag
 
     monkeypatch.setattr(monitor, "_latest_release_tag", fake)
 

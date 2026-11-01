@@ -1,4 +1,4 @@
-module github.com/VijitSingh97/bitcoin-starter-stack/dashboard
+module github.com/VijitSingh97/node-manager/dashboard
 
 go 1.27
 

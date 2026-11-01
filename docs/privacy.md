@@ -101,36 +101,50 @@ This does not add an external route to the Bitcoin or dashboard containers.
 
 ## Package feed
 
-The first package feed will be enabled with the next release. Its dedicated
-public-key fingerprint is intentionally unpublished until then. The release
-must replace `UNPUBLISHED` below with the committed 40-hex primary fingerprint.
-The command fails closed while that placeholder remains and installs the key only
-after an exact fingerprint match:
+Version `v1.32.0` publishes the first signed APT feed. Its dedicated signing-key
+fingerprint is `72FD 6567 54BD 7534 E274 360A 3707 0C27 30C0 B4EA`. Wait for the
+release APT job and GitHub Pages deployment to succeed, then install the feed
+only after verifying the downloaded key against that committed fingerprint:
 
 ```bash
-expected=UNPUBLISHED
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+
+expected='72FD656754BD7534E274360A37070C2730C0B4EA'
 printf '%s\n' "$expected" | grep -Eq '^[0-9A-Fa-f]{40}$' || {
-  echo 'The APT signing fingerprint is not published yet.' >&2
+  echo 'The configured APT signing fingerprint is invalid.' >&2
   exit 1
 }
 key=$(mktemp)
 trap 'rm -f "$key"' EXIT
 curl --fail --show-error --silent \
-  https://vijitsingh97.github.io/bitcoin-starter-stack/bitcoin-starter-stack.asc \
+  https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
   --output "$key"
-actual=$(gpg --batch --show-keys --with-colons "$key" |
-  awk -F: '$1 == "fpr" { print $10; exit }')
-[ "$actual" = "$expected" ] || {
-  echo "Signing-key fingerprint mismatch: $actual" >&2
+listing=$(gpg --batch --show-keys --with-colons "$key") || {
+  echo 'Unable to parse the APT signing key.' >&2
+  exit 1
+}
+actual=$(awk -F: '
+  $1 == "pub" { primary_keys++ }
+  $1 == "fpr" && primary_fingerprint == "" { primary_fingerprint = $10 }
+  END { print primary_keys ":" primary_fingerprint }
+' <<<"$listing") || exit 1
+[ "$actual" = "1:$expected" ] || {
+  echo 'APT signing key does not contain exactly the expected primary key.' >&2
   exit 1
 }
 sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
+echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/node-manager ./' |
+  sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo apt update
+sudo apt install bitcoin-starter-stack
+sudo bitcoin-stack init
 ```
 
-Install GnuPG before running this check. APT installation remains inert: it does
-not run setup, download container images, or start the stack. Run
-`sudo bitcoin-stack init` afterward. Release consumers use prebuilt images and do
-not compile on the node.
+APT package installation remains inert: it does not run setup, download
+container images, or start the stack. The explicit `init` command downloads the
+versioned images and starts the default pruned Bitcoin node. Release consumers
+use prebuilt images and do not compile on the node.
 
 This protects the stack's network paths. It cannot guarantee anonymity against
 traffic correlation, a compromised host/Tor daemon, router port forwarding, or

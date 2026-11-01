@@ -768,7 +768,7 @@ EOF
   fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Not a git checkout — upgrade by unpacking the latest release tarball:"
-    echo "  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest"
+    echo "  https://github.com/VijitSingh97/node-manager/releases/latest"
     exit 1
   fi
   current=$(cat "$stack_root/VERSION" 2>/dev/null || echo 0)

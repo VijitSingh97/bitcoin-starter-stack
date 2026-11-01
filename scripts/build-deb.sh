@@ -61,7 +61,7 @@ Priority: optional
 Architecture: all
 Maintainer: Vijit Singh <VijitSingh97@users.noreply.github.com>
 Depends: bash, ca-certificates, curl, docker-ce | docker.io, docker-compose-plugin (>= 2.33.1) | docker-compose-v2 (>= 2.33.1) | docker-compose (>= 2.33.1), iproute2, jq, openssl, util-linux
-Homepage: https://github.com/VijitSingh97/bitcoin-starter-stack
+Homepage: https://github.com/VijitSingh97/node-manager
 Description: Private cryptocurrency nodes routed over Tor
  Runs selected pruned nodes, Tor, and a local dashboard through Docker Compose.
  Configuration lives in /etc; generated state and node data live in /var/lib.

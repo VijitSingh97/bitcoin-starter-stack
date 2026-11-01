@@ -336,7 +336,7 @@ func TestDashboardUpgradeStatusAndRequest(t *testing.T) {
 				if r.URL.Host != "api.github.com" {
 					return nil, errors.New("unexpected external request: " + r.URL.String())
 				}
-				if strings.Contains(r.URL.Path, "bitcoin-starter-stack") {
+				if r.URL.Path == "/repos/VijitSingh97/node-manager/releases/latest" {
 					return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
 				}
 				return response(http.StatusOK, `{"tag_name":"v31.1.0"}`), nil

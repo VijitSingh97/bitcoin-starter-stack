@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 
 OWNER = "VijitSingh97"
-REPO = "bitcoin-starter-stack"
+REPO = "node-manager"
 APP_SLUG = "bitcoin-starter-stack-developer"
 API = "https://api.github.com"
 PERMISSIONS = {

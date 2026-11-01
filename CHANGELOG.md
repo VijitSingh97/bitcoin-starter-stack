@@ -6,79 +6,60 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
-### Changed
-
-- Rebranded the dashboard as Node Starter Stack while preserving package names,
-  commands, configuration paths, and existing Docker volumes for upgrades.
-- Fresh wizard installs generate separate dashboard and per-node RPC passwords.
-  Existing saved credentials remain unchanged.
-- Fresh installs default Bitcoin Core's UTXO cache to 128 MiB. Existing installs
-  retain their rendered cache setting when no explicit override is configured.
-- Replaced the Python dashboard runtime with a standard-library Go server while
-  retaining the Python reference tests and shared HTTP parity checks.
-- Incomplete wallet imports display pending history above the block tower.
-- Saved wallet views and wallet/upgrade changes require a dashboard password;
-  public node status remains available on the trusted LAN.
-- Release downloads contain runtime source and user documentation only. Tests,
-  parity references, benchmark experiments, screenshots, and maintainer tools
-  remain in Git and are excluded from release archives and image build inputs.
-- Bitcoin and dashboard networking is externally isolated, with local DNS
-  forwarding disabled. Only Tor has an internet route; the optional clearnet
-  sync setting is removed. Dashboard access binds to loopback or a private IPv4.
-- Routine starts use local images without implicit pulls or builds. The setup
-  wizard and `pull` command download missing images with host Docker settings;
-  source upgrades continue to fetch Git release tags through Tor.
-- Updated the digest-pinned Bitcoin Core image to 32.1, retaining the existing
-  connection limits. Dependabot checks Compose dependencies daily for reviewable PRs.
-- Update notices and Telegram release alerts track stack releases only, with
-  notification state preserved across dashboard restarts.
-- Automatic Telegram alerts stay quiet during initial sync, then send the
-  existing one-time sync-complete message when the node is ready.
+## [1.32.0] - 2026-10-31
 
 ### Added
 
-- Optional pruned Monero node with restricted Digest RPC, separate trusted-LAN
-  RPC/ZMQ relays for Pithead, and public runtime traffic routed through Tor.
-- Bitcoin/Monero selection in setup and gold/orange dashboard towers that open
-  each chain's status card. Monero-only installs skip Bitcoin polling and alerts.
-- Experimental APT compact profile: uncapped initial sync followed by guarded,
-  per-node 1 CPU / 2 GiB limits. Source and existing installs leave it disabled.
-- Node comparison covering Litecoin, Dogecoin, Tari, Zebra/Zcash, and Bitcoin Cash.
-- A notification settings menu with persistent JSON overrides, live updates,
-  visible saved values, and the dashboard's optional password on LAN or onion access.
-- Prepared an Ubuntu 24.04 APT package with a global `bitcoin-stack` command,
-  FHS configuration and persistent state, a fresh-install pruning default, and
-  signed-feed release automation for the next release.
-- Cached CoinGecko BTC prices through Tor, with nine selectable fiat currencies
-  and explicit unavailable/stale states.
-- An address-type selector for wallets that export a bare xpub for SegWit accounts.
-- A public Binance address example for fresh installs, excluded from personal
-  totals, with persistent removal and an explicit empty-list opt-out.
-- Opt-in authenticated LAN RPC access for wallet applications, disabled by default.
-- A repository-scoped GitHub App helper for bot-authored commits and pull requests.
+- Node Manager supports Bitcoin Core, Monero, Tari, Litecoin, Dogecoin,
+  Bitcoin Cash Node, and Zcash through Zakura, with a responsive tower overview
+  and individual status panels.
+- Install additional nodes from the dashboard, review their storage paths and
+  estimated disk requirements, and opt into LAN interfaces. Port conflicts are
+  checked before changes; affected nodes restart only when needed.
+- View-only wallets for Bitcoin, Monero, Tari, Litecoin, and Bitcoin Cash, with
+  pending and stale states and saved balance snapshots. Dogecoin and Zcash
+  explicitly report that wallet balances are unavailable in their pruned modes.
+- Ubuntu APT and macOS Homebrew installation, an explicit `bitcoin-stack init`,
+  persistent configuration, and dashboard controls for launch at boot or login.
+- Shared Telegram and Healthchecks settings, per-node block alerts, optional
+  dashboard authentication, and separate node-interface credentials.
+- Cached prices for every supported chain in nine fiat currencies, fetched
+  through Tor, with unavailable and stale indicators.
+- Experimental post-sync resource profiles: 1 CPU / 2 GiB for Bitcoin and
+  Monero, and 1 CPU / 4 GiB for other nodes. Wallet and shared-service overhead
+  is additional; full-chain resource qualification remains pending.
+- Signed APT feed with primary fingerprint
+  `72FD656754BD7534E274360A37070C2730C0B4EA`.
+
+### Changed
+
+- Rebranded the project and repository as Node Manager. Existing package names,
+  `bitcoin-stack` commands, configuration paths, and data volumes are preserved.
+- Replaced the Python dashboard runtime with Go and retained functionality-focused
+  Python and frontend regression tests.
+- Fresh installations start pruned Bitcoin only, select a private LAN dashboard
+  address, leave its password optional, and keep node interfaces and automatic
+  launch disabled. Initial sync is uncapped by default.
+- Updated Bitcoin Core to 32.1. Runtime internet traffic is isolated behind Tor;
+  package and container downloads use the host connection.
+- Release archives contain runtime code, required notices, and user guides;
+  tests, parity references, benchmarks, screenshots, and maintainer tools remain
+  in the repository.
+- Simplified the README around Ubuntu and macOS installation and refreshed its
+  hero with a closer light-mode preview.
 
 ### Fixed
 
-- Updated Tor to 0.4.9.15 so fresh image builds use Alpine's current security release.
-- Dashboard shutdown cancels update and notification requests before waiting for background workers.
-- Busy initial sync no longer inherits the page's short timeout for health
-  checks; temporary misses show the last confirmed sync progress and alerts
-  wait for sustained failure.
-- Failed Telegram release alerts retry until delivery succeeds, Healthchecks
-  failure pings preserve query strings, and future wallet birthdays are rejected.
-- Refreshed the dashboard screenshot and wallet selector theme styling.
-- Failed initial wallet imports can recover after a restart without deleting
-  the existing watch-only wallet or accepting unrelated descriptors.
-- The dashboard upgrade control survives automatic status-panel refreshes.
-- Reusing a watch-only label with a different public key no longer reads the old
-  Core wallet's balance. Existing matching imports and history are preserved.
-- Private keys are rejected before wallet persistence; legacy files containing
-  private material are secured and preserved for operator recovery.
-- Failed roster writes are reported instead of confirming an unsaved wallet
-  change; unreadable or malformed roster files are preserved.
-- Core 31 inactive descriptors can omit optional `internal` metadata without
-  preventing safe reuse of an exact matching watch-only wallet.
-- Healthchecks pings require HTTPS, and external API redirects are not followed.
+- Launch-at-login settings remain synchronized after saving or reopening.
+- Price fetching retries while Tor initializes and uses the correct Tari feed.
+- Monero wallets use private writable ring-database storage and remain pending
+  while the daemon syncs.
+- Disk capacity, free space, and low-disk alerts use the correct allocation units
+  on Docker Desktop bind mounts.
+- Compose resources are scoped per installation, and unselected Tari wallet
+  services and volumes are not created.
+- Settings and node installation validate inputs, preserve private state, and
+  roll back interrupted host changes.
 
 ## [1.31.1] - 2026-10-27
 
@@ -905,57 +886,58 @@ First tagged release.
 - Tor data directory group ownership (`tor:root` → `tor:tor`) so the
   bitcoin container can read the control-auth cookie via gid 101.
 
-[Unreleased]: https://github.com/VijitSingh97/bitcoin-starter-stack/compare/v1.31.1...HEAD
-[1.31.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.1
-[1.31.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.31.0
-[1.30.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.30.0
-[1.29.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.1
-[1.29.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.29.0
-[1.28.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.28.0
-[1.27.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.27.0
-[1.26.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.2
-[1.26.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.1
-[1.26.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.26.0
-[1.25.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.25.1
-[1.25.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.25.0
-[1.24.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.2
-[1.24.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.1
-[1.24.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.24.0
-[1.23.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.23.0
-[1.22.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.22.0
-[1.21.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.21.0
-[1.20.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.1
-[1.20.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.20.0
-[1.19.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.19.0
-[1.18.5]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.5
-[1.18.4]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.4
-[1.18.3]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.3
-[1.18.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.2
-[1.18.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.1
-[1.18.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.18.0
-[1.17.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.17.0
-[1.16.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.16.0
-[1.15.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.1
-[1.15.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.15.0
-[1.14.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.2
-[1.14.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.1
-[1.14.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.14.0
-[1.13.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.13.0
-[1.12.2]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.2
-[1.12.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.1
-[1.12.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.12.0
-[1.11.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.1
-[1.11.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.11.0
-[1.10.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.1
-[1.10.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.10.0
-[1.9.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.9.0
-[1.8.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.8.0
-[1.7.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.7.0
-[1.6.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.6.0
-[1.5.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.5.0
-[1.4.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.4.0
-[1.3.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.3.0
-[1.2.1]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.1
-[1.2.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.2.0
-[1.1.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.1.0
-[1.0.0]: https://github.com/VijitSingh97/bitcoin-starter-stack/releases/tag/v1.0.0
+[Unreleased]: https://github.com/VijitSingh97/node-manager/compare/v1.32.0...HEAD
+[1.32.0]: https://github.com/VijitSingh97/node-manager/compare/v1.31.1...v1.32.0
+[1.31.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.31.1
+[1.31.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.31.0
+[1.30.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.30.0
+[1.29.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.29.1
+[1.29.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.29.0
+[1.28.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.28.0
+[1.27.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.27.0
+[1.26.2]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.26.2
+[1.26.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.26.1
+[1.26.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.26.0
+[1.25.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.25.1
+[1.25.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.25.0
+[1.24.2]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.24.2
+[1.24.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.24.1
+[1.24.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.24.0
+[1.23.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.23.0
+[1.22.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.22.0
+[1.21.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.21.0
+[1.20.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.20.1
+[1.20.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.20.0
+[1.19.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.19.0
+[1.18.5]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.5
+[1.18.4]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.4
+[1.18.3]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.3
+[1.18.2]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.2
+[1.18.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.1
+[1.18.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.18.0
+[1.17.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.17.0
+[1.16.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.16.0
+[1.15.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.15.1
+[1.15.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.15.0
+[1.14.2]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.14.2
+[1.14.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.14.1
+[1.14.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.14.0
+[1.13.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.13.0
+[1.12.2]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.12.2
+[1.12.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.12.1
+[1.12.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.12.0
+[1.11.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.11.1
+[1.11.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.11.0
+[1.10.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.10.1
+[1.10.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.10.0
+[1.9.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.9.0
+[1.8.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.8.0
+[1.7.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.7.0
+[1.6.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.6.0
+[1.5.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.5.0
+[1.4.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.4.0
+[1.3.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.3.0
+[1.2.1]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.2.1
+[1.2.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.2.0
+[1.1.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.1.0
+[1.0.0]: https://github.com/VijitSingh97/node-manager/releases/tag/v1.0.0

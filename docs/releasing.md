@@ -18,10 +18,13 @@ The pins are the ingredients manifest of each release: bumping any of
 them — including a Bitcoin Core security update — is a normal release
 (bump the pin, cut a patch, the gate re-tests the composed set).
 
-Multi-arch images (amd64 and arm64/Raspberry Pi) for the two first-party
-components — `tor` and `dashboard` — are built and published to GHCR
+Multi-arch images (amd64 and arm64/Raspberry Pi) for seven first-party runtime
+components — `tor`, `dashboard`, `monero`, `tari-wallet`, `litecoin`,
+`dogecoin`, and `bitcoincash` — are built and published to GHCR
 (`ghcr.io/vijitsingh97/bitcoin-starter-stack-*`) per release by the `images`
-job in the [Release workflow](../.github/workflows/release.yml).
+job in the [Release workflow](../.github/workflows/release.yml). Bitcoin Core,
+the Tari base node, and Zakura use pinned upstream images rather than duplicate
+first-party builds.
 `./stack pull` downloads these tags with the host's Docker settings;
 `./stack up` starts only locally available images and never builds implicitly.
 The release artifact is also a source tarball. Source builds need a controlled
@@ -79,31 +82,37 @@ without a release — fix on `main`, bump the patch version, tag again
 
 ## APT feed
 
-The first APT feed must wait for a new release containing the Go dashboard so
-the package version and published amd64/arm64 images match. Before that release:
+Version `v1.32.0` is the first APT release. Its dedicated public-key fingerprint
+is committed as `72FD656754BD7534E274360A37070C2730C0B4EA`. Before tagging it,
+confirm all of the following repository settings:
 
-1. Create a dedicated signing key for this project. Do not reuse another
-   project's private key.
-2. Commit its full primary fingerprint in the user onboarding command in
-   `docs/privacy.md`, replacing `UNPUBLISHED`, and review that change before
-   enabling the feed.
-3. Store the armored private key as the `APT_SIGNING_KEY` repository secret and
-   its full fingerprint as the `APT_SIGNING_FINGERPRINT` repository variable.
-4. Configure GitHub Pages to deploy through GitHub Actions.
-5. Decide the feed replay policy before activation. The static feed currently
-   omits `Valid-Until`, so releases remain installable between releases but old
-   signed snapshots do not expire. Adding an expiry requires monitored periodic
-   re-signing so an idle project does not break every user's `apt update`.
+1. `APT_SIGNING_KEY` contains the armored private key for that fingerprint.
+2. `APT_SIGNING_FINGERPRINT` contains the exact 40-hex fingerprint above.
+3. GitHub Pages uses **GitHub Actions** as its deployment source for the renamed
+   `node-manager` repository.
+4. The `github-pages` environment permits the release workflow to deploy.
 
-After the normal source release and multi-architecture images succeed, the
-release workflow builds the architecture-independent package, verifies its
-signed feed locally with APT, uploads the package and checksum to the GitHub
-Release, and deploys the feed to Pages.
+The APT job waits for both the source release and all multi-architecture images.
+It builds the architecture-independent package, creates and signs the feed,
+verifies that feed with an isolated APT client, uploads the package and checksum
+to the GitHub Release, and deploys the feed to Pages. Do not advertise APT
+availability until that Pages deployment succeeds.
+
+The static feed omits `Valid-Until`, so releases remain installable between
+releases but old signed snapshots do not expire. Adding an expiry requires
+monitored periodic re-signing so an idle project does not break every user's
+`apt update`.
 
 ## How users get a release
 
 - **Tarball:** obtain and unpack `bitcoin-starter-stack.tar.gz`, then run
   `./stack init` to download missing images and start.
+- **APT:** after the signed Pages deployment succeeds, install the package from
+  `https://vijitsingh97.github.io/node-manager` and run
+  `sudo bitcoin-stack init` explicitly.
+- **Homebrew:** after the generated formula PR is merged, install from the
+  legacy-named `vijitsingh97/bitcoin-starter-stack` tap, whose explicit remote
+  is the canonical `VijitSingh97/node-manager` repository.
 - **Git:** `./stack upgrade` fetches and applies a release through the guarded
   Tor download path. Source builds stay in a separately controlled environment.
 - Running stacks learn about new releases from the dashboard's daily
@@ -116,7 +125,8 @@ The release uploads a generated `bitcoin-starter-stack.rb` beside the runtime
 archive. The formula pins that exact archive's SHA-256; it is not a development
 checkout. After both the release and its multi-architecture container images
 publish, the developer bot opens a PR updating `Formula/bitcoin-starter-stack.rb`
-on `main`. Review and merge that PR to make the version available from the tap.
+on `main`. The release is **not available through Homebrew until that PR is
+reviewed and merged**.
 The job uses the same `DEVELOPER_BOT_APP_ID` variable (or secret) and
 `DEVELOPER_BOT_PRIVATE_KEY` secret as dependency updates; until configured,
 the formula asset is still generated but no tap-update PR is opened.

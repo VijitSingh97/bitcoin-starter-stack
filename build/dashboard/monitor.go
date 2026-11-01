@@ -18,7 +18,7 @@ import (
 
 const (
 	torProxy             = "172.29.0.25:9050"
-	stackReleasesURL     = "https://api.github.com/repos/VijitSingh97/bitcoin-starter-stack/releases/latest"
+	stackReleasesURL     = "https://api.github.com/repos/VijitSingh97/node-manager/releases/latest"
 	pingEveryTicks       = 5
 	downAfterTicks       = 3
 	updateCheckEveryTick = 1440

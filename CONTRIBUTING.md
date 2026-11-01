@@ -5,8 +5,8 @@ Small stack, small rules. PRs welcome.
 ## Dev setup
 
 ```bash
-git clone https://github.com/VijitSingh97/bitcoin-starter-stack.git
-cd bitcoin-starter-stack
+git clone https://github.com/VijitSingh97/node-manager.git
+cd node-manager
 pip install -r build/dashboard/parity/reference/requirements.txt pytest
 ```
 

@@ -72,7 +72,7 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
   echo "VERSION must be plain semantic version" >&2
   exit 1
 }
-release_url=${release_url:-https://github.com/VijitSingh97/bitcoin-starter-stack/releases/download/v${version}/bitcoin-starter-stack.tar.gz}
+release_url=${release_url:-https://github.com/VijitSingh97/node-manager/releases/download/v${version}/bitcoin-starter-stack.tar.gz}
 case "$release_url" in
   https://* | file:///*) ;;
   *) echo "release URL must use https:// or an absolute file:// URL" >&2; exit 1 ;;

@@ -7,11 +7,27 @@ fail() {
   exit 1
 }
 
-for tool in apt-ftparchive apt-get gpg; do
-  command -v "$tool" >/dev/null || {
-    echo "SKIP: test_apt.sh ($tool not installed)"
-    exit 0
-  }
+verify_downloaded_key() {
+  file=$1
+  expected=$2
+  listing=$(gpg --batch --show-keys --with-colons "$file" 2>/dev/null) || return 1
+  actual=$(awk -F: '
+    $1 == "pub" { primary_keys++ }
+    $1 == "fpr" && primary_fingerprint == "" { primary_fingerprint = $10 }
+    END { print primary_keys ":" primary_fingerprint }
+  ' <<<"$listing") || return 1
+  [ "$actual" = "1:$expected" ]
+}
+
+command -v gpg >/dev/null || {
+  echo "SKIP: test_apt.sh (gpg not installed)"
+  exit 0
+}
+
+for guide in README.md docs/getting-started.md docs/privacy.md; do
+  grep -Fq "listing=\$(gpg --batch --show-keys --with-colons \"\$key\") || {" "$guide" || fail "$guide does not reject GPG parse failures"
+  grep -Fq 'primary_keys++' "$guide" || fail "$guide does not count primary keys"
+  grep -Fq "1:\$expected" "$guide" || fail "$guide does not require exactly the expected primary key"
 done
 
 tmp=$(mktemp -d)
@@ -24,6 +40,39 @@ gpg --batch --passphrase '' --quick-generate-key 'bitcoin-starter-stack package 
 APT_SIGNING_FINGERPRINT=$(gpg --batch --with-colons --fingerprint --list-secret-keys | awk -F: '$1 == "fpr" {print $10; exit}')
 export APT_SIGNING_FINGERPRINT
 [ -n "$APT_SIGNING_FINGERPRINT" ] || fail "test signing key has no fingerprint"
+
+expected_only=$tmp/expected-only.asc
+gpg --batch --armor --export "$APT_SIGNING_FINGERPRINT" >"$expected_only"
+verify_downloaded_key "$expected_only" "$APT_SIGNING_FINGERPRINT" || fail "onboarding rejected the expected primary key"
+if verify_downloaded_key "$expected_only" 0000000000000000000000000000000000000000; then
+  fail "onboarding accepted the wrong primary fingerprint"
+fi
+
+gpg --batch --yes --pinentry-mode loopback --passphrase '' \
+  --quick-add-key "$APT_SIGNING_FINGERPRINT" rsa2048 encrypt 0 >/dev/null 2>&1
+expected_with_subkey=$tmp/expected-with-subkey.asc
+gpg --batch --armor --export "$APT_SIGNING_FINGERPRINT" >"$expected_with_subkey"
+verify_downloaded_key "$expected_with_subkey" "$APT_SIGNING_FINGERPRINT" || fail "onboarding rejected an expected key with a subkey"
+
+gpg --batch --passphrase '' --quick-generate-key 'extra package test key' rsa2048 sign 0 >/dev/null 2>&1
+EXTRA_FINGERPRINT=$(gpg --batch --with-colons --fingerprint --list-secret-keys 'extra package test key' | awk -F: '$1 == "fpr" {print $10; exit}')
+combined=$tmp/combined.asc
+gpg --batch --armor --export "$APT_SIGNING_FINGERPRINT" "$EXTRA_FINGERPRINT" >"$combined"
+if verify_downloaded_key "$combined" "$APT_SIGNING_FINGERPRINT"; then
+  fail "onboarding accepted an extra primary key"
+fi
+printf 'not a key\n' >"$tmp/malformed.asc"
+if verify_downloaded_key "$tmp/malformed.asc" "$APT_SIGNING_FINGERPRINT"; then
+  fail "onboarding accepted an unparseable key file"
+fi
+echo "PASS: APT onboarding key checks"
+
+for tool in apt-ftparchive apt-get; do
+  command -v "$tool" >/dev/null || {
+    echo "SKIP: test_apt.sh feed checks ($tool not installed)"
+    exit 0
+  }
+done
 
 scripts/build-deb.sh >/dev/null
 scripts/build-apt.sh

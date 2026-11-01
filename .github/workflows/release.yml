@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: gate
+    needs: [gate, images]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -59,9 +59,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" bitcoin-starter-stack.tar.gz dist/Formula/bitcoin-starter-stack.rb \
             --title "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
 
-  # Publish prebuilt multi-arch images (amd64 + arm64/Pi) to GHCR so end users
-  # pull instead of building. Independent of `publish`: a registry hiccup here
-  # won't publish a package or tap update until all runtime images exist.
+  # Runtime images must exist before installable release assets are published.
   images:
     needs: gate
     runs-on: ubuntu-latest
