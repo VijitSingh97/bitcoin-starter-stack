@@ -5,7 +5,7 @@ COPY --chmod=0644 build/tari-wallet/launcher.go ./
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /tari-wallet-launcher .
 
-FROM ghcr.io/tari-project/minotari_console_wallet:v6.1.0-mainnet@sha256:e20d5cf93f33254dcd07e8c9a405ee48d20721e14fee81140319dd41ecd277f0
+FROM ghcr.io/tari-project/minotari_console_wallet:v6.2.0-mainnet@sha256:655e804656350559bd4338539b2c625fe2799456b5027f1c2d859d48a9c3c49e
 USER 0
 COPY --from=build --chmod=0755 /tari-wallet-launcher /usr/local/bin/tari-wallet-launcher
 COPY --chmod=0644 build/tari-wallet/config.toml /var/tari/config/config.toml
