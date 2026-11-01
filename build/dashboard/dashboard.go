@@ -265,7 +265,8 @@ func diskUsage(path string) diskInfo {
 	if syscall.Statfs(path, &stat) != nil {
 		return diskInfo{}
 	}
-	return diskInfo{Total: uint64(stat.Blocks) * uint64(stat.Bsize), Free: uint64(stat.Bavail) * uint64(stat.Bsize)}
+	blockSize := statfsBlockSize(&stat)
+	return diskInfo{Total: uint64(stat.Blocks) * blockSize, Free: uint64(stat.Bavail) * blockSize}
 }
 
 func gib(v int64) float64   { return float64(v) / (1024 * 1024 * 1024) }

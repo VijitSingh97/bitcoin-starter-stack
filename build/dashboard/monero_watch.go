@@ -414,6 +414,20 @@ func (s *MoneroWatchStore) refresh(parent context.Context, wallet MoneroWatchWal
 	ctx, cancel := context.WithTimeout(parent, moneroRefreshTimeout)
 	defer cancel()
 	var snapshot moneroWalletSnapshot
+	var daemonInfo moneroInfo
+	if err := s.daemon.call(ctx, "get_info", &daemonInfo); err != nil {
+		s.applyRefresh(wallet.ID, snapshot, err)
+		return
+	}
+	targetHeight := daemonInfo.TargetHeight
+	if targetHeight < daemonInfo.Height {
+		targetHeight = daemonInfo.Height
+	}
+	snapshot.daemonHeight = targetHeight
+	if !daemonInfo.Synchronized || daemonInfo.BusySyncing || targetHeight == 0 {
+		s.applyRefresh(wallet.ID, snapshot, errMoneroScanPending)
+		return
+	}
 	err := s.serialized(ctx, func(ctx context.Context) error {
 		if err := s.openWallet(ctx, wallet); err != nil {
 			return err
@@ -429,16 +443,8 @@ func (s *MoneroWatchStore) refresh(parent context.Context, wallet MoneroWatchWal
 		if err := s.walletCall(ctx, "get_height", map[string]any{}, &walletHeight); err != nil {
 			return err
 		}
-		var daemonInfo moneroInfo
-		if err := s.daemon.call(ctx, "get_info", &daemonInfo); err != nil {
-			return err
-		}
-		targetHeight := daemonInfo.TargetHeight
-		if targetHeight < daemonInfo.Height {
-			targetHeight = daemonInfo.Height
-		}
 		snapshot.walletHeight, snapshot.daemonHeight = walletHeight.Height, targetHeight
-		if !daemonInfo.Synchronized || daemonInfo.BusySyncing || targetHeight == 0 || walletHeight.Height < targetHeight {
+		if walletHeight.Height < targetHeight {
 			return errMoneroScanPending
 		}
 		var balance moneroWalletBalance

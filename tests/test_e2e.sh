@@ -228,6 +228,19 @@ source_view_key=$(wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"query_key","
   wallet_fail "throwaway Monero view key was unavailable"
 wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"close_wallet"}' >/dev/null ||
   wallet_fail "throwaway Monero fixture wallet could not be closed"
+open_response=$(wallet_rpc "$(jq -nc --arg filename "$fixture_name" --arg password "$fixture_password" \
+  '{jsonrpc:"2.0",id:"e2e",method:"open_wallet",params:{filename:$filename,password:$password}}')") ||
+  wallet_fail "throwaway Monero fixture wallet could not be reopened"
+printf '%s' "$open_response" | jq -e '.error == null and .result != null' >/dev/null ||
+  wallet_fail "throwaway Monero fixture wallet reopen returned an error"
+height_response=$(wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"get_height"}') ||
+  wallet_fail "throwaway Monero fixture wallet height was unavailable"
+printf '%s' "$height_response" | jq -e '.error == null and (.result.height | type == "number")' >/dev/null ||
+  wallet_fail "throwaway Monero fixture wallet height returned an error"
+docker compose exec -T monero-wallet sh -c 'test -d /wallets/.shared-ringdb && test -w /wallets/.shared-ringdb' ||
+  wallet_fail "Monero shared ring database is not writable in the private wallet volume"
+wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"close_wallet"}' >/dev/null ||
+  wallet_fail "reopened Monero fixture wallet could not be closed"
 docker compose exec -T -e FIXTURE_NAME="$fixture_name" monero-wallet sh -c 'rm -f "/wallets/$FIXTURE_NAME" "/wallets/$FIXTURE_NAME.keys"' ||
   wallet_fail "throwaway Monero fixture wallet could not be removed"
 
@@ -273,7 +286,7 @@ printf '%s' "$restarted_watch" | grep -Fq "$source_view_key" && wallet_fail "res
 code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2eDashboardSharedPassword123 \
   -H 'X-Requested-With: fetch' -X DELETE "$dashboard_url/api/monero/watch/$watch_id")
 [ "$code" = 200 ] || wallet_fail "throwaway watch-only row could not be removed"
-unset watch_add unsafe create_request create_response watch_response watch_list restarted_watch source_view_key source_address fixture_password
+unset watch_add unsafe create_request create_response open_response height_response watch_response watch_list restarted_watch source_view_key source_address fixture_password
 
 # The inbound onion service registers with tor's control port: once
 # ADD_ONION succeeds, the .onion address appears in localaddresses.

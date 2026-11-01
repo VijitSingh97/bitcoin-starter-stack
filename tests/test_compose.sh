@@ -202,6 +202,7 @@ echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MO
 echo "$monero_rendered" | sed -n '/^  dashboard:$/,/^  monero-wallet:$/p' | grep -q 'MONERO_WALLET_RPC_URL: http://172.29.0.31:18082' ||
   fail "dashboard is not wired to Monero wallet RPC"
 grep -q '^wallet-dir=/wallets$' build/monero/wallet-entrypoint.sh || fail "Monero wallet files are not in the private volume"
+grep -q '^shared-ringdb-dir=/wallets/.shared-ringdb$' build/monero/wallet-entrypoint.sh || fail "Monero shared ring database is not in the private volume"
 grep -q '^daemon-address=http://172.29.0.30:18085$' build/monero/wallet-entrypoint.sh || fail "Monero wallet RPC does not use the internal daemon"
 grep -q '^rpc-bind-port=18082$' build/monero/wallet-entrypoint.sh || fail "Monero wallet RPC port changed"
 grep -q 'chmod 0700 /wallets' build/monero/Dockerfile || fail "Monero wallet volume is not owner-only"

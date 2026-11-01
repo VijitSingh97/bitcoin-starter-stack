@@ -7,9 +7,11 @@ set -eu
 : "${MONERO_WALLET_RPC_PASSWORD:?missing MONERO_WALLET_RPC_PASSWORD}"
 
 umask 077
+mkdir -p /wallets/.shared-ringdb
 config=/run/monero-wallet/wallet-rpc.conf
 cat >"$config" <<EOF
 wallet-dir=/wallets
+shared-ringdb-dir=/wallets/.shared-ringdb
 daemon-address=http://172.29.0.30:18085
 daemon-login=$MONERO_RPC_USER:$MONERO_RPC_PASSWORD
 trusted-daemon=1

@@ -548,7 +548,7 @@ func freeGB(path string) (float64, error) {
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0, err
 	}
-	return float64(stat.Bavail) * float64(stat.Bsize) / float64(uint64(1)<<30), nil
+	return float64(stat.Bavail) * float64(statfsBlockSize(&stat)) / float64(uint64(1)<<30), nil
 }
 
 func integer(value any) (int64, bool) {

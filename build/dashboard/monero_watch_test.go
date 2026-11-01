@@ -354,10 +354,18 @@ func TestMoneroWatchStaysPendingDuringDaemonInitialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixture.mu.Lock()
+	fixture.methods = nil
+	fixture.mu.Unlock()
 	a.moneroWatch.refresh(context.Background(), wallet)
 	status := a.moneroWatch.List()[0]
 	if status.State != "pending" || status.BalanceAtomic != "" || status.Error != "Monero wallet scan is still pending." {
 		t.Fatalf("daemon IBD claimed readiness: %#v", status)
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if len(fixture.methods) != 1 || fixture.methods[0] != "get_info" {
+		t.Fatalf("daemon IBD reached wallet RPC: %v", fixture.methods)
 	}
 }
 
