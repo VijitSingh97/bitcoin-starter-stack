@@ -9,7 +9,8 @@ FROM ghcr.io/tari-project/minotari_console_wallet:v6.1.0-mainnet@sha256:e20d5cf9
 USER 0
 COPY --from=build --chmod=0755 /tari-wallet-launcher /usr/local/bin/tari-wallet-launcher
 COPY --chmod=0644 build/tari-wallet/config.toml /var/tari/config/config.toml
-RUN mkdir -p /tari-wallet/private && chown -R 1000:1000 /tari-wallet
+RUN chmod 0755 /var/tari /var/tari/config && \
+    mkdir -p /tari-wallet/private && chown -R 1000:1000 /tari-wallet
 USER 1000:1000
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/tari-wallet-launcher"]

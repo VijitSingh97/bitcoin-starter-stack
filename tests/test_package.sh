@@ -119,11 +119,19 @@ mkdir "$fake"
 cat >"$fake/docker" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+if [ "${1:-}" = ps ] && [ "${2:-}" = -aq ]; then
+  requested_service=
+  for arg in "$@"; do
+    case "$arg" in label=com.docker.compose.service=*) requested_service=${arg##*=} ;; esac
+  done
+  if [ -n "${FAKE_EXISTING_CONFIG:-}" ]; then
+    existing_service=${FAKE_EXISTING_SERVICE:-tor}
+    [ "$requested_service" != "$existing_service" ] || printf 'existing-id\n'
+  fi
+  exit 0
+fi
 if [ "${1:-}" = inspect ]; then
   [ -n "${FAKE_EXISTING_CONFIG:-}" ] || exit 1
-  last=
-  for arg in "$@"; do last=$arg; done
-  [ -z "${FAKE_EXISTING_SERVICE:-}" ] || [ "$last" = "$FAKE_EXISTING_SERVICE" ] || exit 1
   printf '%s\n' "$FAKE_EXISTING_CONFIG"
 fi
 if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
