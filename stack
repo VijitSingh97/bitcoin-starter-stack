@@ -630,7 +630,8 @@ doctor() {
 }
 
 do_backup() {
-  mkdir -p backups
+  umask 077
+  mkdir -p "$state_dir/backups"
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   [ -f "$config_file" ] && cp "$config_file" "$tmp/config.json"
@@ -647,7 +648,7 @@ do_backup() {
   # UI-managed dashboard state is not otherwise re-derivable.
   compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
     echo "WARN: dashboard state not captured (is the dashboard container up?)"
-  out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  out="$state_dir/backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
   chmod 600 "$out"
   echo "Wrote $out (config, credentials, onion keys, dashboard state — chain data excluded, it's re-derivable)"

@@ -30,7 +30,7 @@ cat >config.json <<'EOF'
 {"bitcoin": {"node_username": "cliuser", "node_password": "clipass1"}}
 EOF
 ./configure.sh >/dev/null
-./stack backup | grep -q "Wrote backups/" || fail "backup did not report an archive"
+./stack backup | grep -q "Wrote .*backups/" || fail "backup did not report an archive"
 archive=$(ls backups/stack-backup-*.tar.gz)
 tar tzf "$archive" | grep -q "config.json" || fail "backup missing config.json"
 tar tzf "$archive" | grep -q ".env" || fail "backup missing .env"
@@ -51,6 +51,42 @@ perms=$(ls -l config.json | cut -c1-10)
 
 # restore without -y aborts on anything but yes
 echo n | ./stack restore "$archive" >/dev/null 2>&1 && fail "restore proceeded without confirmation"
+
+package_root=$tmp/package-root
+package_state=$tmp/package-state
+package_config=$tmp/package-config
+package_cwd=$tmp/package-cwd
+package_bin=$tmp/package-bin
+mkdir -p "$package_root" "$package_state" "$package_config" "$package_cwd" "$package_bin"
+cp stack "$package_root/"
+printf '{"bitcoin": {"enabled": false}}\n' >"$package_config/config.json"
+printf 'BITCOIN_ENABLED=0\n' >"$package_state/.env"
+cat >"$package_bin/docker" <<'EOS'
+#!/usr/bin/env bash
+[ "${1:-}" != inspect ]
+EOS
+chmod +x "$package_bin/docker"
+touch "$package_state/backups"
+(cd "$package_cwd" &&
+  PATH="$package_bin:$PATH" BITCOIN_STACK_ROOT="$package_root" \
+  BITCOIN_STACK_STATE_DIR="$package_state" BITCOIN_STACK_CONFIG_DIR="$package_config" \
+  BITCOIN_STACK_PACKAGE_MANAGED=apt "$package_root/stack" backup >/dev/null 2>&1) &&
+  fail "package backup ignored an unusable managed backup path"
+[ ! -e "$package_cwd/backups" ] || fail "failed package backup fell back to the caller directory"
+rm "$package_state/backups"
+package_backup_out=$(cd "$package_cwd" &&
+  PATH="$package_bin:$PATH" BITCOIN_STACK_ROOT="$package_root" \
+  BITCOIN_STACK_STATE_DIR="$package_state" BITCOIN_STACK_CONFIG_DIR="$package_config" \
+  BITCOIN_STACK_PACKAGE_MANAGED=apt "$package_root/stack" backup)
+printf '%s\n' "$package_backup_out" | grep -q "Wrote $package_state/backups/stack-backup-" ||
+  fail "package backup did not report its managed path"
+package_archive=$(find "$package_state/backups" -type f -name 'stack-backup-*.tar.gz' -print)
+[ -n "$package_archive" ] || fail "package backup was not written under managed state"
+[ ! -e "$package_cwd/backups" ] || fail "package backup was written under the caller directory"
+tar tzf "$package_archive" | grep -q 'config.json' || fail "package backup missing managed config"
+# shellcheck disable=SC2012 # fixed filename, ls is portable across package targets
+[ "$(ls -l "$package_archive" | cut -c1-10)" = "-rw-------" ] ||
+  fail "package backup archive is not mode 600"
 
 
 # ensure_agent: up/apply must start the host-control agent + install the @reboot

@@ -17,6 +17,7 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+
 fake=$tmp/docker
 cat >"$fake" <<'EOF'
 #!/bin/sh
@@ -377,11 +378,24 @@ if command -v ss >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
   listener_pid=
 fi
 
-if [ "$(uname -s)" = Darwin ] && [ -x /usr/sbin/netstat ] && command -v ifconfig >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+if [ "$(uname -s)" = Darwin ] && [ -x /usr/sbin/netstat ] && command -v ifconfig >/dev/null 2>&1; then
   lan_ip=$(ifconfig -a | awk '
     $1 == "inet" && ($2 ~ /^10\./ || $2 ~ /^192\.168\./ || $2 ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) { print $2; exit }
   ')
-  if [ -n "$lan_ip" ]; then
+  macos_port=$(/usr/sbin/netstat -an -p tcp 2>/dev/null | awk '
+    $1 ~ /^tcp(4|6|46)?$/ && $NF == "LISTEN" {
+      endpoint=$4
+      if (!match(endpoint, /\.[0-9]+$/)) next
+      address=substr(endpoint, 1, RSTART - 1)
+      port=substr(endpoint, RSTART + 1)
+      if ((address == "*" || address == "0.0.0.0" || address == "::") && port > 1024 &&
+          port != 8082 && port != 8083 && port != 8332 && port != 18081 && port != 18083) {
+        print port
+        exit
+      }
+    }
+  ')
+  if [ -n "$lan_ip" ] && [ -n "$macos_port" ]; then
     new_case real-macos-host-port-conflict
     jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
     mv "$case_root/config/config.next" "$case_root/config/config.json"
@@ -389,41 +403,15 @@ if [ "$(uname -s)" = Darwin ] && [ -x /usr/sbin/netstat ] && command -v ifconfig
     NETSTAT_BIN=/usr/sbin/netstat
     IFCONFIG_BIN=$(command -v ifconfig)
     export PORT_CONTROL_OS NETSTAT_BIN IFCONFIG_BIN
-    listener_pid=
-    listener_ready=0
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      macos_port=$((49152 + RANDOM % 10000))
-      openssl s_server -accept "0.0.0.0:$macos_port" -nocert -quiet -ign_eof </dev/null >"$case_root/listener.log" 2>&1 &
-      listener_pid=$!
-      for probe in 1 2 3 4 5 6 7 8 9 10; do
-        if "$NETSTAT_BIN" -an -p tcp 2>/dev/null | awk -v suffix=".$macos_port" '
-          $1 ~ /^tcp(4|6|46)?$/ && $NF == "LISTEN" && substr($4, length($4) - length(suffix) + 1) == suffix { found=1 }
-          END { exit !found }
-        '; then
-          listener_ready=1
-          break
-        fi
-        sleep 0.1
-      done
-      if [ "$listener_ready" = 1 ]; then
-        break
-      fi
-      kill "$listener_pid" 2>/dev/null || true
-      wait "$listener_pid" 2>/dev/null || true
-      listener_pid=
-    done
-    [ -n "$listener_pid" ] || fail "real macOS TCP listener could not bind a high port"
-    [ "$listener_ready" = 1 ] || fail "real macOS TCP listener did not start"
+    jq -S . "$case_root/config/config.json" >"$case_root/state/.approved-config.json"
     original_config=$(cat "$case_root/config/config.json")
     request "{\"id\":\"30303030303030303030303030303041\",\"changes\":[{\"port\":\"monero_rpc\",\"enabled\":true,\"bind_ip\":\"$lan_ip\",\"host_port\":$macos_port}],\"requested_at\":1000}"
     scripts/node-port-control
-    [ "$(status .error_code)" = port_in_use ] || fail "real macOS host listener error was $(status .error_code)"
+    [ "$(status .error_code)" = port_in_use ] ||
+      fail "real macOS host listener status was $(status .state): $(status .message)"
     [ "$(status .port)" = monero_rpc ] || fail "real macOS host listener named the wrong setting"
     [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "real macOS host listener changed config"
     [ ! -s "$FAKE_STACK_LOG" ] || fail "real macOS host listener invoked apply"
-    kill "$listener_pid" 2>/dev/null || true
-    wait "$listener_pid" 2>/dev/null || true
-    listener_pid=
   fi
 fi
 
@@ -558,6 +546,20 @@ scripts/node-port-control
 [ "$(status .error_code)" = port_check_failed ] || fail "malformed macOS listener inspection lacked typed status"
 [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "malformed macOS inspection changed config"
 [ ! -s "$FAKE_STACK_LOG" ] || fail "malformed macOS inspection invoked apply"
+
+new_case macos-listener-unexpected-protocol
+jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
+mv "$case_root/config/config.next" "$case_root/config/config.json"
+export PORT_CONTROL_OS=Darwin
+export FAKE_NETSTAT_LISTENERS='tcp99      0      0  *.28081                *.*                    LISTEN'
+export FAKE_IFCONFIG_ADDRESSES='\tinet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255'
+original_config=$(cat "$case_root/config/config.json")
+request '{"id":"30303030303030303030303030303045","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
+scripts/node-port-control
+[ "$(status .state)" = failed ] || fail "unexpected macOS TCP protocol did not fail safely"
+[ "$(status .error_code)" = port_check_failed ] || fail "unexpected macOS TCP protocol lacked typed status"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "unexpected macOS TCP protocol changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "unexpected macOS TCP protocol invoked apply"
 
 new_case wrong-tor
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"

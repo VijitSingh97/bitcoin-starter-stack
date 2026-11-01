@@ -12,55 +12,6 @@ contain a Homebrew formula, so the tap and install commands below are a preview
 of the next package release. Do not use them until a release publishes the
 generated formula.
 
-### Maintainer local-release check
-
-An unreleased branch uses image tags that do not exist in GHCR. Before testing
-its Homebrew formula, archive the committed revision and build every
-first-party image with the exact `VERSION` stored in that archive. Building
-images does not start a node:
-
-```sh
-source_dir=$(pwd)
-preview_dir=$(mktemp -d)
-git archive --format=tar.gz --prefix=bitcoin-starter-stack/ \
-  --output="$preview_dir/bitcoin-starter-stack.tar.gz" HEAD
-tar -xzf "$preview_dir/bitcoin-starter-stack.tar.gz" -C "$preview_dir"
-cd "$preview_dir/bitcoin-starter-stack"
-version=$(cat VERSION)
-
-for image in tor monero litecoin dogecoin bitcoincash; do
-  docker build \
-    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
-    "build/$image"
-done
-
-for image in dashboard tari-wallet; do
-  docker build \
-    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
-    --file "build/$image/Dockerfile" .
-done
-```
-
-Generate the formula from that same archive, rather than from the working tree.
-For an existing private test tap, replace its formula and reinstall it:
-
-```sh
-tap=codex/node-manager-local
-formula="$(brew --repository "$tap")/Formula/bitcoin-starter-stack.rb"
-version=$(cat VERSION)
-package_version=${version%%-*}
-PACKAGE_VERSION="$package_version" "$source_dir/scripts/build-homebrew-formula.sh" \
-  --url "file://$preview_dir/bitcoin-starter-stack.tar.gz" \
-  --output "$formula" "$preview_dir/bitcoin-starter-stack.tar.gz"
-brew reinstall "$tap/bitcoin-starter-stack"
-```
-
-The Compose services use fixed container names, so run only one Node Manager
-installation on a Docker host. On an existing test installation, do not run a
-fresh `init`; use `bitcoin-stack apply` after reinstalling so its configuration
-and chain data remain selected. For a genuinely fresh test, run
-`bitcoin-stack init` only after the matching images above are present.
-
 ## macOS
 
 Install and start [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/),
@@ -201,27 +152,55 @@ brew uninstall bitcoin-starter-stack
 
 ## Test a local release artifact
 
-The tracked formula is a release template. A release job computes the exact
-SHA-256 of the immutable tarball and renders an installable formula; a checksum
-is never guessed or copied from a different archive. To exercise the same path
-from a committed local branch:
+An unreleased branch uses image tags that do not exist in GHCR. Before testing
+its Homebrew formula, archive the committed revision and build every
+first-party image with the exact `VERSION` stored in that archive. Building
+images does not start a node:
 
 ```sh
+source_dir=$(pwd)
+preview_dir=$(mktemp -d)
+git archive --format=tar.gz --prefix=bitcoin-starter-stack/ \
+  --output="$preview_dir/bitcoin-starter-stack.tar.gz" HEAD
+tar -xzf "$preview_dir/bitcoin-starter-stack.tar.gz" -C "$preview_dir"
+cd "$preview_dir/bitcoin-starter-stack"
 version=$(cat VERSION)
-git archive --worktree-attributes --format=tar.gz \
-  --prefix=bitcoin-starter-stack/ \
-  --output=/tmp/bitcoin-starter-stack.tar.gz HEAD
-scripts/build-homebrew-formula.sh \
-  --url "file:///tmp/bitcoin-starter-stack.tar.gz" \
-  /tmp/bitcoin-starter-stack.tar.gz
-brew tap-new --no-git local/node-manager
-cp ./dist/Formula/bitcoin-starter-stack.rb \
-  "$(brew --repository local/node-manager)/Formula/bitcoin-starter-stack.rb"
-brew install local/node-manager/bitcoin-starter-stack
-brew test local/node-manager/bitcoin-starter-stack
+
+for image in tor monero litecoin dogecoin bitcoincash; do
+  docker build \
+    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
+    "build/$image"
+done
+
+for image in dashboard tari-wallet; do
+  docker build \
+    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
+    --file "build/$image/Dockerfile" .
+done
 ```
 
-This local path installs the committed `HEAD`; it does not include uncommitted
-working-tree changes. Remove the temporary tap with
-`brew untap --force local/node-manager` after testing. The published formula
-uses the matching tagged release asset URL and checksum.
+Generate the formula from that same archive, rather than from the working tree.
+Create a private test tap once, then generate its formula:
+
+```sh
+tap=local/node-manager
+brew tap-new --no-git "$tap"
+formula="$(brew --repository "$tap")/Formula/bitcoin-starter-stack.rb"
+version=$(cat VERSION)
+package_version=${version%%-*}
+PACKAGE_VERSION="$package_version" "$source_dir/scripts/build-homebrew-formula.sh" \
+  --url "file://$preview_dir/bitcoin-starter-stack.tar.gz" \
+  --output "$formula" "$preview_dir/bitcoin-starter-stack.tar.gz"
+brew install "$tap/bitcoin-starter-stack"
+brew test "$tap/bitcoin-starter-stack"
+```
+
+For an existing test tap, use its name, skip `brew tap-new`, and use `brew reinstall`
+in place of `brew install`. This installs committed `HEAD`; uncommitted source
+changes are excluded.
+
+The Compose services use fixed container names, so run only one Node Manager
+installation on a Docker host. On an existing test installation, do not run a
+fresh `init`; use `bitcoin-stack apply` after reinstalling so its configuration
+and chain data remain selected. For a genuinely fresh test, run
+`bitcoin-stack init` only after the matching images above are present.
