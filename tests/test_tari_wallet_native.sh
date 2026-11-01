@@ -13,19 +13,26 @@ done
 
 run_id=$(openssl rand -hex 6)
 image="tari-wallet-native-$run_id"
+previous_image="tari-wallet-native-previous-$run_id"
 container="tari-wallet-native-$run_id"
 control_volume="tari-wallet-native-control-$run_id"
 data_volume="tari-wallet-native-data-$run_id"
 db_copy=$(mktemp)
+previous_dockerfile=$(mktemp)
 probe_copy="build/dashboard/tari_grpc_probe_$run_id.go"
 cleanup() {
   docker container rm -f "$container" >/dev/null 2>&1 || true
   docker volume rm "$control_volume" "$data_volume" >/dev/null 2>&1 || true
-  docker image rm "$image" >/dev/null 2>&1 || true
-  rm -f "$db_copy" "$probe_copy"
+  docker image rm "$image" "$previous_image" >/dev/null 2>&1 || true
+  rm -f "$db_copy" "$previous_dockerfile" "$probe_copy"
 }
 trap cleanup EXIT
 
+sed 's|^FROM ghcr.io/tari-project/minotari_console_wallet:.*$|FROM ghcr.io/tari-project/minotari_console_wallet:v6.1.0-mainnet@sha256:e20d5cf93f33254dcd07e8c9a405ee48d20721e14fee81140319dd41ecd277f0|' \
+  build/tari-wallet/Dockerfile >"$previous_dockerfile"
+grep -Fqx 'FROM ghcr.io/tari-project/minotari_console_wallet:v6.1.0-mainnet@sha256:e20d5cf93f33254dcd07e8c9a405ee48d20721e14fee81140319dd41ecd277f0' \
+  "$previous_dockerfile"
+docker build -q -f "$previous_dockerfile" -t "$previous_image" . >/dev/null
 docker build -q -f build/tari-wallet/Dockerfile -t "$image" . >/dev/null
 docker volume create "$control_volume" >/dev/null
 docker volume create "$data_volume" >/dev/null
@@ -35,7 +42,7 @@ docker run -d --name "$container" --read-only -p 127.0.0.1::18143 \
   --tmpfs /tmp:uid=1000,gid=1000,mode=0700 -v "$control_volume:/tari-wallet" -v "$data_volume:/tari-wallet/private" \
   -e TARI_WALLET_PASSWORD=nativeproofdatabasepassword \
   -e TARI_WALLET_RPC_USER=nativeproofuser \
-  -e TARI_WALLET_RPC_PASSWORD=nativeproofrpcpassword "$image" >/dev/null
+  -e TARI_WALLET_RPC_PASSWORD=nativeproofrpcpassword "$previous_image" >/dev/null
 
 for _ in $(seq 1 20); do
   docker exec "$container" test -r /tari-wallet/control/capability.json && break
@@ -91,14 +98,43 @@ assert wallet_type["private_comms_key"] is None
 assert os.environ["VIEW_KEY"] in raw
 PY
 
-docker restart -t 25 "$container" >/dev/null
+docker stop -t 25 "$container" >/dev/null
+docker rm "$container" >/dev/null
+docker run -d --name "$container" --read-only -p 127.0.0.1::18143 \
+  --tmpfs /tmp:uid=1000,gid=1000,mode=0700 -v "$control_volume:/tari-wallet" -v "$data_volume:/tari-wallet/private" \
+  -e TARI_WALLET_PASSWORD=nativeproofdatabasepassword \
+  -e TARI_WALLET_RPC_USER=nativeproofuser \
+  -e TARI_WALLET_RPC_PASSWORD=nativeproofrpcpassword "$image" >/dev/null
 for _ in $(seq 1 30); do
   state=$(docker exec "$container" sh -c \
     'test -r /tari-wallet/control/status.json && sed -n "s/.*\"state\":\"\([^\"]*\)\".*/\1/p" /tari-wallet/control/status.json' 2>/dev/null || true)
   [ "$state" = ready ] && break
   sleep 1
 done
-[ "$state" = ready ] || { echo "FAIL: existing watch wallet did not restart password-only"; exit 1; }
+[ "$state" = ready ] || { echo "FAIL: v6.1 watch wallet did not restart under the current release"; exit 1; }
+docker exec "$container" sh -c \
+  'test "$(stat -c %a /tari-wallet/private/data)" = 700; test "$(stat -c %a /tari-wallet/private/data/wallet.db)" = 600'
+rm -f "$db_copy"
+docker cp "$container:/tari-wallet/private/data/wallet.db" "$db_copy" >/dev/null
+DB_COPY="$db_copy" VIEW_KEY="$view_key" python3 - <<'PY'
+import json
+import os
+import sqlite3
+
+with sqlite3.connect(os.environ["DB_COPY"]) as db:
+    assert db.execute("pragma journal_mode").fetchone()[0] == "wal"
+    raw = db.execute("select value from wallet_settings where key='WalletType'").fetchone()[0]
+wallet_type = json.loads(raw)["ProvidedKeys"]
+assert wallet_type["private_spend_key"] is None
+assert wallet_type["private_comms_key"] is None
+assert os.environ["VIEW_KEY"] in raw
+PY
+host_port=$(docker port "$container" 18143/tcp | sed 's/.*://')
+(
+  cd build/dashboard
+  TARI_PROOF_ENDPOINT="127.0.0.1:$host_port" TARI_PROOF_USER=nativeproofuser TARI_PROOF_PASSWORD=nativeproofrpcpassword \
+    go run "$(basename "$probe_copy")" node-stack-tari-wallet.pb.go node-stack-tari-wallet_grpc.pb.go
+)
 
 operation_id=22222222222222222222222222222222
 jq -nc --arg id "$operation_id" --arg wallet "$wallet_id" \
@@ -136,5 +172,5 @@ logs=$(docker logs "$container" 2>&1)
 ! grep -Fq "$view_key" <<<"$inspect" || { echo "FAIL: view key entered Docker metadata"; exit 1; }
 ! grep -Fq "$view_key" <<<"$logs" || { echo "FAIL: view key entered container logs"; exit 1; }
 
-echo "PASS: native Tari watch wallet is spend-incapable, restart-safe, archived privately, and fails closed without its database"
-echo "NOTE: Tari v6.1.0 stores its private view key in owner-only SQLite metadata; this proof is not a funded pruned-node balance qualification"
+echo "PASS: native Tari watch wallet upgrades from v6.1 to the current release, remains spend-incapable, archives privately, and fails closed without its database"
+echo "NOTE: Tari v6.2.0 stores its private view key in owner-only SQLite metadata; this proof is not a funded pruned-node balance qualification"

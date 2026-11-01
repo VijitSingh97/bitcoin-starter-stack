@@ -395,10 +395,6 @@ func TestMetricsAndReadAPIs(t *testing.T) {
 	if watch.Code != http.StatusOK || !strings.Contains(watch.Body.String(), `"wallets":[]`) {
 		t.Fatalf("watch = %d %q", watch.Code, watch.Body.String())
 	}
-	upgrade := request(t, handler, http.MethodGet, "/api/upgrade", "")
-	if upgrade.Code != http.StatusOK || !strings.Contains(upgrade.Body.String(), `"enabled":false`) {
-		t.Fatalf("upgrade = %d %q", upgrade.Code, upgrade.Body.String())
-	}
 }
 
 func TestFeeHistoryBoundedAndResets(t *testing.T) {
@@ -600,8 +596,7 @@ func TestRPCRejectsInvalidResponses(t *testing.T) {
 func TestSensitiveRoutesRequirePassword(t *testing.T) {
 	fixture := &rpcFixture{}
 	a, handler := testApp(t, fixture, "")
-	a.cfg.control = true
-	for _, target := range []struct{ method, path string }{{"POST", "/api/watch"}, {"DELETE", "/api/watch/Cold"}, {"POST", "/api/upgrade"}} {
+	for _, target := range []struct{ method, path string }{{"POST", "/api/watch"}, {"DELETE", "/api/watch/Cold"}} {
 		response := request(t, handler, target.method, target.path, "")
 		if response.Code != http.StatusForbidden {
 			t.Errorf("%s %s = %d", target.method, target.path, response.Code)

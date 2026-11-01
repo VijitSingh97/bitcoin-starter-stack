@@ -60,6 +60,8 @@ cleanup() {
   rmdir "$BITCOIN_DATA_DIR" 2>/dev/null || true
   rmdir "$MONERO_DATA_DIR" 2>/dev/null || true
   rmdir "$WALLET_DATA_DIR" 2>/dev/null || true
+  [ -z "${dashboard_backup_test_dir:-}" ] || rm -rf "$dashboard_backup_test_dir"
+  [ -z "${dashboard_backup_archive:-}" ] || rm -f "$dashboard_backup_archive"
   rm -f config.json .env .approved-config.json .approved.env # created by this test (guarded above)
 }
 trap cleanup EXIT
@@ -330,6 +332,24 @@ docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashbo
   fail "dashboard recreation failed"
 curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
   fail "notification settings did not survive container recreation"
+dashboard_backup_test_dir=$(mktemp -d "${TMPDIR:-/tmp}/node-manager-dashboard-backup.XXXXXX")
+dashboard_backup_archive=$(./stack backup | sed -n 's/^Wrote \(.*\) (config, .*$/\1/p')
+[ -f "$dashboard_backup_archive" ] || fail "backup did not create its archive"
+tar xzf "$dashboard_backup_archive" -C "$dashboard_backup_test_dir"
+grep -q '"alert_new_block":true' "$dashboard_backup_test_dir/dashboard_state/notification_settings.json" ||
+  fail "backup did not preserve dashboard notification settings"
+# Restore only dashboard state to avoid restarting Tor while checking saved settings.
+tar czf "$dashboard_backup_test_dir/restore.tar.gz" -C "$dashboard_backup_test_dir" dashboard_state
+settings_body='{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":false}'
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
+  -d "$settings_body" "$dashboard_url/api/settings" >/dev/null
+./stack restore -y "$dashboard_backup_test_dir/restore.tar.gz" >/dev/null || fail "dashboard state restore failed"
+docker compose exec -T dashboard sh -c 'test "$(stat -c %u:%a /state/notification_settings.json)" = 1000:600' ||
+  fail "restored dashboard notification settings lost private ownership or permissions"
+docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashboard ||
+  fail "dashboard recreation after state restore failed"
+curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/api/settings" | grep -q '"alert_new_block":true' ||
+  fail "dashboard did not load restored notification settings"
 settings_body='{"reset":true}'
 curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
   -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":false' ||

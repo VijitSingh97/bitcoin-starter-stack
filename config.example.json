@@ -97,7 +97,6 @@
     "dashboard": {
         "password": "",
         "onion": false,
-        "control": false,
         "bind_ip": "auto",
         "launch_at_boot": false,
         "port": 80

@@ -42,9 +42,14 @@ All notable changes to this project are documented here. Format follows
   launch disabled. Initial sync is uncapped by default.
 - Updated Bitcoin Core to 32.1. Runtime internet traffic is isolated behind Tor;
   package and container downloads use the host connection.
+- Updated Tari node and wallet to 6.2, dashboard gRPC/protobuf libraries, and
+  the Monero image base.
 - Release archives contain runtime code, required notices, and user guides;
   tests, parity references, benchmarks, screenshots, and maintainer tools remain
   in the repository.
+- Removed the application self-updater. Release notices remain informational;
+  users update through APT, Homebrew, or a GitHub download. Legacy `upgrade`
+  commands only print instructions.
 - Simplified the README around Ubuntu and macOS installation and refreshed its
   hero with a closer light-mode preview.
 

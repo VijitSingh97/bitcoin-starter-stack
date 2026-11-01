@@ -89,10 +89,9 @@ authorizes the host helper to download that node's versioned images. Routine sta
 and applies retain the `--pull never --no-build` policy; logging in or rebooting
 does not authorize a new download.
 
-Source installs keep a separate upgrade rule: `./stack upgrade` fetches an HTTPS
-Git origin through the running stack's Tor proxy before downloading any missing
-container images with host Docker. Absolute local Git origins and preloaded
-images support offline upgrades. SSH Git origins are rejected.
+The dashboard checks release metadata through Tor and only reports availability.
+It cannot download or apply application updates. Users update through their
+package manager or obtain a release directly from GitHub.
 
 APT, Git clones, browser downloads, and Docker registry pulls are host activity,
 outside the running container boundary. They use the host connection and may

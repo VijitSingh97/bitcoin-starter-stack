@@ -9,14 +9,21 @@ fail() {
 }
 
 [ -x scripts/node-control ] || fail "source node-control helper is not executable"
-grep -Fq 'scripts/node-control" || echo "upgrade-agent: node control check failed' stack ||
-  fail "upgrade-agent does not run node-control"
+grep -Fq 'for helper in node-control node-port-control' stack ||
+  fail "host-service does not run node controls"
 for private_runtime_path in credential-control/transaction.after port-control/request.json node-control/transaction.after; do
   git check-ignore -q "$private_runtime_path" || fail "private runtime path is not ignored: $private_runtime_path"
 done
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+legacy_pid=
+unrelated_pid=
+cleanup() {
+  [ -z "$legacy_pid" ] || kill "$legacy_pid" 2>/dev/null || true
+  [ -z "$unrelated_pid" ] || kill "$unrelated_pid" 2>/dev/null || true
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 cp stack configure.sh config.example.json "$tmp/"
 printf '1.2.3\n' >"$tmp/VERSION"
 cd "$tmp"
@@ -150,6 +157,7 @@ EOS
 cat >"$stub/flock" <<'EOS'
 #!/usr/bin/env bash
 echo "flock $*" >>"$FAKE_LOG"
+[ "${FAKE_FLOCK_BUSY:-0} ${1:-} ${2:-}" != "1 -n 6" ]
 EOS
 cat >"$stub/jq" <<'EOS'
 #!/usr/bin/env bash
@@ -322,26 +330,55 @@ grep -q '^MONERO_RPC_PASSWORD=fixture-password$' "$approved_empty/.env" || fail 
 
 echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 
-# control on -> cron entry installed, agent started
+# A legacy dashboard.control key is ignored, and only this root's loaded old agent is retired.
+sleep 60 &
+legacy_pid=$!
+sleep 60 &
+unrelated_pid=$!
+proc_fixture=$tmp/proc-fixture
+unrelated_root=$tmp/unrelated-stack
+mkdir -p "$proc_fixture/$legacy_pid" "$proc_fixture/$unrelated_pid" "$unrelated_root"
+ln -s "$tmp" "$proc_fixture/$legacy_pid/cwd"
+ln -s "$unrelated_root" "$proc_fixture/$unrelated_pid/cwd"
+printf '/bin/bash\0./stack\0upgrade-agent\0' >"$proc_fixture/$legacy_pid/cmdline"
+printf '/bin/bash\0./stack\0upgrade-agent\0' >"$proc_fixture/$unrelated_pid/cmdline"
 : >"$FAKE_LOG"
-out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+out=$(BITCOIN_STACK_PROC_ROOT="$proc_fixture" HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
+kill -0 "$legacy_pid" 2>/dev/null && fail "legacy upgrade-agent for this root survived migration"
+wait "$legacy_pid" 2>/dev/null || true
+rm -rf "$proc_fixture/$legacy_pid"
+legacy_pid=
+kill -0 "$unrelated_pid" 2>/dev/null || fail "legacy migration stopped another installation"
+kill "$unrelated_pid"
+wait "$unrelated_pid" 2>/dev/null || true
+unrelated_pid=
 awk '/^flock 8$/ { lock=NR } /docker compose .* up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
   fail "apply did not hold the config lock through Compose"
 grep -q 'docker compose .* exec -T -u 1000 dashboard sh -c .*node-runtime.json' "$FAKE_LOG" ||
   fail "apply did not synchronize dashboard node runtime state"
-grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
+grep -q "stack host-service" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
-# the agent start is backgrounded — give the stub a moment to log the call
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  grep -q 'setsid ./stack upgrade-agent' "$FAKE_LOG" 2>/dev/null && break
+  grep -q 'nohup env .*stack host-service' "$FAKE_LOG" 2>/dev/null && break
   sleep 0.3
 done
-grep -q "setsid ./stack upgrade-agent" "$FAKE_LOG" || fail "ensure_agent: agent not started"
-printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: start not reported"
+grep -q 'nohup env .*stack host-service' "$FAKE_LOG" || fail "ensure_agent: host service not started"
+printf '%s' "$out" | grep -q "host-service: started" || fail "ensure_agent: start not reported"
+
+sleep 60 &
+legacy_pid=$!
+mkdir -p "$proc_fixture/$legacy_pid"
+ln -s "$tmp" "$proc_fixture/$legacy_pid/cwd"
+printf '/bin/bash\0./stack\0upgrade-agent\0' >"$proc_fixture/$legacy_pid/cmdline"
+FAKE_FLOCK_BUSY=1 BITCOIN_STACK_PROC_ROOT="$proc_fixture" HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
+kill -0 "$legacy_pid" 2>/dev/null && fail "legacy upgrade-agent survived while host-service lock was held"
+wait "$legacy_pid" 2>/dev/null || true
+rm -rf "$proc_fixture/$legacy_pid"
+legacy_pid=
 
 # idempotent: a second apply must not duplicate the cron entry
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
-[ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
+[ "$(grep -Fc "cd $tmp && ./stack host-service" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
 grep -q 'docker compose .* up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply-port-settings >/dev/null
@@ -366,37 +403,24 @@ HOME="$tmp" PATH="$stub:$PATH" ./stack pull --policy missing >/dev/null || fail 
 grep -q 'docker compose .* pull --policy missing' "$FAKE_LOG" || fail "pull arguments did not reach Compose"
 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull failure was ignored"
 
-cat >"$stub/git" <<'EOS'
-#!/usr/bin/env bash
-case "$*" in
-  'rev-parse --is-inside-work-tree') exit 0 ;;
-  'remote get-url origin') printf '%s\n' "$FAKE_ORIGIN" ;;
-  'tag --list --sort=-v:refname') printf 'v1.2.3\n' ;;
-  *) printf 'git %s no_proxy=%s NO_PROXY=%s\n' "$*" "${no_proxy-unset}" "${NO_PROXY-unset}" >>"$FAKE_LOG" ;;
-esac
-EOS
-chmod +x "$stub/git"
 rm -f "$FAKE_LOG"
-FAKE_ORIGIN=https://github.com/example/stack.git NO_PROXY='*' no_proxy='*' PATH="$stub:$PATH" ./stack upgrade >/dev/null || fail "HTTPS upgrade check failed"
-grep -q 'http.proxy=socks5h://172.29.0.25:9050' "$FAKE_LOG" || fail "Git fetch has no Tor proxy"
-grep -q 'protocol.allow=never -c protocol.https.allow=always fetch' "$FAKE_LOG" || fail "Git fetch can switch protocols"
-grep -q 'no_proxy= NO_PROXY=$' "$FAKE_LOG" || fail "Git inherited a proxy bypass"
-rm -f "$FAKE_LOG"
-FAKE_ORIGIN=git@github.com:example/stack.git PATH="$stub:$PATH" ./stack upgrade >/dev/null 2>&1 && fail "SSH origin accepted"
-[ ! -f "$FAKE_LOG" ] || fail "SSH upgrade attempted a network fetch"
-rm -f "$stub/git"
+upgrade_out=$(PATH="$stub:$PATH" ./stack upgrade)
+printf '%s' "$upgrade_out" | grep -q 'sudo apt install --only-upgrade bitcoin-starter-stack' || fail "upgrade omitted APT instructions"
+printf '%s' "$upgrade_out" | grep -q 'brew upgrade bitcoin-starter-stack' || fail "upgrade omitted Homebrew instructions"
+printf '%s' "$upgrade_out" | grep -q 'node-manager/releases/latest' || fail "upgrade omitted GitHub releases"
+[ ! -f "$FAKE_LOG" ] || fail "upgrade touched Docker or another host service"
 
-# Upgrade control can be off while close-only LAN port controls keep the agent.
+# Host controls remain available when the ignored legacy key is false.
 echo '{"dashboard": {"password": "hunter2", "control": false}}' >config.json
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
-grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: control-off dashboard lost LAN port controls"
+grep -q "stack host-service" "$FAKE_CRON" || fail "ensure_agent: dashboard lost LAN port controls"
 grep -q "pkill" "$FAKE_LOG" && fail "ensure_agent: control-off dashboard stopped the host-control agent"
 
 # Passwordless LAN dashboards retain host controls through capability authentication.
 echo '{"dashboard": {"password": "", "control": false}}' >config.json
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
-grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: passwordless dashboard lost host controls"
+grep -q "stack host-service" "$FAKE_CRON" || fail "ensure_agent: passwordless dashboard lost host controls"
 grep -q "pkill" "$FAKE_LOG" && fail "ensure_agent: passwordless dashboard stopped host controls"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   grep -q '^setsid ' "$FAKE_LOG" 2>/dev/null && break
@@ -433,35 +457,7 @@ echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 sleep 0.5
 grep -qE '^(pkill|setsid) ' "$FAKE_LOG" && fail "ensure_agent: touched the host despite an enabled systemd unit"
-grep -q "stack upgrade-agent" "$FAKE_CRON" 2>/dev/null && fail "ensure_agent: installed cron despite systemd"
+grep -q "stack host-service" "$FAKE_CRON" 2>/dev/null && fail "ensure_agent: installed cron despite systemd"
 rm -f config.json .env "$FAKE_CRON" "$FAKE_LOG"
-
-# ./stack upgrade: the decision paths that don't touch docker (the real
-# checkout+apply is covered by tests/test_upgrade.sh).
-# (a) not a git checkout -> points at the release tarball (it exits 1, so capture
-# the output rather than piping under pipefail)
-out=$(./stack upgrade 2>&1 || true)
-printf '%s' "$out" | grep -q "Not a git checkout" || fail "upgrade: non-git should point at the tarball"
-# (b) HEAD already at the latest tag -> nothing to do
-gtmp=$(mktemp -d)
-cp stack configure.sh "$gtmp/"
-printf '9.9.9\n' >"$gtmp/VERSION"
-(
-  cd "$gtmp"
-  git init -q && git config user.email t@t && git config user.name t
-  git add -A && git commit -qm v && git tag v9.9.9
-  git remote add origin "$gtmp"
-  ./stack upgrade 2>&1 | grep -q "Already on the latest release (v9.9.9)" || {
-    echo "FAIL: upgrade should no-op when HEAD is the latest tag"
-    exit 1
-  }
-  # (c) installed newer than the newest tag -> refuse to downgrade
-  git tag -d v9.9.9 >/dev/null && git tag v0.0.1
-  ./stack upgrade 2>&1 | grep -q "newer than the latest release" || {
-    echo "FAIL: upgrade should refuse to downgrade"
-    exit 1
-  }
-) || exit 1
-rm -rf "$gtmp"
 
 echo "PASS: test_cli.sh"

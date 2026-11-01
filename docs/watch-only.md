@@ -176,7 +176,7 @@ key. No private spend key or spending-wallet seed is imported. Tari may generate
 its own internal master seed, but the imported view-only identity has no private
 spend key and cannot sign for the monitored funds.
 
-Tari v6.1 stores the private view key in plaintext inside its native SQLite
+Tari v6.2 stores the private view key in plaintext inside its native SQLite
 `wallet.db`, even when a wallet password is configured. The `tari_wallet_data`
 Docker volume is owner-only and mounted only by the wallet service; the dashboard
 shares only the `tari_wallet` control and public-metadata volume. Separate generated
@@ -193,15 +193,16 @@ The dashboard reaches the wallet through authenticated gRPC at internal port
 `9000`. Neither port is published to the host. The optional LAN port `18142` is
 the separate mining gRPC endpoint for Pithead and does not expose this wallet.
 
-The repeatable native test verifies offline view-only creation, authenticated
-gRPC reads, restart, removal, storage isolation, and failure on a missing database.
+The repeatable native test verifies offline view-only creation on v6.1, a
+persisted upgrade to v6.2, authenticated gRPC reads, removal, storage isolation,
+and failure on a missing database.
 Run it explicitly with `RUN_TARI_WALLET_NATIVE_SMOKE=1 tests/test_tari_wallet_native.sh`.
 A funded balance on a fully synced pruned node, and sustained sidecar operation
 within its separate 0.5 CPU / 512 MiB ceiling, remain unqualified. Do not treat
 startup or mocked API tests as those full-sync results. Tari pruning retains live
 unspent outputs through its
-[UTXO synchronization service](https://github.com/tari-project/tari/blob/v6.1.0/base_layer/core/src/base_node/sync/rpc/sync_utxos_task.rs),
-and its [view-only initializer](https://github.com/tari-project/tari/blob/v6.1.0/applications/minotari_console_wallet/src/init/mod.rs)
+[UTXO synchronization service](https://github.com/tari-project/tari/blob/v6.2.0/base_layer/core/src/base_node/sync/rpc/sync_utxos_task.rs),
+and its [view-only initializer](https://github.com/tari-project/tari/blob/v6.2.0/applications/minotari_console_wallet/src/init/mod.rs)
 stores no private spend key.
 
 ## Unavailable wallet balances

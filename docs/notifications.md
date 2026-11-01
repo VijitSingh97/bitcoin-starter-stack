@@ -61,7 +61,7 @@ read alerts but never change anything.
 | 🟢 **Node recovered** | That node's RPC answers again after a down alert. |
 | ✅ **Sync complete** | A node's initial sync finished. |
 | 💾 **Disk low** | A node's data volume has less than 50 GB free. Re-arms if space is freed. |
-| 🆕 **Update available** | A new stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
+| 🆕 **Update available** | A new stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only; update manually through APT, Homebrew, or [GitHub](operations.md#upgrading). |
 | 🟧 **New block** | A synced node accepted a new block. **Off by default**; Bitcoin produces about 144 a day and Monero about 720. Enable either node separately. |
 
 Every message is prefixed with the host's name (`NODE_NAME`, the box's

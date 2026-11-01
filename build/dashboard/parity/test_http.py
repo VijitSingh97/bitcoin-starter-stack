@@ -115,14 +115,14 @@ class DashboardContracts(unittest.TestCase):
         self.log = (self.state_dir / 'server.log').open('w+')
         self.start()
 
-    def start(self, password='paritypass', control='1'):
+    def start(self, password='paritypass'):
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             self.port = listener.getsockname()[1]
         self.url = f'http://127.0.0.1:{self.port}'
         env = dict(os.environ, RPC_URL=f'http://127.0.0.1:{self.fixture.server_port}',
                    RPC_USER='parityuser', RPC_PASSWORD='parityrpc', DASHBOARD_PASSWORD=password,
-                   DASHBOARD_CONTROL=control, PORT=str(self.port), DATA_DIR=str(self.state_dir),
+                   PORT=str(self.port), DATA_DIR=str(self.state_dir),
                    STATE_DIR=str(self.state_dir), WATCH_STORE=str(self.state_dir/'wallets.json'),
                    BALANCE_HISTORY=str(self.state_dir/'balance_history.json'), EVENTS_LOG=str(self.state_dir/'events.log'),
                    WATCH_WALLETS_B64='', TELEGRAM_BOT_TOKEN='', TELEGRAM_CHAT_ID='', HEALTHCHECKS_URL='', STACK_VERSION='1.31.1')
@@ -209,7 +209,7 @@ class DashboardContracts(unittest.TestCase):
         return 'watch_' + label
 
     def test_auth_covers_routes_and_static(self):
-        for path in ['/', '/metrics', '/api/settings', '/api/watch', '/api/fees', '/api/upgrade',
+        for path in ['/', '/metrics', '/api/settings', '/api/watch', '/api/fees',
                      '/static/dashboard.css', '/static/theme.js', '/static/favicon.svg']:
             status, _, headers = self.call(path, auth=False)
             self.assertEqual(status, 401, path)
@@ -237,7 +237,7 @@ class DashboardContracts(unittest.TestCase):
         bitcoin = self.bitcoin_panel(body)
         for value in ['Bitcoin Node Status', '/Satoshi:31.1.0/', '1d 1h 1m', '123 / 123', 'Sync Progress', 'Mempool:', '42 tx', '0.4', 'v1.31.1', 'id="watch"', 'data-blocks="123"']:
             self.assertIn(value, bitcoin)
-        for value in ['/static/watch.js', '/static/upgrade.js']:
+        for value in ['/static/watch.js']:
             self.assertIn(value, body)
         expected = 'Basic '+base64.b64encode(b'parityuser:parityrpc').decode()
         self.assertTrue(all(call[3] == expected for call in self.fixture.state['calls']))
@@ -338,17 +338,6 @@ class DashboardContracts(unittest.TestCase):
         self.start()
         row=self.body()['wallets'][0]
         self.assertEqual((row['state'],row['btc'],row['history']), ('stale','0.75',[0.5,0.75]))
-
-    def test_upgrade_marker_and_csrf(self):
-        self.assertEqual(self.body('/api/upgrade'), {'enabled':True,'update':'','pending':False})
-        self.assertEqual(self.call('/api/upgrade','POST',csrf=False)[0], 403)
-        self.assertEqual(self.call('/api/upgrade','POST')[0], 200)
-        self.assertEqual((self.state_dir/'upgrade.request').read_text(), 'requested\n')
-        self.assertTrue(self.body('/api/upgrade')['pending'])
-        self.stop()
-        self.start(control='0')
-        self.assertFalse(self.body('/api/upgrade')['enabled'])
-        self.assertEqual(self.call('/api/upgrade','POST')[0], 403)
 
     def test_static_and_fee_contract(self):
         status, body, headers=self.call('/static/dashboard.css')

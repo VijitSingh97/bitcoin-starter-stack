@@ -163,6 +163,8 @@ bitcoin-stack down
 
 Use `sudo` with an APT installation. Configure nodes from the dashboard and see
 [Operations](docs/operations.md) for backups, upgrades, logs, and troubleshooting.
+The dashboard reports new versions; install updates yourself through APT,
+Homebrew, or the [GitHub release](https://github.com/VijitSingh97/node-manager/releases/latest).
 
 ## Documentation
 

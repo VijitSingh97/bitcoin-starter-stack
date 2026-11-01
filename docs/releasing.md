@@ -113,11 +113,12 @@ monitored periodic re-signing so an idle project does not break every user's
 - **Homebrew:** after the generated formula PR is merged, install from the
   legacy-named `vijitsingh97/bitcoin-starter-stack` tap, whose explicit remote
   is the canonical `VijitSingh97/node-manager` repository.
-- **Git:** `./stack upgrade` fetches and applies a release through the guarded
-  Tor download path. Source builds stay in a separately controlled environment.
+- **Git:** users select the published release tag themselves, then pull its
+  images and apply it. Source builds stay in a separately controlled environment.
 - Running stacks learn about new releases from the dashboard's daily
   update check (badge + optional Telegram 🆕 alert) — see
-  [Notifications](notifications.md).
+  [Notifications](notifications.md). Notices link to manual APT, Homebrew, and
+  GitHub update instructions; the application has no self-updater.
 
 ## Homebrew formula
 

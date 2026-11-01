@@ -89,8 +89,11 @@ application authentication and therefore no password to reveal or reset.
 
 ## Upgrading
 
-APT installations are upgraded explicitly so package installation never
-restarts containers or changes node data. Run:
+The dashboard checks for new Node Manager releases daily through Tor and shows
+an informational notice. It cannot install or apply an update. Choose the same
+installation method you used originally and back up before updating.
+
+**Ubuntu / APT:**
 
 ```bash
 sudo bitcoin-stack backup
@@ -100,8 +103,27 @@ sudo bitcoin-stack pull
 sudo bitcoin-stack apply
 ```
 
-The dashboard upgrade button is unavailable for APT installations. Source and
-release-tarball installations continue to use the flows below.
+**macOS / Homebrew:**
+
+```bash
+bitcoin-stack backup
+brew update
+brew upgrade bitcoin-starter-stack
+bitcoin-stack pull
+bitcoin-stack apply
+```
+
+**GitHub download / source:** download the runtime archive from
+[the latest release](https://github.com/VijitSingh97/node-manager/releases/latest).
+Back up and stop the existing stack, replace its runtime files while preserving
+`config.json`, `.env`, data directories, and named volumes, then run
+`./stack pull && ./stack apply`. For a Git checkout, select the published release
+tag yourself before pulling images and applying. Review release notes for data
+migration requirements; node databases may not support downgrades.
+
+`bitcoin-stack upgrade` (or `./stack upgrade`) only prints instructions. It does
+not fetch, check out, download, or apply a release. Installation and container
+downloads use the host connection; see [Privacy](privacy.md#downloads-and-upgrades).
 
 The first package release is for fresh installations. Do not run
 `sudo bitcoin-stack up` beside an existing source checkout: the package refuses to
@@ -114,78 +136,16 @@ That transition must stop and back up the old deployment, set
 project's dashboard and Tor volumes. Package installation, upgrade, removal,
 and purge never perform that migration or change those data paths.
 
-- **One command: `./stack upgrade`.** Fetches the latest release tag through Tor, **backs up
-  first**, checks it out, and re-applies — pulling missing prebuilt images with
-  host Docker and recreating changed containers. The Git fetch fails closed when
-  the stack's Tor proxy is unavailable. It only ever moves **forward** (never
-  downgrades) and prints a rollback line if you need it. This is the normal way
-  to update the stack itself. (Requires a git checkout; for a tarball install,
-  unpack the latest release over it, run `./configure.sh`, then `./stack pull`
-  and `./stack apply`.)
-- **Bitcoin Core:** the stack uses the official
-  [`bitcoin/bitcoin`](https://hub.docker.com/r/bitcoin/bitcoin) image,
-  pinned to an exact version and digest in `docker-compose.yml`. Dependabot
-  files a PR when a new release is published; CI boots the stack against it
-  before you merge. To upgrade manually, bump the tag+digest and
-  `./stack pull && ./stack apply`. Chain data upgrades in place; downgrades across
-  major versions are not generally supported, so read the release notes.
-- **Dashboard / Tor images:** handled by `./stack upgrade`. Local development
-  builds require a separately controlled Tor build environment.
-- Image digests, Tor packages, and action SHAs are pinned. Dependabot proposes
-  image/action updates; Tor package pins also need review during releases.
+Node images and dependencies remain pinned to reviewed versions and digests.
+Dependabot proposes updates in pull requests. The daily dashboard check reports
+Node Manager releases, rather than individual Bitcoin Core or other node releases.
+Local development builds require a separately controlled build environment.
 
-### Upgrade button (opt-in)
-
-The dashboard can show an **Upgrade now** button when a newer release is
-available — one click instead of an SSH session. It's **off by default** and
-runs the dashboard as an unprivileged user with no host or Docker access, so
-the button never touches the host directly.
-
-Enabling it is one setting: answer **y** at the Upgrade-button question in
-`./stack init`, or set `dashboard.control: true` in `config.json` (set a
-`dashboard.password` too — the button triggers upgrades) and run
-`./stack apply`. That's it: `up`/`apply` start the host-side agent for you,
-detached and logging to `~/upgrade-agent.log`, and install a `@reboot` cron
-entry so it survives reboots (no sudo needed). Setting `control` back to
-`false` disables upgrades. The agent continues to handle validated LAN port
-requests while a dashboard password is configured; clearing that password and
-applying removes its automatic source-install startup.
-`./stack doctor` reports whether the agent is running.
-
-The source upgrade's Git fetch requires the running Tor proxy. A failed Tor check
-stops the upgrade without a direct Git fallback.
-
-The button appears only when control is on **and** an update is available. It
-writes a request marker to the dashboard's state volume; the agent sees it,
-backs up, and runs the same `./stack upgrade` as above. Without the agent
-running, clicking the button does nothing — the request just waits.
-
-**Prefer systemd?** Cron can't restart the agent if it crashes mid-run (only
-on reboot); a systemd unit can. If the unit below is enabled, the stack leaves
-agent management entirely to systemd. Run it as the user who owns the checkout
-(and is in the `docker` group) — **not root**, or git refuses the upgrade's
-`fetch`/`checkout` with "dubious ownership" on a user-owned repo. Replace
-`YOU` with that username:
-
-```ini
-# /etc/systemd/system/bitcoin-stack-upgrade-agent.service
-[Unit]
-Description=bitcoin-starter-stack dashboard upgrade agent
-After=docker.service
-Requires=docker.service
-
-[Service]
-User=YOU
-WorkingDirectory=/home/YOU/bitcoin-starter-stack
-ExecStart=/home/YOU/bitcoin-starter-stack/stack upgrade-agent
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`sudo systemctl enable --now bitcoin-stack-upgrade-agent`.
+Older source installs may have an `@reboot` entry or a manually created
+`bitcoin-stack-upgrade-agent.service`. The compatibility agent now handles only
+validated node controls; it cannot update the application. The removed
+`dashboard.control` setting is ignored. Keep the host helper running if you use
+dashboard node management.
 
 ## Backup
 
@@ -206,8 +166,8 @@ data and encrypted Monero wallet files:
 - the node's inbound-onion key (`onion_v3_private_key`, if enabled)
 - the dashboard onion keys (from the tor volume, if enabled)
 - the full `dashboard_state` volume: watch-only wallet roster and balance
-  history (including entries that still need a rescan), pending upgrade
-  request, event log, and dashboard-saved notification settings
+  history (including entries that still need a rescan), event log, and
+  dashboard-saved notification settings
   (`notification_settings.json`), plus the saved dashboard password hash
   (`dashboard_auth.json`)
 

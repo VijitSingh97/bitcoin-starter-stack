@@ -288,9 +288,8 @@ grep -q 'compose .* up ' "$log" && fail "Tari wallet deployment refusal reached 
 
 printf '%s\n' '{"dashboard":{"control":true}}' >"$config_dir/config.json"
 rm -f "$log"
-"$wrapper" apply >"$tmp/control.out" 2>&1 && fail "APT mode accepted dashboard.control"
-grep -q 'dashboard.control is unavailable' "$tmp/control.out" || fail "dashboard.control rejection is unclear"
-[ ! -e "$log" ] || fail "rejected config invoked Docker"
+"$wrapper" apply >"$tmp/control.out" 2>&1 || fail "APT mode rejected legacy dashboard.control"
+grep -q '^DASHBOARD_CONTROL=' "$env_file" && fail "legacy dashboard.control was rendered"
 
 bad=$tmp/not-a-directory
 : >"$bad"

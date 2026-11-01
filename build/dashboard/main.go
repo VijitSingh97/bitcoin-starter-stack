@@ -28,7 +28,6 @@ type config struct {
 	version                 string
 	port                    string
 	settingsPort            string
-	control                 bool
 	moneroEnabled           bool
 	moneroActive            bool
 	moneroActiveSet         bool
@@ -92,7 +91,6 @@ func envConfig() (config, error) {
 			cfg.version = "dev"
 		}
 	}
-	cfg.control = enabled(os.Getenv("DASHBOARD_CONTROL"))
 	cfg.moneroEnabled = enabled(os.Getenv("MONERO_ENABLED"))
 	cfg.moneroActive = !explicitlyDisabled(os.Getenv("MONERO_ACTIVE"))
 	cfg.moneroActiveSet = true

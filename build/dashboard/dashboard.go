@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +61,7 @@ type pageData struct {
 	LastSyncTime         string
 	InitialBlockDownload bool
 	Version              string
+	UpdateNote           string
 	CoreVersion          string
 	Uptime               string
 	Blocks               int64
@@ -120,6 +123,9 @@ type syncSnapshot struct {
 }
 
 func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger *log.Logger) (*app, error) {
+	if err := removeLegacyUpgradeRequest(cfg.stateDir); err != nil {
+		return nil, err
+	}
 	t, err := template.ParseFiles(templatePath)
 	if err != nil {
 		return nil, err
@@ -152,6 +158,14 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	a.ctx = context.Background()
 	a.fees = []float64{}
 	return a, nil
+}
+
+func removeLegacyUpgradeRequest(stateDir string) error {
+	err := os.Remove(filepath.Join(stateDir, "upgrade.request"))
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return errors.New("legacy upgrade request cleanup unavailable")
 }
 func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -246,6 +260,7 @@ func (a *app) loadingPageData() pageData {
 
 func (a *app) render(w http.ResponseWriter, data pageData) {
 	data.NodeName = a.monitor.nodeName
+	data.UpdateNote = a.monitor.UpdateNote()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := a.template.ExecuteTemplate(w, "index.html", data); err != nil {
 		a.log.Printf("render dashboard: %v", err)

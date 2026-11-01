@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -48,8 +46,6 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
 	mux.HandleFunc("POST /api/watch", a.apiWatchAdd)
 	mux.HandleFunc("DELETE /api/watch/{name}", a.apiWatchRemove)
-	mux.HandleFunc("GET /api/upgrade", a.apiUpgradeStatus)
-	mux.HandleFunc("POST /api/upgrade", a.apiUpgradeRequest)
 	mux.Handle("GET /static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, max-age=0")
 		a.static.ServeHTTP(w, r)
@@ -312,26 +308,6 @@ func (a *app) rejectDisabledBitcoin(w http.ResponseWriter) bool {
 	}
 	http.Error(w, "Bitcoin node is not configured", http.StatusServiceUnavailable)
 	return true
-}
-
-func (a *app) apiUpgradeStatus(w http.ResponseWriter, r *http.Request) {
-	_, err := os.Stat(filepath.Join(a.cfg.stateDir, "upgrade.request"))
-	writeJSON(w, map[string]any{"enabled": a.cfg.control, "update": a.monitor.UpdateNote(), "pending": err == nil})
-}
-
-func (a *app) apiUpgradeRequest(w http.ResponseWriter, r *http.Request) {
-	if !a.cfg.control || !a.hasDashboardPassword() {
-		http.Error(w, "upgrade control is disabled — set dashboard.control", 403)
-		return
-	}
-	if rejectCSRF(w, r) {
-		return
-	}
-	if err := os.WriteFile(filepath.Join(a.cfg.stateDir, "upgrade.request"), []byte("requested\n"), 0600); err != nil {
-		http.Error(w, "could not write upgrade request", 500)
-		return
-	}
-	writeJSON(w, map[string]any{"ok": true})
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

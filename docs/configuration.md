@@ -18,8 +18,6 @@ under `/var/lib/bitcoin-starter-stack`, and chain data defaults to the dedicated
 `/var/lib/bitcoin-starter-stack/data/monero` directories. Run package commands
 with `sudo`. A fresh package installation with no config or prior `.env` defaults
 to `prune_mb: 10000`; an explicit config or existing generated value always wins.
-`dashboard.control` is unavailable for APT installations because package
-upgrades require an explicit administrator command.
 
 Homebrew installations also use `bitcoin-stack`, without `sudo`. On macOS,
 configuration lives at
@@ -29,10 +27,13 @@ directories. Linuxbrew follows XDG: configuration defaults to
 `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json`, while state
 and data default below
 `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/`. Homebrew-managed
-upgrades also keep `dashboard.control` off; use `brew upgrade` explicitly.
+upgrades use `brew upgrade` explicitly.
 Linuxbrew safely initializes empty default node directories with the container
 UIDs after images are present. It does not take ownership of non-empty or custom
 paths; correct those deliberately when the startup error identifies a mismatch.
+
+The removed `dashboard.control` key is ignored in existing files. Updates are
+manual through APT, Homebrew, or GitHub; the dashboard only reports new releases.
 
 Use the command and paths for your installation:
 
@@ -163,7 +164,6 @@ shows the overridable settings with their defaults:
     "dashboard": {
         "password": "",
         "onion": false,
-        "control": false,
         "bind_ip": "auto",
         "port": 80,
         "launch_at_boot": false
@@ -234,7 +234,6 @@ shows the overridable settings with their defaults:
 | `litecoin.node_password`, `dogecoin.node_password`, `bitcoincash.node_password`, `zcash.node_password` | auto-generated | Separate RPC or proxy passwords. LAN exposure requires at least 24 letters or numbers. |
 | `dashboard.password` | `""` (off) | Optional baseline basic-auth password. A fresh dashboard is passwordless on the trusted LAN; preset this field for authentication on first start or add a password in Settings. It is separate from every node password. After a password change in the dashboard, the saved hash in `dashboard_state` takes precedence over this baseline until it is deliberately recovered; see [Operations](operations.md#dashboard-and-node-credentials). |
 | `dashboard.onion` | `false` | `true` publishes the dashboard as a Tor onion service and requires a non-empty `dashboard.password` — see [Notifications & Remote Access](notifications.md#dashboard-over-tor). |
-| `dashboard.control` | `false` | `true` shows an **Upgrade now** button on the dashboard when a newer release is available. `./stack up`/`apply` start and manage the host-side agent for you; set a `dashboard.password` too. See [Upgrade button](operations.md#upgrade-button-opt-in). |
 | `dashboard.bind_ip` | `auto` | Select the default network interface's RFC1918 IPv4 address each time configuration is rendered, falling back to `127.0.0.1` when no supported private interface is available. Set loopback for access only from this machine, or an explicit private host address. Public, wildcard, and IPv6 binds are rejected. |
 | `dashboard.port` | `80`; `8080` for a fresh Homebrew install | Host TCP port for the dashboard (`1`–`65535`). Edit this key before setup or apply it later when the default conflicts with another service. |
 | `dashboard.launch_at_boot` | `false` | Start the configured application after reboot for APT, or after login for user Homebrew services. Global Settings applies this through the host helper, including container restart policy; disabling it leaves the current application running and uses up to five retries for crashes without startup after a Docker restart. Source installs without a managed service report this control as unavailable. |
@@ -394,8 +393,8 @@ ZMQ do not display made-up credentials.
 
 For APT installs, `bitcoin-stack init`, `up`, and `apply` enable
 `bitcoin-starter-stack-port-control.timer`. Source installs reuse the host
-agent for trusted-LAN controls even when dashboard authentication and upgrades
-are off. On macOS source installs, setup starts a session helper with a private
+agent for trusted-LAN controls even when dashboard authentication is off. On
+macOS source installs, setup starts a session helper with a private
 `host-service.log`; Homebrew registers the user service automatically. No host
 control runs inside the dashboard, and it has no Docker socket. Homebrew uses
 `bitcoin-stack host-service` through `brew services` for these requests. Port settings persist across reboot because the host
@@ -458,7 +457,7 @@ one view-only wallet and has no bundled example.
 
 Keep the following in the server file: Bitcoin storage paths, pruning, indexes,
 cache and memory limits, RPC credentials and LAN exposure, `inbound_onion`, and dashboard
-password, bind address, onion publication, and `control`. They change storage, process
+password, bind address, and onion publication. They change storage, process
 limits, access, or host privileges and require an explicit server-side apply.
 
 ```bash

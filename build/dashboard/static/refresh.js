@@ -13,6 +13,14 @@ export function needsFullReload(current, next) {
   return layout(current) !== layout(next);
 }
 
+export function replaceUpdateViews(current, next) {
+  for (const id of ["update-notice", "settings-update"]) {
+    const currentView = current.getElementById(id);
+    const nextView = next.getElementById(id);
+    if (currentView && nextView) currentView.replaceWith(nextView);
+  }
+}
+
 if (typeof document !== "undefined") {
   let reloading = false;
 
@@ -28,6 +36,7 @@ if (typeof document !== "undefined") {
         }
         return;
       }
+      replaceUpdateViews(document, doc);
       const next = doc.getElementById("live");
       const cur = document.getElementById("live");
       if (next && cur) {

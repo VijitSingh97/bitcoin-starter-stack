@@ -6,7 +6,7 @@ ARG MONERO_AMD64_SHA256=ba2928962c101b609434bf8c1b43ad59ebe96c5525977284ca599d8b
 ARG MONERO_ARM64_SHA256=d20d71e6522b41eb8e549c3425f7f4622c9c9a448fc7147525393fd0a6b59703
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-# Build tools follow Bookworm security updates instead of brittle exact versions.
+# Build tools follow Debian security updates instead of brittle exact versions.
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl bzip2 \
