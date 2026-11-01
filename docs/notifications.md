@@ -174,10 +174,11 @@ port-forwarding, via a Tor onion service:
 }
 ```
 
-`./stack apply`, then read your address:
+`./stack apply`, then find the dashboard onion address in the doctor report
+(use `bitcoin-stack` instead of `./stack` for a package installation):
 
 ```bash
-docker exec tor cat /var/lib/tor/dashboard_onion/hostname
+./stack doctor
 ```
 
 Open that `.onion` in [Tor Browser](https://www.torproject.org/). The address

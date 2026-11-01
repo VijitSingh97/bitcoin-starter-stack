@@ -211,6 +211,7 @@ gives their containers and named volumes project-scoped names. Existing
 installations keep their saved `bitcoin-starter-stack-brew` project and volumes,
 so reinstalling does not silently select an empty replacement chain. Use
 `bitcoin-stack` commands instead of addressing containers by generated name.
+Run one installation per Docker host, with all selected chains in that stack.
 On an existing test installation, do not run a fresh `init`; use
 `bitcoin-stack apply` after reinstalling so its configuration and chain data
 remain selected. For a genuinely fresh test, run `bitcoin-stack init` only

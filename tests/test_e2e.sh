@@ -5,7 +5,7 @@
 # This is the test that catches config-plumbing bugs the static contract
 # test can't.
 #
-# Runs real containers (fixed names/ports) and writes config.json/.env in
+# Runs real containers (project-scoped names and a fixed dashboard port) and writes config.json/.env in
 # the checkout, so it self-skips unless in CI or explicitly requested, and
 # refuses to run where a config already exists.
 set -euo pipefail
@@ -22,11 +22,27 @@ if [ -f config.json ] || [ -f .env ] || [ -f .approved-config.json ] || [ -f .ap
   exit 1
 fi
 
+export BITCOIN_STACK_PROJECT_NAME="node-manager-e2e-$$-$RANDOM"
+export COMPOSE_PROJECT_NAME="$BITCOIN_STACK_PROJECT_NAME"
+
 fail() {
   echo "FAIL: $1"
   docker compose ps || true
   docker compose logs --tail 50 || true
   exit 1
+}
+
+service_id() {
+  docker compose ps -q "$1"
+}
+
+service_inspect() {
+  local service id
+  service=$1
+  shift
+  id=$(service_id "$service")
+  [ -n "$id" ] || return 1
+  docker inspect "$id" "$@"
 }
 
 BITCOIN_DATA_DIR=$(mktemp -d)
@@ -114,7 +130,7 @@ if [ -z "$rpc_user" ] || [ -z "$rpc_pass" ] || [ -z "$monero_rpc_user" ] || [ -z
 fi
 
 wallet_rpc() {
-  printf '%s' "$1" | docker exec -i monero-wallet curl --silent --show-error --fail --digest \
+  printf '%s' "$1" | docker compose exec -T monero-wallet curl --silent --show-error --fail --digest \
     --user "$monero_wallet_rpc_user:$monero_wallet_rpc_pass" -H 'content-type: application/json' \
     --data-binary @- http://127.0.0.1:18082/json_rpc
 }
@@ -122,11 +138,11 @@ wallet_rpc() {
 docker compose up -d --pull never --no-build --wait --wait-timeout 300 ||
   fail "stack did not reach healthy within 5 minutes"
 # --wait passing also proves the cookie-based bitcoin healthcheck works
-docker exec dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*_test.go" -o -name tests -o -name parity)"' ||
+docker compose exec -T dashboard sh -c 'test -z "$(find /app -name "*.test.mjs" -o -name "*_test.go" -o -name tests -o -name parity)"' ||
   fail "dashboard image includes development-only files"
 
 # rpcauth accepts the generated plaintext password end to end
-docker exec bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" getblockchaininfo |
+docker compose exec -T bitcoin bitcoin-cli -rpcuser="$rpc_user" -rpcpassword="$rpc_pass" getblockchaininfo |
   grep -q '"chain"' || fail "RPC rejected the generated password against the rpcauth hash"
 if [ "$test_lan_rpc" = true ]; then
   curl --noproxy '*' -fsS --user "$rpc_user:$rpc_pass" -H 'content-type: application/json' \
@@ -135,23 +151,23 @@ if [ "$test_lan_rpc" = true ]; then
     fail "LAN RPC relay did not authenticate to Core"
 fi
 
-docker exec monero /usr/local/bin/monero-healthcheck || fail "Monero authenticated health check failed"
-docker exec monero-wallet /usr/local/bin/monero-wallet-healthcheck || fail "Monero wallet RPC health check failed"
-wallet_ports=$(docker inspect monero-wallet --format '{{json .HostConfig.PortBindings}}')
+docker compose exec -T monero /usr/local/bin/monero-healthcheck || fail "Monero authenticated health check failed"
+docker compose exec -T monero-wallet /usr/local/bin/monero-wallet-healthcheck || fail "Monero wallet RPC health check failed"
+wallet_ports=$(service_inspect monero-wallet --format '{{json .HostConfig.PortBindings}}')
 [ "$wallet_ports" = "{}" ] || [ "$wallet_ports" = "null" ] ||
   fail "Monero wallet RPC published a host port"
-monero_info=$(docker exec monero curl --silent --show-error --fail --digest \
+monero_info=$(docker compose exec -T monero curl --silent --show-error --fail --digest \
   --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
   --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' http://127.0.0.1:18085/json_rpc) ||
   fail "Monero internal RPC rejected its generated Digest credentials"
 printf '%s' "$monero_info" | jq -e '.result.restricted == false and (.result.height | type == "number") and (.result.version | length > 0) and .result.start_time > 0' >/dev/null ||
   fail "Monero internal RPC redacted node health fields"
-if docker exec monero curl --silent --fail --digest --user "$monero_rpc_user:wrong" \
+if docker compose exec -T monero curl --silent --fail --digest --user "$monero_rpc_user:wrong" \
   -H 'content-type: application/json' --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' \
   http://127.0.0.1:18085/json_rpc >/dev/null 2>&1; then
   fail "Monero RPC accepted an invalid password"
 fi
-restricted_info=$(docker exec monero curl --silent --show-error --fail --digest \
+restricted_info=$(docker compose exec -T monero curl --silent --show-error --fail --digest \
   --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
   --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_info"}' http://127.0.0.1:18081/json_rpc) ||
   fail "Monero restricted RPC rejected its generated Digest credentials"
@@ -159,7 +175,7 @@ printf '%s' "$restricted_info" | jq -e '.result.restricted == true and (.result.
   fail "Monero public RPC is not restricted"
 printf '%s' "$restricted_info" | jq -e '(.result.version // "") == "" and (.result.start_time // 0) == 0 and (.result.pruning_seed // 0) == 0' >/dev/null ||
   fail "Monero restricted RPC exposed private node metadata"
-restricted_admin=$(docker exec monero curl --silent --show-error --digest \
+restricted_admin=$(docker compose exec -T monero curl --silent --show-error --digest \
   --user "$monero_rpc_user:$monero_rpc_pass" -H 'content-type: application/json' \
   --data-binary '{"jsonrpc":"2.0","id":"e2e","method":"get_connections"}' http://127.0.0.1:18081/json_rpc) ||
   fail "Monero restricted RPC request failed before returning its denial"
@@ -174,7 +190,7 @@ if [ "$test_lan_rpc" = true ]; then
 fi
 
 # ...but the plaintext password is nowhere in the bitcoin container's config
-docker inspect bitcoin | grep "$rpc_pass" >/dev/null && fail "plaintext RPC password leaked into the bitcoin container"
+service_inspect bitcoin | grep "$rpc_pass" >/dev/null && fail "plaintext RPC password leaked into the bitcoin container"
 
 # Dashboard enforces basic auth when a password is set
 code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' "$dashboard_url")
@@ -212,7 +228,7 @@ source_view_key=$(wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"query_key","
   wallet_fail "throwaway Monero view key was unavailable"
 wallet_rpc '{"jsonrpc":"2.0","id":"e2e","method":"close_wallet"}' >/dev/null ||
   wallet_fail "throwaway Monero fixture wallet could not be closed"
-docker exec -e FIXTURE_NAME="$fixture_name" monero-wallet sh -c 'rm -f "/wallets/$FIXTURE_NAME" "/wallets/$FIXTURE_NAME.keys"' ||
+docker compose exec -T -e FIXTURE_NAME="$fixture_name" monero-wallet sh -c 'rm -f "/wallets/$FIXTURE_NAME" "/wallets/$FIXTURE_NAME.keys"' ||
   wallet_fail "throwaway Monero fixture wallet could not be removed"
 
 watch_add=$(jq -nc --arg address "$source_address" --arg view_key "$source_view_key" \
@@ -237,7 +253,7 @@ printf '%s' "$watch_list" | jq -e --arg id "$watch_id" '.wallets | length == 1 a
   wallet_fail "initial-sync wallet did not remain safely pending"
 printf '%s' "$watch_list" | grep -Fq "$source_view_key" && wallet_fail "watch-only list disclosed the private view key"
 printf '%s' "$watch_list" | grep -Fq 'wallet_file' && wallet_fail "watch-only list disclosed its internal wallet filename"
-docker exec -e NEEDLE="$source_view_key" dashboard sh -c 'test "$(stat -c %a /state/monero_watch.json)" = 600 && ! grep -Fq "$NEEDLE" /state/monero_watch.json' ||
+docker compose exec -T -e NEEDLE="$source_view_key" dashboard sh -c 'test "$(stat -c %a /state/monero_watch.json)" = 600 && ! grep -Fq "$NEEDLE" /state/monero_watch.json' ||
   wallet_fail "watch-only state permissions or view-key retention are unsafe"
 if docker compose logs dashboard monero-wallet 2>&1 | grep -Fq "$source_view_key"; then
   wallet_fail "watch-only services logged the private view key"
@@ -264,7 +280,7 @@ unset watch_add unsafe create_request create_response watch_response watch_list 
 # (Core's "tor: Got service ID" log line only exists with -debug=tor.)
 onion_ok=""
 for _ in $(seq 1 24); do
-  if docker exec bitcoin bitcoin-cli -datadir=/data getnetworkinfo | grep -q '\.onion'; then
+  if docker compose exec -T bitcoin bitcoin-cli -datadir=/data getnetworkinfo | grep -q '\.onion'; then
     onion_ok=1
     break
   fi
@@ -273,7 +289,7 @@ done
 [ -n "$onion_ok" ] || fail "bitcoind never registered an onion service with tor"
 
 # The dashboard hidden service is provisioned (keys + hostname generated)
-docker exec tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' ||
+docker compose exec -T tor cat /var/lib/tor/dashboard_onion/hostname | grep -q '\.onion$' ||
   fail "dashboard onion hostname was not provisioned"
 
 # Prometheus metrics behind the same auth
@@ -295,7 +311,7 @@ code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' -u x:e2eDashboardSha
 curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: fetch' -H 'Content-Type: application/json' \
   -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":true' ||
   fail "authenticated LAN notification settings write failed"
-docker exec dashboard sh -c 'test "$(stat -c %a /state/notification_settings.json)" = 600' ||
+docker compose exec -T dashboard sh -c 'test "$(stat -c %a /state/notification_settings.json)" = 600' ||
   fail "saved notification settings are not private"
 docker compose up -d --no-deps --force-recreate --wait --wait-timeout 300 dashboard ||
   fail "dashboard recreation failed"
@@ -306,11 +322,11 @@ curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 -H 'X-Requested-With: 
   -d "$settings_body" "$dashboard_url/api/settings" | grep -q '"overridden":false' ||
   fail "notification reset did not restore the server configuration"
 
-restarts=$(docker inspect tor --format '{{.RestartCount}}')
-docker exec tor sh -c 'kill "$(pidof socat)"'
+restarts=$(service_inspect tor --format '{{.RestartCount}}')
+docker compose exec -T tor sh -c 'kill "$(pidof socat)"'
 forwarder_recovered=""
 for _ in $(seq 1 30); do
-  current=$(docker inspect tor --format '{{.RestartCount}}')
+  current=$(service_inspect tor --format '{{.RestartCount}}')
   if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
     forwarder_recovered=1
     break
@@ -319,11 +335,11 @@ for _ in $(seq 1 30); do
 done
 [ -n "$forwarder_recovered" ] || fail "Tor/dashboard forwarder did not restart cleanly"
 
-restarts=$(docker inspect tor --format '{{.RestartCount}}')
-docker exec tor sh -c 'kill "$(pidof tor)"'
+restarts=$(service_inspect tor --format '{{.RestartCount}}')
+docker compose exec -T tor sh -c 'kill "$(pidof tor)"'
 tor_recovered=""
 for _ in $(seq 1 30); do
-  current=$(docker inspect tor --format '{{.RestartCount}}')
+  current=$(service_inspect tor --format '{{.RestartCount}}')
   if [ "$current" -gt "$restarts" ] && curl --noproxy '*' -sf -u x:e2eDashboardSharedPassword123 "$dashboard_url/metrics" | grep -q "bitcoin_node_up 1"; then
     tor_recovered=1
     break
@@ -337,71 +353,71 @@ done
 # application network namespaces; every attempt must fail closed.
 tor_bootstrapped=""
 for _ in $(seq 1 30); do
-  if docker logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
+  if docker compose logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
     tor_bootstrapped=1
     break
   fi
   sleep 10
 done
 [ -n "$tor_bootstrapped" ] || fail "Tor never reached the public network"
-helper_image=$(docker inspect dashboard --format '{{.Config.Image}}')
-docker exec dashboard sh -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.26 8332' ||
+helper_image=$(service_inspect dashboard --format '{{.Config.Image}}')
+docker compose exec -T dashboard sh -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.26 8332' ||
   fail "dashboard network probes are unavailable or cannot reach local RPC"
-docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" \
+docker run --rm --pull never --network "container:$(service_id bitcoin)" --entrypoint /bin/sh "$helper_image" \
   -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.25 9050' ||
   fail "bitcoin network probes are unavailable or cannot reach local Tor"
-docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" \
+docker run --rm --pull never --network "container:$(service_id monero)" --entrypoint /bin/sh "$helper_image" \
   -c 'command -v nc >/dev/null && command -v nslookup >/dev/null && nc -z -w 3 172.29.0.25 9050' ||
   fail "Monero network probes are unavailable or cannot reach local Tor"
 docker compose stop tor >/dev/null
-[ "$(docker inspect bitcoin --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+[ "$(service_inspect bitcoin --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
   fail "bitcoin does not have loopback-only DNS configured"
-[ "$(docker inspect dashboard --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+[ "$(service_inspect dashboard --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
   fail "dashboard does not have loopback-only DNS configured"
-[ "$(docker inspect monero --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
+[ "$(service_inspect monero --format '{{json .HostConfig.Dns}}')" = '["127.0.0.1"]' ] ||
   fail "Monero does not have loopback-only DNS configured"
-if docker exec dashboard nc -z -w 3 1.1.1.1 443; then
+if docker compose exec -T dashboard nc -z -w 3 1.1.1.1 443; then
   fail "dashboard reached a public IP directly with Tor offline"
 fi
-if docker exec dashboard nc -z -w 3 2606:4700:4700::1111 443; then
+if docker compose exec -T dashboard nc -z -w 3 2606:4700:4700::1111 443; then
   fail "dashboard reached a public IPv6 address directly with Tor offline"
 fi
-if docker exec dashboard nslookup example.com >/dev/null 2>&1; then
+if docker compose exec -T dashboard nslookup example.com >/dev/null 2>&1; then
   fail "dashboard resolved public DNS with Tor offline"
 fi
-if docker exec dashboard nslookup example.com 8.8.8.8 >/dev/null 2>&1; then
+if docker compose exec -T dashboard nslookup example.com 8.8.8.8 >/dev/null 2>&1; then
   fail "dashboard reached a public DNS server directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
+if docker run --rm --pull never --network "container:$(service_id bitcoin)" --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
   fail "bitcoin reached a public IP directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
+if docker run --rm --pull never --network "container:$(service_id bitcoin)" --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
   fail "bitcoin reached a public IPv6 address directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
+if docker run --rm --pull never --network "container:$(service_id bitcoin)" --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
   fail "bitcoin resolved public DNS with Tor offline"
 fi
-if docker run --rm --pull never --network container:bitcoin --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
+if docker run --rm --pull never --network "container:$(service_id bitcoin)" --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
   fail "bitcoin reached a public DNS server directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
+if docker run --rm --pull never --network "container:$(service_id monero)" --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 1.1.1.1 443'; then
   fail "Monero reached a public IP directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
+if docker run --rm --pull never --network "container:$(service_id monero)" --entrypoint /bin/sh "$helper_image" -c 'nc -z -w 3 2606:4700:4700::1111 443'; then
   fail "Monero reached a public IPv6 address directly with Tor offline"
 fi
-if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
+if docker run --rm --pull never --network "container:$(service_id monero)" --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com' >/dev/null 2>&1; then
   fail "Monero resolved public DNS with Tor offline"
 fi
-if docker run --rm --pull never --network container:monero --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
+if docker run --rm --pull never --network "container:$(service_id monero)" --entrypoint /bin/sh "$helper_image" -c 'nslookup example.com 8.8.8.8' >/dev/null 2>&1; then
   fail "Monero reached a public DNS server directly with Tor offline"
 fi
 docker compose start tor >/dev/null
 for _ in $(seq 1 30); do
-  [ "$(docker inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] && break
+  [ "$(service_inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] && break
   sleep 2
 done
-[ "$(docker inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] ||
+[ "$(service_inspect tor --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" = "healthy" ] ||
   fail "Tor did not recover after fail-closed egress test"
 
 # Egress audit: every ESTABLISHED connection from the bitcoin and dashboard
@@ -409,9 +425,9 @@ done
 # xx001DAC in /proc/net/tcp little-endian hex) — i.e. everything goes to tor
 # or intra-stack RPC, and nothing dials clearnet directly.
 for c in bitcoin monero monero-wallet dashboard; do
-  bad=$(docker exec "$c" awk 'NR>1 && $4=="01" {split($3,r,":"); if (r[1] !~ /001DAC$/) print r[1]":"r[2]}' /proc/net/tcp 2>/dev/null || true)
+  bad=$(docker compose exec -T "$c" awk 'NR>1 && $4=="01" {split($3,r,":"); if (r[1] !~ /001DAC$/) print r[1]":"r[2]}' /proc/net/tcp 2>/dev/null || true)
   [ -z "$bad" ] || fail "clearnet egress from $c: $bad"
-  bad6=$(docker exec "$c" sh -c 'awk "NR>1 && \$4==\"01\" {print \$3}" /proc/net/tcp6 2>/dev/null' || true)
+  bad6=$(docker compose exec -T "$c" sh -c 'awk "NR>1 && \$4==\"01\" {print \$3}" /proc/net/tcp6 2>/dev/null' || true)
   [ -z "$bad6" ] || fail "unexpected IPv6 egress from $c: $bad6"
 done
 
@@ -425,7 +441,7 @@ sync_starts() { # $1: label for messages
   # vs. bitcoind not finding onion peers through a working Tor
   boot_ok=""
   for _ in $(seq 1 30); do
-    if docker logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
+    if docker compose logs tor 2>&1 | grep "Bootstrapped 100" >/dev/null; then
       boot_ok=1
       break
     fi
@@ -437,7 +453,7 @@ sync_starts() { # $1: label for messages
   for _ in $( # up to 20 min for the first peer: cold onion discovery is slow
     seq 1 120
   ); do
-    conns=$(docker exec bitcoin bitcoin-cli -datadir=/data getnetworkinfo | grep -o '"connections": *[0-9]*' | grep -o '[0-9]*' || echo 0)
+    conns=$(docker compose exec -T bitcoin bitcoin-cli -datadir=/data getnetworkinfo | grep -o '"connections": *[0-9]*' | grep -o '[0-9]*' || echo 0)
     if [ "${conns:-0}" -ge 1 ]; then
       peer_ok=1
       break
@@ -446,7 +462,7 @@ sync_starts() { # $1: label for messages
   done
   [ -n "$peer_ok" ] || fail "$1: no peers found over Tor within 20 minutes (tor was bootstrapped)"
 
-  clearnet_peers=$(docker exec bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep '"addr":' | grep -v '\.onion' || true)
+  clearnet_peers=$(docker compose exec -T bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep '"addr":' | grep -v '\.onion' || true)
   [ -z "$clearnet_peers" ] || fail "$1: non-onion peer(s) connected: $clearnet_peers"
 
   # "sync started" = headers flowing. Core's headers PRESYNC (redownload
@@ -458,8 +474,8 @@ sync_starts() { # $1: label for messages
   for _ in $( # 10 min for the first headers to flow
     seq 1 60
   ); do
-    hdrs=$(docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo | grep -o '"headers": *[0-9]*' | grep -o '[0-9]*' || echo 0)
-    presync=$(docker exec bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep -oE '"presynced_headers": [0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1 || echo 0)
+    hdrs=$(docker compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo | grep -o '"headers": *[0-9]*' | grep -o '[0-9]*' || echo 0)
+    presync=$(docker compose exec -T bitcoin bitcoin-cli -datadir=/data getpeerinfo | grep -oE '"presynced_headers": [0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1 || echo 0)
     if [ "${hdrs:-0}" -gt 0 ] || [ "${presync:-0}" -gt 0 ]; then
       hdr_ok=1
       break

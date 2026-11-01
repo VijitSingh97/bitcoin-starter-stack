@@ -510,7 +510,7 @@ read the cookie; bitcoind gets `-listen=1 -listenonion=1 -torcontrol=...`.
 Confirm it worked with:
 
 ```bash
-docker logs bitcoin 2>&1 | grep "tor: Got service ID"
+./stack logs bitcoin 2>&1 | grep "tor: Got service ID"
 ```
 
 No host port is opened — inbound arrives through the Tor network only.

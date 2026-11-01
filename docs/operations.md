@@ -3,7 +3,9 @@
 ## Day-to-day commands
 
 Use `./stack` for operations; it prevents implicit image downloads and builds.
-The explicit `pull` command uses the host's existing Docker settings.
+The explicit `pull` command uses the host's existing Docker settings. Package
+installs use `bitcoin-stack` instead of `./stack` (with `sudo` for APT). Direct
+`docker compose` examples run from a configured source checkout.
 
 | Command | What it does |
 |---|---|
@@ -15,7 +17,7 @@ The explicit `pull` command uses the host's existing Docker settings.
 | `./stack status` | Container + health summary; exits non-zero if anything is down. |
 | `./stack doctor` | Read-only health report: deps, config freshness, disk, containers, sync state, tor bootstrap, onion addresses. |
 | `./stack backup` / `restore [-y] <archive>` | See [Backup](#backup). |
-| `docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
+| `docker compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
 
 ## Health checks
 
@@ -29,7 +31,9 @@ the core Bitcoin deployment:
 - `dashboard` — any HTTP response on port 8000 (inside the container); a
   401 under basic auth still counts as healthy.
 
-`docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
+`docker ps` shows the state. Run `./stack doctor` or `bitcoin-stack doctor` for
+a health report. From a source checkout,
+`docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q bitcoin)"`
 shows recent probe output when diagnosing.
 
 ## Startup and external configuration changes

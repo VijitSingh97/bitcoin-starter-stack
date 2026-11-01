@@ -17,7 +17,7 @@ fail() {
   echo "FAIL: $1"
   exit 1
 }
-bcli() { docker exec bitcoin bitcoin-cli -datadir=/data "$@"; }
+bcli() { docker compose exec -T bitcoin bitcoin-cli -datadir=/data "$@"; }
 
 info=$(bcli getblockchaininfo) || fail "bitcoind RPC unreachable"
 echo "$info" | grep -q '"initialblockdownload": false' || fail "node is still in initial block download"
