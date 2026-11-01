@@ -169,7 +169,8 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
           git fetch --no-tags origin main:refs/remotes/origin/main
           git merge-base --is-ancestor HEAD refs/remotes/origin/main
-          scripts/build-deb.sh
+          scripts/resolve-runtime-images.sh >"$RUNNER_TEMP/runtime-images.json"
+          RUNTIME_IMAGE_DIGESTS_FILE="$RUNNER_TEMP/runtime-images.json" scripts/build-deb.sh
           dpkg-deb --info dist/*.deb
       - name: Build signed APT feed
         env:
@@ -189,8 +190,13 @@ jobs:
           mkdir -p "$state/lists/partial" "$state/download"
           cp -R public "$state/feed"
           chmod -R a+rX "$state/feed"
-          printf 'deb [signed-by=%s/feed/bitcoin-starter-stack.asc] file:%s/feed ./\n' "$state" "$state" >"$state/sources.list"
-          options=(-o "Dir::Etc::sourcelist=$state/sources.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/lists")
+          cat >"$state/sources.sources" <<EOF
+          Types: deb
+          URIs: file:$state/feed/
+          Suites: ./
+          Signed-By: $state/feed/bitcoin-starter-stack.asc
+          EOF
+          options=(-o "Dir::Etc::sourcelist=$state/sources.sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/lists")
           sudo apt-get "${options[@]}" update
           cd "$state/download"
           sudo apt-get "${options[@]}" download bitcoin-starter-stack

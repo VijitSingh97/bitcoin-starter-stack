@@ -144,8 +144,10 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build and test the package
         run: |
-          shellcheck scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/build-homebrew-formula.sh scripts/node-resource-profile scripts/node-port-control scripts/node-control tests/test_package.sh tests/test_apt.sh tests/test_homebrew.sh tests/test_host_install.sh tests/test_brew_data.sh tests/test_resource_profile.sh tests/test_port_control.sh tests/test_node_control.sh
+          shellcheck packaging/postinst scripts/resolve-runtime-images.sh scripts/bitcoin-stack scripts/build-deb.sh scripts/build-apt.sh scripts/build-homebrew-formula.sh scripts/node-resource-profile scripts/node-port-control scripts/node-control tests/test_package.sh tests/test_package_upgrade.sh tests/test_runtime_images.sh tests/test_apt.sh tests/test_homebrew.sh tests/test_host_install.sh tests/test_brew_data.sh tests/test_resource_profile.sh tests/test_port_control.sh tests/test_node_control.sh
           tests/test_package.sh
+          tests/test_package_upgrade.sh
+          tests/test_runtime_images.sh
           tests/test_apt.sh
           tests/test_homebrew.sh
           tests/test_host_install.sh
@@ -153,7 +155,7 @@ jobs:
           tests/test_resource_profile.sh
           tests/test_port_control.sh
           tests/test_node_control.sh
-      - name: Verify inert install, upgrade, and removal
+      - name: Verify fresh install, reinstall, and removal preserve state
         run: |
           printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
           chmod 755 /usr/sbin/policy-rc.d

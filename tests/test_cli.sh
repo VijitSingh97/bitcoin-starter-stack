@@ -119,7 +119,8 @@ case " $* " in
   *' compose '*' pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
   *' compose '*' up '*) [ "${FAKE_UP_FAIL:-0}" != 1 ]; exit ;;
   *' ps -aq '*'com.docker.compose.service=dashboard'*) printf 'dashboard-id\n'; exit ;;
-  *'com.docker.compose.project.config_files'*) exit 1 ;;
+  *'com.docker.compose.project.config_files'*) printf '%s/docker-compose.yml\n' "$PWD" ;;
+  *'com.docker.compose.project.working_dir'*) printf '%s\n' "$PWD" ;;
   *' inspect --format {{.State.Running}} dashboard-id '*) printf 'true\n' ;;
 esac
 exit 0

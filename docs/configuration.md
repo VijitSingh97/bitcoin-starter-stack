@@ -32,8 +32,10 @@ Linuxbrew safely initializes empty default node directories with the container
 UIDs after images are present. It does not take ownership of non-empty or custom
 paths; correct those deliberately when the startup error identifies a mismatch.
 
-The removed `dashboard.control` key is ignored in existing files. Updates are
-manual through APT, Homebrew, or GitHub; the dashboard only reports new releases.
+The removed `dashboard.control` key is ignored in existing files. The dashboard
+only reports new releases. APT upgrades automatically activate new release images
+for running services using approved settings; Homebrew and GitHub updates remain
+manual. See [Operations](operations.md#upgrading).
 
 Use the command and paths for your installation:
 

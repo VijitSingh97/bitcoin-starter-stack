@@ -17,6 +17,8 @@ tests/test_homebrew.sh
 tests/test_brew_data.sh
 tests/test_release.sh
 tests/test_package.sh
+tests/test_package_upgrade.sh
+tests/test_runtime_images.sh
 tests/test_resource_profile.sh
 tests/test_port_control.sh
 tests/test_node_control.sh

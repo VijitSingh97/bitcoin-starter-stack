@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+HOME=/root
+export PATH HOME
+
+[ "${1:-}" = configure ] || exit 0
+old_version=${2:-}
+[ -n "$old_version" ] || exit 0
+new_version='@VERSION@'
+/usr/bin/dpkg --compare-versions "$new_version" gt "$old_version" || exit 0
+
+state=/var/lib/bitcoin-starter-stack
+[ -s "$state/.env" ] && [ -s "$state/.approved-config.json" ] && [ -s "$state/.approved.env" ] || exit 0
+
+if ! env -i \
+  HOME=/root \
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  DEBIAN_FRONTEND=noninteractive \
+  /usr/bin/bitcoin-stack package-upgrade </dev/null; then
+  echo "WARNING: Node Manager was installed, but its running containers could not be updated." >&2
+  echo "After fixing Docker, retry with: sudo bitcoin-stack package-upgrade" >&2
+fi
+exit 0

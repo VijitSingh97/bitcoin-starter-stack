@@ -376,7 +376,7 @@ func TestDashboardUpdateNoticeIsInformational(t *testing.T) {
 	for _, want := range []string{
 		"stack v1.3.0 available (running v1.2.0)",
 		"sudo apt install --only-upgrade bitcoin-starter-stack",
-		"sudo bitcoin-stack pull",
+		"bitcoin-stack pull",
 		"brew upgrade bitcoin-starter-stack",
 		"bitcoin-stack apply",
 		"https://github.com/VijitSingh97/node-manager/releases/latest",
@@ -387,6 +387,9 @@ func TestDashboardUpdateNoticeIsInformational(t *testing.T) {
 	}
 	if strings.Contains(page, "Upgrade now") || strings.Contains(page, "/static/upgrade.js") {
 		t.Fatal("page still offers an in-app upgrade")
+	}
+	if strings.Contains(page, "sudo bitcoin-stack pull") || strings.Contains(page, "sudo bitcoin-stack apply") {
+		t.Fatal("APT instructions still require manual container activation")
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		resp := fixture.request(t, method, "/api/upgrade")

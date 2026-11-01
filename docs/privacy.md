@@ -102,8 +102,10 @@ This does not add an external route to the Bitcoin or dashboard containers.
 
 Version `v1.32.0` publishes the first signed APT feed. Its dedicated signing-key
 fingerprint is `72FD 6567 54BD 7534 E274 360A 3707 0C27 30C0 B4EA`. Wait for the
-release APT job and GitHub Pages deployment to succeed, then install the feed
-only after verifying the downloaded key against that committed fingerprint:
+release APT job and GitHub Pages deployment to succeed. The standard
+[APT setup](../README.md#ubuntu-install-with-apt) downloads the key over HTTPS
+and scopes it to this repository with `Signed-By`. To verify the key against the
+published fingerprint before installing it, use this optional procedure:
 
 ```bash
 sudo apt update
@@ -132,18 +134,26 @@ actual=$(awk -F: '
   echo 'APT signing key does not contain exactly the expected primary key.' >&2
   exit 1
 }
-sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
-echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/node-manager ./' |
-  sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo install -m 0644 "$key" /etc/apt/keyrings/bitcoin-starter-stack.asc
+sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://vijitsingh97.github.io/node-manager/
+Suites: ./
+Signed-By: /etc/apt/keyrings/bitcoin-starter-stack.asc
+EOF
 sudo apt update
 sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
 
-APT package installation remains inert: it does not run setup, download
-container images, or start the stack. The explicit `init` command downloads the
-versioned images and starts the default pruned Bitcoin node. Release consumers
-use prebuilt images and do not compile on the node.
+Fresh APT installation does not run setup or start containers; `init` does that
+explicitly. Later APT upgrades download the release images and recreate the
+services that were running. A stopped stack stays stopped, and pending config
+edits remain unapproved. Downloads use the host connection. The signed package
+pins exact multi-architecture image digests, so Docker verifies the image content
+rather than trusting a mutable version tag. Release consumers use prebuilt images
+and do not compile on the node.
 
 This protects the stack's network paths. It cannot guarantee anonymity against
 traffic correlation, a compromised host/Tor daemon, router port forwarding, or

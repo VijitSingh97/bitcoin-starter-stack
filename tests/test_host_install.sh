@@ -95,6 +95,7 @@ cat >"$tmp/bin/docker" <<'SH'
 #!/bin/sh
 case "$1" in
   info) test -f "$HOST_TEST_DOCKER_READY" ;;
+  ps) exit 0 ;;
   inspect) exit 1 ;;
   compose) shift; printf 'compose %s\n' "$*" >>"$HOST_TEST_LOG" ;;
   exec) exit 0 ;;

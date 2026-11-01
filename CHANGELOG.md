@@ -28,6 +28,8 @@ All notable changes to this project are documented here. Format follows
 - Experimental post-sync resource profiles: 1 CPU / 2 GiB for Bitcoin and
   Monero, and 1 CPU / 4 GiB for other nodes. Wallet and shared-service overhead
   is additional; full-chain resource qualification remains pending.
+- Automatic activation of new container images after APT upgrades, with pinned
+  image digests, approved configuration, and preservation of stopped services.
 - Signed APT feed with primary fingerprint
   `72FD656754BD7534E274360A37070C2730C0B4EA`.
 
