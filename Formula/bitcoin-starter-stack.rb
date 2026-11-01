@@ -1,0 +1,120 @@
+class BitcoinStarterStack < Formula
+  desc "Run private cryptocurrency nodes behind Tor"
+  homepage "https://github.com/VijitSingh97/node-manager"
+  url "https://github.com/VijitSingh97/node-manager/releases/download/v1.32.0/bitcoin-starter-stack.tar.gz"
+  version "1.32.0"
+  sha256 "e3b8eebd1aece66d2ad9e8396ad0c08056743e0215773effcf36ee9f69e8d451"
+  license "MIT"
+
+  depends_on "bash"
+  depends_on "flock"
+  depends_on "jq"
+  depends_on "openssl@3"
+  on_linux do
+    depends_on "iproute2"
+  end
+
+  def install
+    libexec.install "stack", "configure.sh", "VERSION", ".dockerignore"
+    libexec.install Dir["docker-compose*.yml"]
+    libexec.install "build"
+    (libexec/"scripts").install "scripts/bitcoin-stack", "scripts/node-control", "scripts/node-port-control",
+                                "scripts/node-resource-profile"
+
+    dependency_path = [formula_opt_bin("bash"), formula_opt_bin("flock"), formula_opt_bin("jq"),
+                       formula_opt_bin("openssl@3")]
+    if OS.linux?
+      dependency_path << formula_opt_bin("iproute2")
+      dependency_path << Formula["iproute2"].opt_sbin
+    end
+
+    (bin/"bitcoin-stack").write <<~SH
+      #!#{formula_opt_bin("bash")}/bash
+      set -euo pipefail
+
+      export BITCOIN_STACK_ROOT="#{opt_libexec}"
+      export BITCOIN_STACK_PACKAGE_MANAGED=brew
+      export PATH="#{dependency_path.join(":")}:#{HOMEBREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      exec "#{formula_opt_bin("bash")}/bash" "#{opt_libexec}/scripts/bitcoin-stack" "$@"
+    SH
+  end
+
+  service do
+    run [opt_bin/"bitcoin-stack", "host-service"]
+    keep_alive crashed: true
+    restart_delay 10
+    process_type :background
+    log_path var/"log/bitcoin-starter-stack.log"
+    error_log_path var/"log/bitcoin-starter-stack.log"
+    environment_variables PATH: std_service_path_env
+  end
+
+  def caveats
+    <<~EOS
+      Docker Desktop (macOS) or Docker Engine with Compose 2.33.1+ (Linux) is required and is not installed by this formula.
+
+      Setup is explicit and does not run during installation:
+        bitcoin-stack init
+
+      Setup starts the Homebrew host supervisor automatically. Launch at login
+      defaults off and can be enabled from Global Settings in the dashboard.
+    EOS
+  end
+
+  test do
+    ENV["HOME"] = testpath
+    ENV["XDG_CONFIG_HOME"] = testpath/"xdg-config"
+    ENV["XDG_DATA_HOME"] = testpath/"xdg-data"
+    config_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/config/config.json"
+    else
+      testpath/"xdg-config/bitcoin-starter-stack/config.json"
+    end
+    state_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/state"
+    else
+      testpath/"xdg-data/bitcoin-starter-stack/state"
+    end
+    data_path = if OS.mac?
+      testpath/"Library/Application Support/bitcoin-starter-stack/data"
+    else
+      testpath/"xdg-data/bitcoin-starter-stack/data"
+    end
+    config_path.dirname.mkpath
+    state_path.mkpath
+    data_path.mkpath
+    default_config = JSON.generate(
+      "bitcoin" => { "enabled" => true, "resource_profile" => "compact" },
+      "dashboard" => { "password" => "", "bind_ip" => "auto", "launch_at_boot" => false },
+    )
+    config_path.write(default_config)
+    ENV["BITCOIN_STACK_ROOT"] = libexec
+    ENV["BITCOIN_STACK_PACKAGE_MANAGED"] = "brew"
+    ENV["BITCOIN_STACK_CONFIG_DIR"] = config_path.dirname
+    ENV["BITCOIN_STACK_STATE_DIR"] = state_path
+    ENV["BITCOIN_STACK_DATA_DIR"] = data_path
+    ENV["BITCOIN_STACK_DEFAULT_BIND_IP"] = "192.168.1.116"
+    system libexec/"configure.sh"
+
+    rendered = (state_path/".env").read
+    assert_predicate formula_opt_bin("openssl@3")/"openssl", :executable?
+    assert_equal default_config, config_path.read
+    assert_match(/^DASHBOARD_PASSWORD=$/, rendered)
+    assert_match(/^DASHBOARD_BIND_IP=192\.168\.1\.116$/, rendered)
+    assert_match(/^COMPOSE_PROFILES=bitcoin$/, rendered)
+    assert_match(/^BITCOIN_RESOURCE_PROFILE=compact$/, rendered)
+    assert_match(/^STACK_RESTART_POLICY=on-failure:5$/, rendered)
+
+    preset_config = JSON.generate(
+      "bitcoin" => { "enabled" => false },
+      "monero" => { "enabled" => true, "data_dir" => data_path/"custom-monero" },
+      "dashboard" => { "password" => "presetdashboardpassword", "bind_ip" => "192.168.1.118" },
+    )
+    config_path.write(preset_config)
+    system libexec/"configure.sh"
+    assert_equal preset_config, config_path.read
+    rendered = (state_path/".env").read
+    assert_match(/^COMPOSE_PROFILES=monero$/, rendered)
+    assert_match(/^DASHBOARD_PASSWORD=presetdashboardpassword$/, rendered)
+  end
+end
