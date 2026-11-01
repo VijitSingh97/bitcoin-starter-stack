@@ -134,7 +134,7 @@ rm -f "$FAKE_IMAGES_READY"
   cat "$tmp/wizard-init.log"
   fail "init failed with mocked Linux host controls"
 }
-grep -q 'docker compose pull' "$FAKE_LOG" || fail "init did not pull missing images"
+grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "init did not preserve local images while pulling missing ones"
 grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
 [ "$(jq -r '.bitcoin.enabled' "$wizard/config.json")" = true ] || fail "init did not default to Bitcoin"
 [ "$(jq -r '.dashboard.password' "$wizard/config.json")" = "" ] || fail "init did not default to a passwordless dashboard"
@@ -178,7 +178,7 @@ rm -f "$FAKE_IMAGES_READY"
 (cd "$wizard_failed" &&
   BITCOIN_STACK_DEFAULT_BIND_IP=192.168.1.116 FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init ignored a missing-image pull failure"
-grep -q 'docker compose pull' "$FAKE_LOG" || fail "init failure did not attempt a pull"
+grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "init failure did not attempt a missing-only pull"
 grep -q 'docker compose up -d' "$FAKE_LOG" && fail "init started after a failed pull"
 
 wizard_no_docker="$tmp/wizard-no-docker"
@@ -324,6 +324,9 @@ rm -f "$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null || fail "host Docker pull failed"
 grep -q 'docker compose pull' "$FAKE_LOG" || fail "pull did not reach Compose"
 grep -q 'docker info' "$FAKE_LOG" && fail "pull inspected or changed host Docker proxy settings"
+rm -f "$FAKE_LOG"
+HOME="$tmp" PATH="$stub:$PATH" ./stack pull --policy missing >/dev/null || fail "pull policy was rejected"
+grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "pull arguments did not reach Compose"
 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull failure was ignored"
 
 cat >"$stub/git" <<'EOS'

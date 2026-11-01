@@ -319,7 +319,7 @@ init() {
     echo "Configuration was saved, but Docker is not ready. Start Docker, then run $stack_command init again." >&2
     return 1
   fi
-  if ! guard_package_containers || { ! images_available && ! pull_images; }; then
+  if ! guard_package_containers || { ! images_available && ! pull_images --policy missing; }; then
     if [ "$had_previous_env" = 1 ]; then cp "$previous_env" "$env_file"; else rm -f "$env_file"; fi
     rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
     unlock_config
@@ -517,7 +517,7 @@ offline_up() {
 }
 
 pull_images() {
-  compose pull
+  compose pull "$@"
 }
 
 images_available() {
@@ -1085,7 +1085,7 @@ case "$cmd" in
   pull)
     lock_config
     "$stack_root/configure.sh"
-    pull_images
+    pull_images "$@"
     unlock_config
     ;;
   upgrade-agent) upgrade_agent ;;

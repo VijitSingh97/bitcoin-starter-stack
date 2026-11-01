@@ -11,7 +11,7 @@ config_lock=$state_root/.config.lock
 docker_bin=${DOCKER_BIN:-docker}
 ss_bin=${SS_BIN:-ss}
 ip_bin=${IP_BIN:-ip}
-lsof_bin=${LSOF_BIN:-/usr/sbin/lsof}
+netstat_bin=${NETSTAT_BIN:-/usr/sbin/netstat}
 ifconfig_bin=${IFCONFIG_BIN:-/sbin/ifconfig}
 host_os=${PORT_CONTROL_OS:-$(uname -s)}
 control_state=$state_root/port-control
@@ -238,56 +238,19 @@ host_tcp_listeners() {
       '
       ;;
     Darwin)
-      output_file=$(mktemp "$control_state/.lsof.XXXXXX") || return 1
-      status_file=$output_file.status
-      (
-        child_pid=
-        trap 'kill -KILL "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 124' HUP INT TERM
-        "$lsof_bin" -b -nP -iTCP -sTCP:LISTEN -F n >"$output_file" 2>/dev/null &
-        child_pid=$!
-        if wait "$child_pid"; then
-          child_status=0
-        else
-          child_status=$?
-        fi
-        printf '%s\n' "$child_status" >"$status_file"
-        exit "$child_status"
-      ) &
-      lsof_wait=0
-      lsof_pid=$!
-      while [ ! -f "$status_file" ] && [ "$lsof_wait" -lt 50 ]; do
-        sleep 0.1
-        lsof_wait=$((lsof_wait + 1))
-      done
-      if [ ! -f "$status_file" ]; then
-        kill -TERM "$lsof_pid" 2>/dev/null || true
-        wait "$lsof_pid" 2>/dev/null || true
-        rm -f "$output_file" "$status_file"
-        return 1
-      fi
-      if ! wait "$lsof_pid"; then
-        rm -f "$output_file" "$status_file"
-        return 1
-      fi
-      output=$(cat "$output_file")
-      rm -f "$output_file" "$status_file"
+      output=$("$netstat_bin" -an -p tcp 2>/dev/null) || return 1
       printf '%s\n' "$output" | awk '
-        substr($0, 1, 1) != "n" { next }
+        $1 !~ /^tcp/ { next }
+        $1 !~ /^tcp(4|6|46)?$/ { if ($NF == "LISTEN") bad=1; next }
+        $NF != "LISTEN" { next }
         {
-          endpoint=substr($0, 2)
-          if (endpoint ~ /^\[/) {
-            sub(/^\[/, "", endpoint)
-            count=split(endpoint, parts, /\]:/)
-            if (count == 2 && parts[2] ~ /^[0-9]+$/) print parts[1] "\t" parts[2]
-            else bad=1
-          } else {
-            port=endpoint
-            sub(/^.*:/, "", port)
-            address=endpoint
-            sub(/:[^:]*$/, "", address)
-            if (port ~ /^[0-9]+$/ && address != "") print address "\t" port
-            else bad=1
-          }
+          if (NF < 5) { bad=1; next }
+          endpoint=$4
+          if (!match(endpoint, /\.[0-9]+$/)) { bad=1; next }
+          address=substr(endpoint, 1, RSTART - 1)
+          port=substr(endpoint, RSTART + 1)
+          if (address == "" || port !~ /^[0-9]+$/) bad=1
+          else print address "\t" port
         }
         END { exit bad }
       '

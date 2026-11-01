@@ -140,9 +140,10 @@ Run `bitcoin-stack init` for Homebrew, `sudo bitcoin-stack init` for APT, or
    The optional dashboard password can be added from Settings. Node RPC passwords
    are generated separately with username `admin` and retained on later applies.
 4. Downloads missing versioned container images and starts the application.
-5. Leaves launch at boot/login off until selected in global Settings. After
-   a later reboot with this off, run `bitcoin-stack up` (`sudo` for APT), or
-   `./stack up` for source, to start the application manually.
+5. Leaves launch at boot/login off. APT and Homebrew users can enable it in
+   global Settings. After a later reboot with it off, run `bitcoin-stack up`
+   (`sudo` for APT), or `./stack up` for source, to start the application
+   manually.
 
 Fresh containers retry a crash up to five times even when launch at boot/login
 is off; they do not automatically return after Docker itself restarts. Existing
@@ -153,17 +154,25 @@ when a password is set. See the [privacy model](privacy.md).
 
 Open the printed URL, then use the gear menu to install additional nodes and
 configure Appearance, the dashboard password, Telegram, Healthchecks, and
-launch at boot/login. Installing a node starts it with its default data path,
+launch at boot/login where the installation manages that feature. Installing a
+node starts it with its default data path,
 pruned mode where supported, and LAN interfaces closed. It preserves the data
 of every existing node. Watch progress or correct a failed installation in the
 same panel. View-only wallets are added in the relevant tower; setup does not
 ask for wallet keys or seed phrases.
 
+On a macOS source checkout, `./stack init` starts a host helper for the current
+login session so dashboard node installs and LAN-port changes work. Source
+installs do not register a login service, so **Launch at login** is unavailable;
+run `./stack up` after signing in again. The Homebrew package registers the
+managed user service once that package is released.
+
 Fresh APT and Homebrew installs select `resource_profile: compact`. The host
 helper waits for three spaced, healthy, current sync checks before applying
 1 CPU / 2048 MiB to Bitcoin or Monero, or 1 CPU / 4096 MiB to the other nodes,
-with no extra swap. Initial sync is uncapped. Source and existing profiles stay
-off unless configured. These ceilings remain experimental until sustained
+with no extra swap. Initial sync is uncapped. Source first-start selections and
+existing profiles stay off unless configured; a node installed later from the
+dashboard selects `compact`. These ceilings remain experimental until sustained
 operation is qualified; they do not mean a whole 2 GiB VPS can host multiple
 nodes. See [resource caps](configuration.md#resource-caps).
 

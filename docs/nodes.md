@@ -131,8 +131,9 @@ uses user-owned Application Support/XDG data, and source uses `./data/<node>`.
 
 Fresh managed installs use the `compact` resource profile: sync is uncapped,
 then repeated healthy, current sync checks activate the table's per-node
-ceiling with no extra swap. Source and existing profiles remain off unless
-configured. These are editable budgets, not claims that every chain has passed
+ceiling with no extra swap. Source first-start selections and existing profiles
+remain off unless configured; nodes installed later from the dashboard select
+`compact`. These are editable budgets, not claims that every chain has passed
 sustained operation within them.
 
 View-only wallets are optional steps in their dashboard cards. Keep endpoint
@@ -143,8 +144,9 @@ and reset require a dashboard password; it can be added in global Settings.
 Monero ZMQ and Tari gRPC have no password controls.
 
 Global Settings also contains launch at boot/login, Appearance, Dashboard
-password, Telegram, and Healthchecks. Turning launch at boot/login off does not
-stop running nodes; it controls future starts.
+password, Telegram, and Healthchecks. Launch at boot/login is managed by APT
+and Homebrew installations; source installs show it as unavailable. Turning it
+off does not stop running nodes; it controls future starts.
 
 ## Private-LAN endpoints
 

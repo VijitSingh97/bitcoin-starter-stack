@@ -308,7 +308,7 @@ if [ "$host_request" = true ]; then
     mv "$transaction_tmp" "$install_transaction"
     mv "$candidate" "$config_file"
     if BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
-      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" pull >/dev/null 2>&1 &&
+      BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" pull --policy missing >/dev/null 2>&1 &&
       BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
       BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/stack" apply >/dev/null 2>&1; then
       transaction_meta_tmp=$(mktemp "$install_transaction/.meta.XXXXXX")

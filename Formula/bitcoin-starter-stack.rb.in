@@ -10,7 +10,6 @@ class BitcoinStarterStack < Formula
   depends_on "flock"
   depends_on "jq"
   depends_on "openssl@3"
-  uses_from_macos "lsof"
   on_linux do
     depends_on "iproute2"
   end

@@ -159,7 +159,7 @@ BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-contro
 if [ "$(status .action)" != install ] || [ "$(status .state)" != applied ]; then
   fail "install status was not applied"
 fi
-grep -qx pull "$tmp/stack.log" || fail "install did not use the normal image pull"
+grep -qx 'pull --policy missing' "$tmp/stack.log" || fail "install did not preserve unpublished local images"
 request '{"action":"install","id":"66666666666666666666666666666666","node":"litecoin","requested_at":1000}'
 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ "$(status .error_code)" = replayed ] || fail "replayed install request was accepted"

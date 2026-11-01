@@ -12,6 +12,55 @@ contain a Homebrew formula, so the tap and install commands below are a preview
 of the next package release. Do not use them until a release publishes the
 generated formula.
 
+### Maintainer local-release check
+
+An unreleased branch uses image tags that do not exist in GHCR. Before testing
+its Homebrew formula, archive the committed revision and build every
+first-party image with the exact `VERSION` stored in that archive. Building
+images does not start a node:
+
+```sh
+source_dir=$(pwd)
+preview_dir=$(mktemp -d)
+git archive --format=tar.gz --prefix=bitcoin-starter-stack/ \
+  --output="$preview_dir/bitcoin-starter-stack.tar.gz" HEAD
+tar -xzf "$preview_dir/bitcoin-starter-stack.tar.gz" -C "$preview_dir"
+cd "$preview_dir/bitcoin-starter-stack"
+version=$(cat VERSION)
+
+for image in tor monero litecoin dogecoin bitcoincash; do
+  docker build \
+    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
+    "build/$image"
+done
+
+for image in dashboard tari-wallet; do
+  docker build \
+    --tag "ghcr.io/vijitsingh97/bitcoin-starter-stack-$image:$version" \
+    --file "build/$image/Dockerfile" .
+done
+```
+
+Generate the formula from that same archive, rather than from the working tree.
+For an existing private test tap, replace its formula and reinstall it:
+
+```sh
+tap=codex/node-manager-local
+formula="$(brew --repository "$tap")/Formula/bitcoin-starter-stack.rb"
+version=$(cat VERSION)
+package_version=${version%%-*}
+PACKAGE_VERSION="$package_version" "$source_dir/scripts/build-homebrew-formula.sh" \
+  --url "file://$preview_dir/bitcoin-starter-stack.tar.gz" \
+  --output "$formula" "$preview_dir/bitcoin-starter-stack.tar.gz"
+brew reinstall "$tap/bitcoin-starter-stack"
+```
+
+The Compose services use fixed container names, so run only one Node Manager
+installation on a Docker host. On an existing test installation, do not run a
+fresh `init`; use `bitcoin-stack apply` after reinstalling so its configuration
+and chain data remain selected. For a genuinely fresh test, run
+`bitcoin-stack init` only after the matching images above are present.
+
 ## macOS
 
 Install and start [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/),

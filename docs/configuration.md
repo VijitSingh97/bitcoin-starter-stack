@@ -48,7 +48,8 @@ Installation never runs setup. Run `./stack init` for source,
 noninteractive command downloads missing images and starts the default stack,
 or preserves and starts a configuration you created beforehand. Save printed
 node credentials in a password manager. Use global Settings to install another
-node, add a dashboard password, or enable launch at boot/login.
+node, add a dashboard password, or enable launch at boot/login on APT and
+Homebrew installations.
 Internal Monero and Tari wallet-service passwords live only in `.env`; they are
 not dashboard logins or personal wallet keys.
 
@@ -198,14 +199,14 @@ shows the overridable settings with their defaults:
 | `bitcoin.rpc_expose` | `false` | `true` exposes authenticated Bitcoin RPC to a trusted private LAN through the Tor container's TCP relay. See [LAN wallet RPC](#lan-wallet-rpc-opt-in). |
 | `bitcoin.rpc_bind_ip` | `""` | Private IPv4 address assigned to this host for the opt-in RPC listener. Required when `rpc_expose` is true. Public, wildcard, loopback, malformed, and IPv6 addresses are rejected. |
 | `bitcoin.rpc_port` | `8332` | Host port for the opt-in RPC listener (`1`–`65535`). The internal Core RPC port remains `8332`. |
-| `bitcoin.resource_profile` | `off`; `compact` for a node selected by APT/Homebrew setup | Experimental managed-install profile: initial sync is uncapped, then a host helper applies the configured steady caps after three spaced, healthy, current sync checks. Existing and source installs remain off. Explicit operator limits take precedence. |
+| `bitcoin.resource_profile` | `off`; `compact` for a node selected by APT/Homebrew setup or installed from the dashboard | Initial sync is uncapped, then a host helper applies the configured steady caps after three spaced, healthy, current sync checks. Source first-start selections and existing nodes remain off unless configured. Explicit operator limits take precedence. |
 | `bitcoin.steady_cpus` | `1` | Post-sync CPU ceiling when `resource_profile` is `compact`. A JSON number from `0.01` to `256` with at most two decimal places; fractional values such as `0.5` work. |
 | `bitcoin.steady_mem_limit_mb` | `2048` | Post-sync memory ceiling in MiB when `resource_profile` is `compact`. A whole JSON number from `257` to `1048576`. Memory plus swap is capped to this same value, so extra swap cannot hide an undersized budget. |
 | `monero.enabled` | `false` | Runs the pruned Monero node and adds its health card to the dashboard. |
 | `monero.node_username` | `admin` | Digest-auth username for restricted Monero RPC. |
 | `monero.node_password` | auto-generated | Separate Digest-auth password for restricted Monero RPC. LAN exposure requires at least 24 letters or numbers. |
 | `monero.data_dir` | `./data/monero` (source), managed data directory for APT/Homebrew | Monero blockchain data on the host. APT and Homebrew use their platform data paths. The node always uses pruned storage. |
-| `monero.resource_profile` | `off`; `compact` for a node selected by APT/Homebrew setup | The same experimental per-node limit as Bitcoin. Sustained Monero operation at 2 GiB remains unqualified. |
+| `monero.resource_profile` | `off`; `compact` for a node selected by APT/Homebrew setup or installed from the dashboard | The same experimental per-node limit as Bitcoin. Sustained Monero operation at 2 GiB remains unqualified. |
 | `monero.steady_cpus` | `1` | Monero's independent post-sync CPU ceiling; same format and range as Bitcoin. |
 | `monero.steady_mem_limit_mb` | `2048` | Monero's independent post-sync memory ceiling in MiB; same format and range as Bitcoin. The view-only wallet service is additional. |
 | `monero.rpc_expose` | `false` | Publishes restricted Digest-auth RPC to one trusted private-LAN address. |
@@ -217,7 +218,7 @@ shows the overridable settings with their defaults:
 | `<node>.enabled` | `false` for Tari, Litecoin, Dogecoin, Bitcoin Cash, and Zcash | Adds that node to the configured stack and dashboard. At least one node must be enabled. |
 | `<node>.active` | `true` | Starts the configured node. Dashboard deactivation changes this to `false` while preserving data and configuration. |
 | `<node>.data_dir` | `./data/<node>` (source), managed data directory for APT/Homebrew | Host directory for that chain's data. APT uses `/var/lib/bitcoin-starter-stack/data/<node>`; Homebrew uses its platform data path above. |
-| `<node>.resource_profile` | `off`; `compact` for APT/Homebrew default setup selections | Syncs uncapped, then applies that node's steady ceiling after repeated healthy sync checks. |
+| `<node>.resource_profile` | `off`; `compact` for APT/Homebrew default setup selections or dashboard installs | Syncs uncapped, then applies that node's steady ceiling after repeated healthy sync checks. |
 | `<node>.steady_cpus` | `1` | Independent post-sync CPU ceiling for Tari, Litecoin, Dogecoin, Bitcoin Cash, or Zcash. |
 | `<node>.steady_mem_limit_mb` | `4096` | Independent post-sync memory-plus-swap ceiling for those base nodes. Tari's separate wallet sidecar is not included. This is a budget, not a qualified minimum. |
 | `tari.pruning_horizon` | `10000` | Positive retained-block horizon for Minotari's pruned state. |
@@ -257,10 +258,12 @@ provide encryption at rest; use encrypted host storage when that is required.
 
 ## Resource caps
 
-Fresh APT and Homebrew default installs write these values into each selected node's section.
-Existing installations and source installs keep `resource_profile: "off"`
-unless explicitly configured. Automatic handoff is provided by the APT host
-timer or the optional Homebrew background service. The `steady_*` values have
+Fresh APT and Homebrew default installs write these values into each selected
+node's section. Existing nodes and source first-start selections keep
+`resource_profile: "off"` unless explicitly configured. Installing a new node
+from the dashboard selects `compact` in every installation mode. Automatic
+handoff is provided by the APT host timer or the optional Homebrew background
+service. The `steady_*` values have
 no effect while the profile is `off`.
 
 ```json
@@ -413,9 +416,9 @@ administration RPC is never shown as a wallet connection endpoint.
 
 ## Applying changes
 
-The gear menu installs nodes and changes launch at boot/login, Appearance,
-Telegram, Healthchecks, and the dashboard password. A node's own settings change its block alert and LAN
-listeners. Dashboard-saved notifications use a persistent JSON override; see
+The gear menu installs nodes and changes launch at boot/login where supported,
+Appearance, Telegram, Healthchecks, and the dashboard password. A node's own
+settings change its block alert and LAN listeners. Dashboard-saved notifications use a persistent JSON override; see
 [Dashboard settings](notifications.md#dashboard-settings). Personal wallets are
 managed by the watch-only card. Passwordless access is limited to trusted
 localhost/private-LAN requests; add a dashboard password to restrict access.

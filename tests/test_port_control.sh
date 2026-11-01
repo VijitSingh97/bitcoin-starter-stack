@@ -83,18 +83,14 @@ set -eu
 printf '%s' "${FAKE_IP_ADDRESSES:-}"
 EOF
 chmod +x "$fake_ip"
-fake_lsof=$tmp/lsof
-cat >"$fake_lsof" <<'EOF'
+fake_netstat=$tmp/netstat
+cat >"$fake_netstat" <<'EOF'
 #!/bin/sh
 set -eu
-[ "${FAKE_LSOF_HANG:-0}" != 1 ] || {
-  printf '%s\n' "$$" >"$FAKE_LSOF_PID_FILE"
-  exec sleep 30
-}
-[ "${FAKE_LSOF_FAIL:-0}" != 1 ] || exit 1
-printf '%s' "${FAKE_LSOF_LISTENERS:-}"
+[ "${FAKE_NETSTAT_FAIL:-0}" != 1 ] || exit 1
+printf '%s' "${FAKE_NETSTAT_LISTENERS:-}"
 EOF
-chmod +x "$fake_lsof"
+chmod +x "$fake_netstat"
 fake_ifconfig=$tmp/ifconfig
 cat >"$fake_ifconfig" <<'EOF'
 #!/bin/sh
@@ -152,7 +148,7 @@ EOF
   export BITCOIN_STACK_CONFIG_DIR=$case_root/config
   export DOCKER_BIN=$fake FAKE_DASH_STATE=$case_root/state/dashboard
   export SS_BIN=$fake_ss
-  export IP_BIN=$fake_ip LSOF_BIN=$fake_lsof IFCONFIG_BIN=$fake_ifconfig PORT_CONTROL_OS=Linux
+  export IP_BIN=$fake_ip NETSTAT_BIN=$fake_netstat IFCONFIG_BIN=$fake_ifconfig PORT_CONTROL_OS=Linux
   export FAKE_IP_ADDRESSES='1: lo inet 127.0.0.1/8 scope host lo
 2: eth0 inet 192.168.1.10/24 scope global eth0
 2: eth0 inet 192.168.1.20/24 scope global secondary eth0
@@ -164,8 +160,8 @@ EOF
   export PORT_CONTROL_NOW_EPOCH=1000 FAKE_APPLY_FAIL=0 FAKE_APPLY_FAIL_ONCE=0 FAKE_APPLY_FAIL_MARKER=$case_root/apply-failed
   export FAKE_TOR_PORTS='{"8332/tcp":[{"HostIp":"192.168.1.10","HostPort":"8332"}],"18081/tcp":[{"HostIp":"192.168.1.10","HostPort":"18081"}],"18083/tcp":[{"HostIp":"192.168.1.10","HostPort":"18083"}]}'
   unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL
-  unset FAKE_IP_FAIL FAKE_LSOF_FAIL FAKE_LSOF_HANG FAKE_LSOF_PID_FILE FAKE_IFCONFIG_FAIL
-  unset FAKE_LSOF_LISTENERS FAKE_IFCONFIG_ADDRESSES
+  unset FAKE_IP_FAIL FAKE_NETSTAT_FAIL FAKE_IFCONFIG_FAIL
+  unset FAKE_NETSTAT_LISTENERS FAKE_IFCONFIG_ADDRESSES
   unset FAKE_NODE_LIMITS
   : >"$FAKE_DOCKER_LOG"
   : >"$FAKE_STACK_LOG"
@@ -193,39 +189,6 @@ credential_request() {
 
 credential_status() {
   jq -r "$1" "$FAKE_DASH_STATE/credential-control.status"
-}
-
-bounded_lsof() {
-  probe_output=$tmp/lsof-probe
-  probe_status=$tmp/lsof-probe.status
-  rm -f "$probe_status"
-  (
-    child_pid=
-    trap 'kill -KILL "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 124' HUP INT TERM
-    "$LSOF_BIN" -b "$@" >"$probe_output" 2>/dev/null &
-    child_pid=$!
-    if wait "$child_pid"; then
-      child_status=0
-    else
-      child_status=$?
-    fi
-    printf '%s\n' "$child_status" >"$probe_status"
-    exit "$child_status"
-  ) &
-  probe_pid=$!
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if [ -f "$probe_status" ]; then
-      if wait "$probe_pid"; then
-        cat "$probe_output"
-        return 0
-      fi
-      return 1
-    fi
-    sleep 0.1
-  done
-  kill -TERM "$probe_pid" 2>/dev/null || true
-  wait "$probe_pid" 2>/dev/null || true
-  return 1
 }
 
 new_case close
@@ -414,7 +377,7 @@ if command -v ss >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
   listener_pid=
 fi
 
-if [ "$(uname -s)" = Darwin ] && command -v lsof >/dev/null 2>&1 && command -v ifconfig >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+if [ "$(uname -s)" = Darwin ] && [ -x /usr/sbin/netstat ] && command -v ifconfig >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
   lan_ip=$(ifconfig -a | awk '
     $1 == "inet" && ($2 ~ /^10\./ || $2 ~ /^192\.168\./ || $2 ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) { print $2; exit }
   ')
@@ -423,35 +386,38 @@ if [ "$(uname -s)" = Darwin ] && command -v lsof >/dev/null 2>&1 && command -v i
     jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
     mv "$case_root/config/config.next" "$case_root/config/config.json"
     PORT_CONTROL_OS=Darwin
-    LSOF_BIN=$(command -v lsof)
+    NETSTAT_BIN=/usr/sbin/netstat
     IFCONFIG_BIN=$(command -v ifconfig)
-    export PORT_CONTROL_OS LSOF_BIN IFCONFIG_BIN
+    export PORT_CONTROL_OS NETSTAT_BIN IFCONFIG_BIN
     listener_pid=
+    listener_ready=0
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       macos_port=$((49152 + RANDOM % 10000))
       openssl s_server -accept "0.0.0.0:$macos_port" -nocert -quiet -ign_eof </dev/null >"$case_root/listener.log" 2>&1 &
       listener_pid=$!
-      sleep 0.1
-      if kill -0 "$listener_pid" 2>/dev/null; then
+      for probe in 1 2 3 4 5 6 7 8 9 10; do
+        if "$NETSTAT_BIN" -an -p tcp 2>/dev/null | awk -v suffix=".$macos_port" '
+          $1 ~ /^tcp(4|6|46)?$/ && $NF == "LISTEN" && substr($4, length($4) - length(suffix) + 1) == suffix { found=1 }
+          END { exit !found }
+        '; then
+          listener_ready=1
+          break
+        fi
+        sleep 0.1
+      done
+      if [ "$listener_ready" = 1 ]; then
         break
       fi
+      kill "$listener_pid" 2>/dev/null || true
       wait "$listener_pid" 2>/dev/null || true
       listener_pid=
     done
     [ -n "$listener_pid" ] || fail "real macOS TCP listener could not bind a high port"
-    listener_ready=0
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      if bounded_lsof -nP -iTCP:"$macos_port" -sTCP:LISTEN -F n | grep -Eq "^n(\\*|0\\.0\\.0\\.0):$macos_port$"; then
-        listener_ready=1
-        break
-      fi
-      sleep 0.1
-    done
     [ "$listener_ready" = 1 ] || fail "real macOS TCP listener did not start"
     original_config=$(cat "$case_root/config/config.json")
     request "{\"id\":\"30303030303030303030303030303041\",\"changes\":[{\"port\":\"monero_rpc\",\"enabled\":true,\"bind_ip\":\"$lan_ip\",\"host_port\":$macos_port}],\"requested_at\":1000}"
     scripts/node-port-control
-    [ "$(status .error_code)" = port_in_use ] || fail "real macOS host listener lacked typed conflict status"
+    [ "$(status .error_code)" = port_in_use ] || fail "real macOS host listener error was $(status .error_code)"
     [ "$(status .port)" = monero_rpc ] || fail "real macOS host listener named the wrong setting"
     [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "real macOS host listener changed config"
     [ ! -s "$FAKE_STACK_LOG" ] || fail "real macOS host listener invoked apply"
@@ -535,11 +501,11 @@ new_case macos-host-port-conflict
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
 mv "$case_root/config/config.next" "$case_root/config/config.json"
 export PORT_CONTROL_OS=Darwin
-export FAKE_LSOF_LISTENERS='p123
-n*:28081
-p124
-n[::1]:12345
-n[::]:28082'
+export FAKE_NETSTAT_LISTENERS='Active Internet connections (including servers)
+Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
+tcp46      0      0  *.28081                *.*                    LISTEN
+tcp6       0      0  ::1.12345              *.*                    LISTEN
+tcp6       0      0  ::.28082                *.*                    LISTEN'
 export FAKE_IFCONFIG_ADDRESSES='lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
 	inet 127.0.0.1 netmask 0xff000000
 en0: flags=8863<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500
@@ -556,8 +522,7 @@ new_case macos-ipv6-wildcard-conflict
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
 mv "$case_root/config/config.next" "$case_root/config/config.json"
 export PORT_CONTROL_OS=Darwin
-export FAKE_LSOF_LISTENERS='p123
-n[::]:28082'
+export FAKE_NETSTAT_LISTENERS='tcp6       0      0  ::.28082                *.*                    LISTEN'
 export FAKE_IFCONFIG_ADDRESSES='	inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255'
 original_config=$(cat "$case_root/config/config.json")
 request '{"id":"30303030303030303030303030303043","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28082}],"requested_at":1000}'
@@ -570,7 +535,7 @@ scripts/node-port-control
 new_case macos-listener-inspection-failure
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
 mv "$case_root/config/config.next" "$case_root/config/config.json"
-export PORT_CONTROL_OS=Darwin FAKE_LSOF_FAIL=1
+export PORT_CONTROL_OS=Darwin FAKE_NETSTAT_FAIL=1
 export FAKE_IFCONFIG_ADDRESSES='	inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255'
 original_config=$(cat "$case_root/config/config.json")
 request '{"id":"30303030303030303030303030303042","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
@@ -580,22 +545,19 @@ scripts/node-port-control
 [ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "macOS inspection failure changed config"
 [ ! -s "$FAKE_STACK_LOG" ] || fail "macOS inspection failure invoked apply"
 
-new_case macos-listener-inspection-timeout
+new_case macos-listener-inspection-malformed
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"
 mv "$case_root/config/config.next" "$case_root/config/config.json"
-export PORT_CONTROL_OS=Darwin FAKE_LSOF_HANG=1 FAKE_LSOF_PID_FILE=$case_root/lsof.pid
+export PORT_CONTROL_OS=Darwin
+export FAKE_NETSTAT_LISTENERS='tcp4       0      0  malformed              *.*                    LISTEN'
 export FAKE_IFCONFIG_ADDRESSES='	inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255'
 original_config=$(cat "$case_root/config/config.json")
 request '{"id":"30303030303030303030303030303044","changes":[{"port":"monero_rpc","enabled":true,"bind_ip":"192.168.1.10","host_port":28081}],"requested_at":1000}'
 scripts/node-port-control
-[ "$(status .state)" = failed ] || fail "hung macOS listener inspection did not fail safely"
-[ "$(status .error_code)" = port_check_failed ] || fail "hung macOS listener inspection lacked typed status"
-[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "hung macOS inspection changed config"
-[ ! -s "$FAKE_STACK_LOG" ] || fail "hung macOS inspection invoked apply"
-hung_lsof_pid=$(cat "$FAKE_LSOF_PID_FILE")
-if kill -0 "$hung_lsof_pid" 2>/dev/null; then
-  fail "hung macOS listener inspection left its child running"
-fi
+[ "$(status .state)" = failed ] || fail "malformed macOS listener inspection did not fail safely"
+[ "$(status .error_code)" = port_check_failed ] || fail "malformed macOS listener inspection lacked typed status"
+[ "$(cat "$case_root/config/config.json")" = "$original_config" ] || fail "malformed macOS inspection changed config"
+[ ! -s "$FAKE_STACK_LOG" ] || fail "malformed macOS inspection invoked apply"
 
 new_case wrong-tor
 jq '.monero.rpc_expose=false' "$case_root/config/config.json" >"$case_root/config/config.next"

@@ -56,7 +56,7 @@ names for upgrade compatibility while the broader Node Manager takes shape.
   low), a [Healthchecks.io](https://healthchecks.io/) dead-man's switch for when the whole
   box goes dark, and dashboard access from anywhere via a Tor onion service — all routed
   over Tor. See [Notifications](docs/notifications.md).
-- ⚙️ **Settings that stick.** Use the gear menu to install another node, choose launch at boot/login,
+- ⚙️ **Settings that stick.** Use the gear menu to install another node, choose launch at boot/login where supported,
   and configure Appearance, the dashboard password, Telegram, and Healthchecks. Each tower keeps its own block alert,
   LAN-port, and RPC-login controls after its wallet section. Use localhost, your
   private LAN, or a password-protected onion dashboard.
@@ -151,8 +151,9 @@ sync one chain at a time on a smaller host. See [Hardware Requirements](docs/har
 These are planning budgets, not measured average usage or hard minimums. Sync
 is uncapped by default; a smaller host can work but may take longer. Each node's
 `steady_cpus` and `steady_mem_limit_mb` are editable in `config.json`. Fresh APT
-default managed installs activate those caps after healthy sync checks; source installs
-leave automatic caps off. See [changing resource caps](docs/configuration.md#resource-caps).
+and Homebrew installs activate those caps after healthy sync checks. Source
+first-start selections leave automatic caps off; a node added later with the
+dashboard uses the compact profile. See [changing resource caps](docs/configuration.md#resource-caps).
 
 ### 1. Install the current release
 
@@ -213,13 +214,13 @@ Run the installation's `init` command once. Setup uses these defaults:
   the actual dashboard URL. Homebrew uses port **8080**; APT/source use **80**.
 - **No exposed node RPC, gRPC, or ZMQ ports.** Each authenticated node endpoint
   still gets its own generated `admin` login.
-- **Launch at boot/login off**, until enabled in global Settings. On macOS,
-  Docker Desktop must also be running in your logged-in session. After a reboot
-  with this option off, run `bitcoin-stack up` (`sudo` for APT) to open the
-  dashboard again.
+- **Launch at boot/login off.** APT and Homebrew users can enable it in global
+  Settings. On macOS, Docker Desktop must also be running in your logged-in
+  session. After a reboot with this option off, run `bitcoin-stack up` (`sudo`
+  for APT) to open the dashboard again.
 
 Open the printed URL. The gear menu lets you install another supported node,
-choose launch at boot/login, add a dashboard password, and set Appearance,
+choose launch at boot/login where supported, add a dashboard password, and set Appearance,
 Telegram, and Healthchecks. Each tower's **Node controls** contains its block
 alerts and optional LAN interfaces. Installing another node downloads its versioned
 images and starts it with default storage and closed LAN ports; progress and
@@ -255,7 +256,8 @@ approves and applies the file. Routine `up` and `apply` use local images only;
 
 Fresh APT and Homebrew installs select the experimental compact resource
 profile. Initial sync is uncapped; healthy sync checks activate the configured
-steady limits. Source installs leave automatic caps off. See
+steady limits. A source first start leaves automatic caps off, while a node
+installed later from the dashboard selects the compact profile. See
 [resource caps](docs/configuration.md#resource-caps).
 
 ### 3. Know where configuration and passwords live
@@ -320,10 +322,13 @@ features that use view-only material; neither accepts a private spend key or
 seed phrase.
 
 Fresh installs leave launch at boot/login off and retry crashed containers up
-to five times during the current Docker session. Enable **Launch at boot/login**
-in Settings to use Docker's `unless-stopped` policy and return automatically
-when Docker starts. Existing installations retain their saved policy. Linux
-needs Docker enabled at boot; macOS needs Docker Desktop after login.
+to five times during the current Docker session. APT and Homebrew installs can
+enable **Launch at boot/login** in Settings to use Docker's `unless-stopped`
+policy and return automatically when Docker starts. Existing installations
+retain their saved policy. Linux needs Docker enabled at boot; macOS needs
+Docker Desktop after login. A macOS source checkout starts its dashboard host
+helper only for the current login session and cannot manage launch at login;
+run `./stack up` after signing in again.
 Day-to-day commands, upgrades, backups, and troubleshooting are in
 [Operations](docs/operations.md).
 
@@ -392,7 +397,7 @@ address-only confirmed-UTXO snapshots. Tari accepts one native view-only wallet
 and keeps confirmed, available, timelocked, and pending amounts distinct.
 Dogecoin and Zcash show **Wallet balance not available** with no address card.
 
-The gear menu contains node installation, launch at boot/login, Appearance,
+The gear menu contains node installation, launch at boot/login where supported, Appearance,
 Dashboard password, Telegram, and Healthchecks settings. Adding the first dashboard password leaves the current field blank; changing an
 existing one requires its current password plus the new value twice; the old login stops working immediately, so
 reload and sign in again. When configured, the password protects the whole
