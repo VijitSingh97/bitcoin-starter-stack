@@ -108,6 +108,7 @@ grep -q '^BITCOIN_PRUNE=0$' "$legacy/.env" || fail "existing archival node was c
 grep -q '^BITCOIN_INBOUND_ONION=1$' "$legacy/.env" || fail "existing inbound onion setting was disabled"
 grep -q '^DASHBOARD_ONION=1$' "$legacy/.env" || fail "existing dashboard onion setting was disabled"
 grep -q '^STACK_RESTART_POLICY=unless-stopped$' "$legacy/.env" || fail "legacy install had launch at boot disabled"
+grep -q '^COMPOSE_PROJECT_NAME=bitcoin-starter-stack$' "$legacy/.env" || fail "legacy source install changed its Compose project"
 
 legacy_missing="$tmp/legacy-missing-prune"
 mkdir "$legacy_missing"
@@ -183,7 +184,7 @@ grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
-grep -q '^COMPOSE_PROJECT_NAME=bitcoin-starter-stack$' "$tmp/.env" || fail "existing source install did not preserve its legacy Compose project"
+grep -q '^COMPOSE_PROJECT_NAME=node-manager-source$' "$tmp/.env" || fail "fresh source install did not use its Node Manager Compose project"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password should default to disabled"
 grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
 grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"

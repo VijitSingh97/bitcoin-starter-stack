@@ -42,6 +42,13 @@ if [ "$1" = ps ] && [ "$2" = -aq ]; then
   case "$*" in
     *com.docker.compose.service=dashboard*) [ "${FAKE_DASHBOARD_MISSING:-0}" = 1 ] || printf '%s\n' dashboard-id ;;
     *com.docker.compose.service=tor*) printf '%s\n' tor-id ;;
+    *com.docker.compose.service=bitcoincash*) printf '%s\n' bitcoincash-id ;;
+    *com.docker.compose.service=bitcoin*) printf '%s\n' bitcoin-id ;;
+    *com.docker.compose.service=monero-wallet*) printf '%s\n' monero-wallet-id ;;
+    *com.docker.compose.service=monero*) printf '%s\n' monero-id ;;
+    *com.docker.compose.service=litecoin*) printf '%s\n' litecoin-id ;;
+    *com.docker.compose.service=dogecoin*) printf '%s\n' dogecoin-id ;;
+    *com.docker.compose.service=zcash*) printf '%s\n' zcash-id ;;
   esac
   exit 0
 fi
@@ -885,7 +892,7 @@ printf '%s\n' "$credential_targets" | while IFS=: read -r node services; do
   grep -q "compose .*up -d --pull never --no-build --no-deps $services" "$FAKE_DOCKER_LOG" ||
     fail "$node credential apply targeted the wrong services"
   if [ "$node" != zcash ]; then
-    grep -q "update --cpus 1.000000000 --memory 2147483648 --memory-swap 2147483648 $node" "$FAKE_DOCKER_LOG" ||
+    grep -q "update --cpus 1.000000000 --memory 2147483648 --memory-swap 2147483648 $node-id" "$FAKE_DOCKER_LOG" ||
       fail "$node credential apply did not restore its resource limits"
   fi
 done

@@ -129,6 +129,13 @@ locations that overlap application settings or other sensitive application paths
 it never changes ownership recursively on existing files. To reuse an existing
 chain database, set its path in `config.json` and apply that configuration.
 
+APT management helpers can write only inside the package’s managed directories.
+Use the default `/var/lib/bitcoin-starter-stack/data/<node>` path, or mount
+another disk at that path. An arbitrary external path such as `/mnt/...` or
+`/home/nodes/...` needs an administrator to grant that exact directory to the
+node-control and port-control systemd services first. Homebrew uses the current
+user’s filesystem permissions.
+
 After confirmation, the host validates the folder and checks each enabled port
 for conflicts before it stops or recreates anything. A rejected request leaves
 the current stack running and reports the folder or port problem in Settings.

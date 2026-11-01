@@ -299,7 +299,7 @@ jq -n '{bitcoin:{enabled:false},monero:{enabled:false,node_password:"moneropassw
 jq -S . "$config/config.json" >"$state/.approved-config.json"
 printf 'DASHBOARD_PASSWORD=testpassword\nDASHBOARD_BIND_IP=192.168.1.20\n' >"$state/.env"
 cp "$state/.env" "$state/.approved.env"
-custom_monero_dir="$tmp/Application Support/nodes/monero"
+custom_monero_dir="$(cd "$tmp" && pwd -P)/Application Support/nodes/monero"
 request "$(jq -nc --arg data_dir "$custom_monero_dir" '{action:"install",data_dir:$data_dir,id:"b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",interfaces:[{enabled:true,host_port:28081,id:"monero_rpc"},{enabled:false,host_port:18083,id:"monero_zmq"}],node:"monero",requested_at:1000}')"
 BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
 custom_monero_real=$(cd "$custom_monero_dir" && pwd -P)

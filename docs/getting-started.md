@@ -84,9 +84,10 @@ APT installation does not start containers, run setup, or change an existing
 checkout. Run `sudo bitcoin-stack init` explicitly after installation. A new
 package install defaults to `prune_mb: 10000`; existing configuration and
 generated state always win, so an upgrade never converts a full node to pruning.
-The first package release supports fresh installations only; keep an existing
-source-managed production node on its current upgrade path. Package mode blocks
-startup when the fixed service names belong to another Compose installation.
+Existing package installations retain their saved Compose project and volumes.
+A source-managed deployment keeps its own configuration and upgrade commands;
+installing the package does not migrate it automatically. Package mode refuses
+to operate on services owned by another installation.
 Until the feed is live, use the release tarball section below. When the package
 is released, verify and install its signing key as described in
 [Package feed](privacy.md#package-feed), then add the feed:

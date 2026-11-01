@@ -331,6 +331,9 @@ func (a *app) apiHostControlPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "host control unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if input.Action == "install" && input.DataDir != "" && input.Interfaces == nil {
+		input.Interfaces = []hostInstallInterface{}
+	}
 	request := hostControlRequest{ID: hex.EncodeToString(id), Action: input.Action, Node: input.Node, Enabled: input.Enabled, Revision: input.Revision, DataDir: input.DataDir, Interfaces: input.Interfaces, RequestedAt: time.Now().Unix()}
 	var b []byte
 	if request.Action == "install" && request.DataDir != "" {

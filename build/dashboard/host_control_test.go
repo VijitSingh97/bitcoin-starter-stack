@@ -70,16 +70,19 @@ func TestHostControlQueuesValidatedInstallOptions(t *testing.T) {
 }
 
 func TestHostControlKeepsEmptyInstallInterfaces(t *testing.T) {
-	a, _ := testApp(t, &rpcFixture{}, "")
-	writeHostCapability(t, a, false)
-	response := hostControlHTTP(a, http.MethodPost, `{"action":"install","node":"zcash","data_dir":"/srv/nodes/zcash","interfaces":[]}`, true, "192.168.1.20:4321")
-	if response.Code != http.StatusAccepted {
-		t.Fatalf("install = %d %s", response.Code, response.Body.String())
-	}
-	b, err := os.ReadFile(a.nodeControlPath("request"))
-	var raw map[string]json.RawMessage
-	if err != nil || json.Unmarshal(b, &raw) != nil || string(raw["interfaces"]) != "[]" {
-		t.Fatalf("request = %s, %v", b, err)
+	for _, suffix := range []string{`,"interfaces":[]`, `,"interfaces":null`, ""} {
+		a, _ := testApp(t, &rpcFixture{}, "")
+		writeHostCapability(t, a, false)
+		body := `{"action":"install","node":"zcash","data_dir":"/srv/nodes/zcash"` + suffix + `}`
+		response := hostControlHTTP(a, http.MethodPost, body, true, "192.168.1.20:4321")
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("install = %d %s", response.Code, response.Body.String())
+		}
+		b, err := os.ReadFile(a.nodeControlPath("request"))
+		var raw map[string]json.RawMessage
+		if err != nil || json.Unmarshal(b, &raw) != nil || string(raw["interfaces"]) != "[]" {
+			t.Fatalf("request = %s, %v", b, err)
+		}
 	}
 }
 
