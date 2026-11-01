@@ -196,13 +196,13 @@ func TestDashboardKeepsOnlyLastConfirmedInProgressSyncForRPCFailures(t *testing.
 	fixture.rpc.setChain(blockchainInfo{Blocks: 300000, Headers: 900001, VerificationProgress: 0.25, InitialBlockDownload: true, Pruned: true})
 
 	body := responseBody(t, fixture.request(t, http.MethodGet, "/"))
-	if !strings.Contains(body, "25.00% synced") || strings.Contains(body, "Last known:") {
+	if !strings.Contains(body, "25.00% synced") || !strings.Contains(body, `data-sync-percent="25.000000"`) || strings.Contains(body, "Last known:") {
 		t.Fatalf("live sync page = %q", body)
 	}
 
 	fixture.rpc.setUnavailable(true)
 	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
-	for _, want := range []string{"Bitcoin Node Syncing", "Waiting for a fresh response", "Last known: 25.00% synced", "Last confirmed ", "block 300000 of 900001"} {
+	for _, want := range []string{"Bitcoin Node Syncing", "Waiting for a fresh response", "Last known: 25.00% synced", "Last confirmed ", "block 300000 of 900001", `data-sync-percent="25.000000"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stale sync page missing %q", want)
 		}
@@ -214,13 +214,13 @@ func TestDashboardKeepsOnlyLastConfirmedInProgressSyncForRPCFailures(t *testing.
 	fixture.rpc.setUnavailable(false)
 	fixture.rpc.setChain(blockchainInfo{Blocks: 400000, Headers: 900002, VerificationProgress: 0.5, InitialBlockDownload: true, Pruned: true})
 	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
-	if !strings.Contains(body, "50.00% synced") || strings.Contains(body, "Last known:") {
+	if !strings.Contains(body, "50.00% synced") || !strings.Contains(body, `data-sync-percent="50.000000"`) || strings.Contains(body, "Last known:") {
 		t.Fatalf("fresh recovered sync page = %q", body)
 	}
 
 	fixture.rpc.setChain(blockchainInfo{Blocks: 900002, Headers: 900002, VerificationProgress: 1, InitialBlockDownload: false, Pruned: true})
 	body = responseBody(t, fixture.request(t, http.MethodGet, "/"))
-	if !strings.Contains(body, "Bitcoin Node Status") || strings.Contains(body, "% synced") {
+	if !strings.Contains(body, "Bitcoin Node Status") || !strings.Contains(body, `data-sync-percent="100.000000"`) || strings.Contains(body, "% synced") {
 		t.Fatalf("synced page = %q", body)
 	}
 

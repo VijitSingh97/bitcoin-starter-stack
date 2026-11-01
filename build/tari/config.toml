@@ -1,0 +1,43 @@
+[common]
+base_path = "/var/tari/node"
+
+[mainnet.p2p.seeds]
+dns_seeds = []
+peer_seeds = [
+  "1069fb56a3aaba45b9aa9839714251a4dfeb850e8d79d6ac9ca180377120fe1c::/onion3/urvwskrhqa52km46xt2oevblebmylleglph6dythhndmctwdzl6cuoqd:18141",
+  "54e491e0d88633170a98898f5d89ccc6b4f7ec22252afc23fe645d5bab453734::/onion3/b5zgqd6emm6p2zmj7gdniysbxvmtvltrwshsyfxjoq26xqfjoicge5id:18141",
+  "7c8e6530294e8bb7ff45b0f39e8bf8ea4e461b3df15a2df1ba3fa3a9bcc9ef71::/onion3/5husjyv2zskwjh2wzbuirbq4gk5uiyx4gnn277r3yoxv4oucn72tmeyd:18141"
+]
+
+[base_node]
+mining_enabled = true
+grpc_enabled = true
+grpc_address = "/ip4/0.0.0.0/tcp/18142"
+grpc_server_allow_methods = [
+  "get_version", "get_sync_info", "get_sync_progress", "get_tip_info",
+  "identify", "get_network_status", "get_new_block_template_with_coinbases",
+  "submit_block", "get_peers", "list_connected_peers", "get_mempool_stats"
+]
+
+[base_node.storage]
+pruning_horizon = __PRUNING_HORIZON__
+pruning_interval = 50
+
+[base_node.http_wallet_query_service]
+port = 9000
+listen_ip = "0.0.0.0"
+external_address = "http://tari:9000"
+
+[base_node.p2p]
+public_addresses = []
+
+[base_node.p2p.transport]
+type = "tor"
+
+[base_node.p2p.transport.tor]
+control_address = "/ip4/172.29.0.25/tcp/9051"
+socks_address_override = "/ip4/172.29.0.25/tcp/9050"
+control_auth = "auto"
+proxy_bypass_for_outbound_tcp = false
+proxy_bypass_addresses = []
+onion_port = 18189

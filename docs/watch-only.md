@@ -1,10 +1,13 @@
 # Watch-only balances
 
-Add your public keys and the dashboard shows the balance of each, plus a total —
-read straight off **your own node**. No third-party block explorer ever sees your
-addresses, which is the whole reason to run a private node in the first place.
+Bitcoin, Litecoin, and Bitcoin Cash read confirmed unspent balances from **your
+own node**, so no third-party block explorer receives your addresses. Bitcoin
+accepts public keys only; Litecoin and Bitcoin Cash accept one public address per
+row. Monero uses a private view key plus optional signed key images. None of these
+paths accepts a private spending key or can send funds. Tari accepts one public
+spend key plus private view key and likewise cannot sign or send.
 
-These are **watch-only** wallets: they hold public keys only. The node can see
+Bitcoin **watch-only** entries hold public keys only. The node can see
 your balance and derive your addresses, but it has no private keys and
 **cannot spend** anything.
 
@@ -12,11 +15,12 @@ your balance and derive your addresses, but it has no private keys and
 
 The dashboard has a **Watch-only balances** card with an add form:
 
-1. **Label** — any name you like (e.g. "Cold storage").
+1. **Label** (optional) — any name you like; the dashboard picks the first free
+   `Wallet N` name when omitted.
 2. **Key** — an extended public key, public output descriptor, or address (see below).
    For a bare `xpub`, choose the address type your wallet uses.
-3. **Birthday** (optional) — retained for existing Core-wallet imports. It does
-   not make the default pruned UTXO-set scan faster.
+3. **Birthday** (optional, archival nodes only) — bounds a Core rescan. The
+   default pruned UTXO-set scan does not show or use it.
 
 Click **Add**. On the default pruned node, the row stays pending while Bitcoin
 Core's `scantxoutset` checks the live UTXO set, then shows the confirmed balance
@@ -51,11 +55,185 @@ The rebuildable `watch_scan_cache.json` can be backed up and removed from the
 state volume to request a new scan; keep `wallets.json` and
 `balance_history.json` intact.
 
-Set `dashboard.password` in `config.json` to view personal wallets and add or remove
-entries. Fresh installs include one clearly marked public example; see
-[Public example](#public-example-and-seeding-from-configjson).
+Personal wallet views and add/remove controls are available on the trusted LAN.
+Add a dashboard password in Settings, or preset it in `config.json`, to restrict
+access. Fresh Bitcoin state includes one clearly marked public example; see
+[Bitcoin public example](#bitcoin-public-example-and-seeding-from-configjson).
 
-## The Genesis address is a special case
+## Litecoin and Bitcoin Cash addresses
+
+The Litecoin and Bitcoin Cash cards require one public address; the optional
+label defaults to **Litecoin wallet** or **Bitcoin Cash wallet**. After
+the node is fully synced, the dashboard validates the address with that daemon and
+runs its native `scantxoutset` call. The result is a confirmed UTXO snapshot at the
+displayed scan height, not transaction history. Extended public keys, descriptors,
+Litecoin MWEB addresses, private keys, and seeds are not accepted in these forms.
+
+Scans run in the background and a confirmed result is reused for up to one hour.
+The row is **Pending** before its first successful scan. If the node is syncing or
+a later scan fails, a prior confirmed amount remains visible as **Stale** or
+**Error**; an unverified failure is never displayed as a zero balance. Saved
+snapshot charts and watch lists survive dashboard restarts.
+
+Fresh state includes two sourced public examples:
+
+- **Linux Mint** for Litecoin, from its
+  [official donors page](https://www.linuxmint.com/donors.php).
+- **Bitcoin Cash Node** for Bitcoin Cash, from its
+  [official project site](https://bitcoincashnode.org/en/).
+
+Examples are clearly marked and excluded from personal totals. Removing one is
+persistent; restarting the dashboard does not add it back.
+
+## Monero view-only wallets
+
+A Monero address alone cannot reveal incoming outputs. Open the Monero card,
+then use **View-only wallets**:
+
+1. Enter the primary mainnet address and private view key. The optional label
+   defaults to **Monero wallet**. Under **Scan options**, restore height defaults
+   to `0`, which scans safely from genesis but takes longer.
+2. Or paste JSON in this form:
+
+   ```json
+   {"name":"Cold storage","address":"4...","view_key":"...","restore_height":0}
+   ```
+
+3. Submit it and wait while the wallet scans. **Pending** is not a zero balance.
+
+The form never accepts a private spend key or seed phrase. The resulting wallet
+cannot sign or send transactions. The private view key is write-only in the UI:
+it creates an encrypted watch-only wallet file, then is not stored in dashboard
+metadata or returned by the API. Do not place it in `config.json`, Git, or a shell
+command. The label, address, scan state, and balance snapshots stay in private
+mode-600 dashboard state. Encrypted wallet files stay in the private
+`monero_wallets` Docker volume; removing a dashboard row stops monitoring but
+does not delete that encrypted file. Stack backups, release archives, and Debian
+packages do not copy this private volume. After a disaster restore, remove and
+add the Monero row again from your original address and private view key.
+
+### Received-only and current balances
+
+A view key detects incoming outputs but cannot determine by itself whether an
+output was later spent. Until complete key images are imported, the dashboard
+labels the amount **Received only**, not current balance. This follows Monero's
+[view-only wallet guide](https://www.getmonero.org/resources/user-guides/view_only.html),
+which says outgoing transactions require matching key images for a correct balance.
+
+Export signed key images from the spending wallet and paste the native wallet-RPC
+JSON object:
+
+```json
+{"offset":0,"signed_key_images":[{"key_image":"...","signature":"..."}]}
+```
+
+A wrapper response containing that object under `result` is accepted too. The
+GUI/CLI encrypted binary `.key_images` file is not accepted. Some hardware-wallet
+view-only flows cannot export key images; in that case keep using received-only
+amounts. Import key images again after receiving or spending, because new outputs
+need new coverage. A snapshot is marked verified/current only after the wallet is
+fully scanned and fresh key-image coverage is complete.
+
+The stack uses Monero's authenticated
+[`generate_from_keys`, `get_balance`, and `import_key_images` wallet RPCs](https://docs.getmonero.org/rpc-library/wallet-rpc/)
+inside Docker. That wallet service has no host port and no public internet route.
+
+On fresh Monero wallet state, the dashboard seeds the official **Monero General
+Fund** as a public example using the address and published view key from Monero's
+[contribution page](https://www.getmonero.org/get-started/contributing/). A view
+key is not a spending key, but it reveals received outputs, so treat personal view
+keys as sensitive. The example is always received-only: the project has not
+published complete current key images, so the dashboard does not claim an
+accurate current balance. Removing the example is persistent and it is not seeded
+into an existing wallet roster.
+
+## Tari view-only wallet
+
+The Tari card manages one native view-only wallet alongside the pruned base node:
+
+1. Enter the 64-character public spend key and 64-character private view key.
+   The optional name defaults to **Tari wallet**.
+2. Under **Scan options**, birthday is optional from `2022-01-01` through today
+   and defaults to blank, which scans from genesis.
+3. Or upload strict JSON with only these fields:
+
+   ```json
+   {"name":"Cold storage","public_spend_key":"...","view_key":"...","birthday":"2024-01-01"}
+   ```
+
+The form rejects seeds, private spend keys, unknown JSON fields, invalid dates,
+and a second wallet. **Pending**, **Waiting**, and **Error** never mean zero. Once
+the native scan verifies a current result, the card shows total confirmed funds
+as available plus timelocked outputs, with available, timelocked, pending incoming,
+and pending outgoing amounts kept separate. A stale row is a saved verified
+snapshot, not a fresh result. The snapshot chart is not transaction history.
+
+The private view key reveals wallet funds and history but cannot spend. During
+creation it crosses the shared private volume in a mode-600 request file, which
+is removed after the native wallet accepts it. Dashboard state keeps the name,
+public spend key, birthday, state, and balance snapshots, never the private view
+key. No private spend key or spending-wallet seed is imported. Tari may generate
+its own internal master seed, but the imported view-only identity has no private
+spend key and cannot sign for the monitored funds.
+
+Tari v6.1 stores the private view key in plaintext inside its native SQLite
+`wallet.db`, even when a wallet password is configured. The `tari_wallet_data`
+Docker volume is owner-only and mounted only by the wallet service; the dashboard
+shares only the `tari_wallet` control and public-metadata volume. Separate generated
+passwords protect native wallet
+startup and the internal gRPC service, but they do not encrypt that database at
+rest. Use an encrypted host disk or encrypted Docker-volume backing store when
+encryption at rest is required. Removing the dashboard wallet stops it and moves
+its native database into the owner-only archive inside `tari_wallet_data`; it does
+not delete the base-node chain data. Failed imports are also retained there for
+recovery. Removing a row does not erase its archived private view key.
+
+The dashboard reaches the wallet through authenticated gRPC at internal port
+`18143`; the wallet reaches the base node's internal HTTP query service at port
+`9000`. Neither port is published to the host. The optional LAN port `18142` is
+the separate mining gRPC endpoint for Pithead and does not expose this wallet.
+
+The repeatable native test verifies offline view-only creation, authenticated
+gRPC reads, restart, removal, storage isolation, and failure on a missing database.
+Run it explicitly with `RUN_TARI_WALLET_NATIVE_SMOKE=1 tests/test_tari_wallet_native.sh`.
+A funded balance on a fully synced pruned node, and sustained sidecar operation
+within its separate 0.5 CPU / 512 MiB ceiling, remain unqualified. Do not treat
+startup or mocked API tests as those full-sync results. Tari pruning retains live
+unspent outputs through its
+[UTXO synchronization service](https://github.com/tari-project/tari/blob/v6.1.0/base_layer/core/src/base_node/sync/rpc/sync_utxos_task.rs),
+and its [view-only initializer](https://github.com/tari-project/tari/blob/v6.1.0/applications/minotari_console_wallet/src/init/mod.rs)
+stores no private spend key.
+
+## Unavailable wallet balances
+
+Dogecoin and Zcash display **Wallet balance not available** with no public
+reference address or balance card. Dogecoin's current pruned daemon cannot
+discover arbitrary address UTXOs, and Zakura's default checkpoint-pruned mode
+omits the address index. The dashboard does not query an external explorer to
+fill those gaps.
+
+**Dogecoin:** an address watched before initial sync or before its first payment
+can be tracked going forward. Adding an old address to an already-pruned node
+cannot establish its full balance: `importaddress` refuses a historical rescan,
+and skipping the rescan can miss older unspent funds. Upstream's proposed
+[UTXO scanner](https://github.com/dogecoin/dogecoin/pull/3665) remains unmerged
+as of October 31, 2026. Its current RPC requires a private spending key, so it
+also fails this dashboard's public-key-only requirement. A full archival rescan or a separately built address
+index would be needed with the current released daemon.
+
+**Zcash / Zakura:** this is a limitation of our current storage profile, not a
+claim that every pruned Zcash implementation lacks wallet support. Zakura 1.7.0
+can retain transparent address indexes while pruning transaction bodies, but
+requires a fresh database with checkpoint sync disabled. Upstream describes
+that mode as slower and less secure against some chain attacks; it also retains
+extra indexes with no published sizing estimate. We keep the default profile.
+See the [release notes](https://github.com/zakura-core/zakura/releases/tag/v1.7.0)
+and [checkpoint configuration](https://github.com/zakura-core/zakura/blob/v1.7.0/crates/zakura-consensus/src/config.rs).
+Shielded addresses additionally need a viewing key and wallet scanner; a public
+address alone is insufficient. Zallet and lightwalletd are separate wallet/index
+services, not a small switch that enables balances in our existing database.
+
+## Bitcoin: the Genesis address is a special case
 
 The Genesis address `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` is not added automatically.
 It can be watched manually, but it is a poor reference for comparing balances:
@@ -131,14 +309,14 @@ xpub.
 - `blockfilterindex` and `prune_mb: 0` remain manual compatibility settings for
   advanced archival setups. They are not required for the default UTXO-set scan.
 
-## Public example and seeding from config.json
+## Bitcoin public example and seeding from config.json
 
 Fresh installs start with one public example address disclosed by Binance in
 2022. It is labeled **Public example** and excluded from personal totals, so its
 balance cannot be mistaken for yours or for Binance's total reserves. It is one
 address, not proof of the exchange's solvency. Its first UTXO-set scan stays
-pending until complete. You can remove it after setting a dashboard
-password, or opt out before first start with `"wallets": []`. See Binance's
+pending until complete. You can remove it in the dashboard, or opt out before first start with
+`"wallets": []`. See Binance's
 [original address disclosure](https://www.binance.com/en-IN/blog/community/2895840147147652626).
 
 You can instead predeclare your own wallets in `config.json`, which seeds the
@@ -155,12 +333,29 @@ edits you make in the UI stick, and further `config.json` changes are ignored.
 
 ## Privacy & safety
 
-- **No signing keys.** Watch-only wallets have no private keys, and the add form
-  rejects private keys and seed phrases.
+- **No spending keys.** Bitcoin, Litecoin, and Bitcoin Cash accept public material
+  only. Monero and Tari accept private view keys, but reject private spend keys and
+  seeds; none of these paths can sign or send.
 - **An xpub is still sensitive.** Anyone who has it can follow the addresses and
   balances derived from that account. It's stored in the private wallet list;
   existing Core watch-wallet files can also contain it. Keep access to the box and dashboard
   controlled, and set a dashboard password if it's reachable beyond your LAN.
-- **Wallet data stays on the box.** Balances come directly from your node;
+- **Wallet data stays on the box.** Balances come directly from your nodes;
   wallet keys and addresses are never sent to external services. The separate BTC
-  price lookup sends only Bitcoin and currency names to CoinGecko through Tor.
+  and XMR price lookups send only asset and currency names to CoinGecko through Tor.
+- **View keys are sensitive.** Monero and Tari view keys reveal funds and history.
+  Tari v6.1 stores its key inside the native SQLite database, so use encrypted
+  host storage if you require encryption at rest.
+
+## Native wallet smoke test
+
+Maintainers can opt into isolated Litecoin and Bitcoin Cash regtest proofs. The
+test builds temporary local images, exercises funded and zero-balance addresses
+through the authenticated dashboard API, and removes its owned resources:
+
+```bash
+RUN_NATIVE_WALLET_SMOKE=1 tests/test_native_wallets.sh
+```
+
+Set `NATIVE_WALLET_CHAIN=litecoin` or `bitcoincash` to run one daemon. This test
+needs Docker and is intentionally skipped by default.

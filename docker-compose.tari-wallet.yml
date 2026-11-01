@@ -1,0 +1,48 @@
+services:
+  dashboard:
+    volumes:
+      - tari_wallet:/tari-wallet
+
+  tari-wallet:
+    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tari-wallet:${STACK_VERSION:?Run stack init or configure.sh first}
+    build:
+      context: ${STACK_ROOT:-.}
+      dockerfile: build/tari-wallet/Dockerfile
+    profiles: ["tari"]
+    user: "1000:1000"
+    init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      TARI_WALLET_PASSWORD: ${TARI_WALLET_PASSWORD:?run ./configure.sh first}
+      TARI_WALLET_RPC_USER: ${TARI_WALLET_RPC_USER:?run ./configure.sh first}
+      TARI_WALLET_RPC_PASSWORD: ${TARI_WALLET_RPC_PASSWORD:?run ./configure.sh first}
+    volumes:
+      - tari_wallet:/tari-wallet
+      - tari_wallet_data:/tari-wallet/private
+    tmpfs:
+      - /tmp:mode=0700,uid=1000,gid=1000
+    depends_on:
+      tari:
+        condition: service_healthy
+    stop_grace_period: 1m
+    restart: ${STACK_RESTART_POLICY:-on-failure:5}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "test -r /tari-wallet/control/capability.json && find /tari-wallet/control/capability.json -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      btc_net:
+        ipv4_address: 172.29.0.37
+    dns: ["127.0.0.1"]

@@ -59,7 +59,9 @@ def dashboard(method, path, body=None):
 def bitcoin_cli(method, params=None, wallet=None):
     command = [
         "docker",
+        "compose",
         "exec",
+        "-T",
         "bitcoin",
         "bitcoin-cli",
         f"-rpcuser={RPC_USER}",

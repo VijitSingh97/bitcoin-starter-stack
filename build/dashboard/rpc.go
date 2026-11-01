@@ -3,19 +3,23 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 )
 
 const maxRPCBody = 4 << 20
 
 type rpcClient struct {
-	url      string
-	user     string
-	password string
-	client   *http.Client
+	url        string
+	user       string
+	password   string
+	cookiePath string
+	client     *http.Client
 }
 
 type rpcResponse struct {
@@ -35,9 +39,20 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(r.user, r.password)
+	user, password := r.user, r.password
+	if r.cookiePath != "" {
+		user, password, err = readRPCCookie(r.cookiePath)
+		if err != nil {
+			return fmt.Errorf("read RPC cookie: %w", err)
+		}
+	}
+	if user != "" || password != "" {
+		req.SetBasicAuth(user, password)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.client.Do(req)
+	client := *r.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -66,4 +81,32 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 		return fmt.Errorf("decode RPC %s result: %w", method, err)
 	}
 	return nil
+}
+
+func readRPCCookie(path string) (string, string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("cookie is not a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer file.Close()
+	contents, err := io.ReadAll(io.LimitReader(file, 1025))
+	if err != nil {
+		return "", "", err
+	}
+	if len(contents) > 1024 {
+		return "", "", fmt.Errorf("cookie is too large")
+	}
+	user, password, ok := strings.Cut(strings.TrimSpace(string(contents)), ":")
+	decoded, decodeErr := base64.StdEncoding.DecodeString(password)
+	if !ok || user != "__cookie__" || len(decoded) != 32 || decodeErr != nil || strings.ContainsAny(password, "\r\n") {
+		return "", "", fmt.Errorf("cookie is malformed")
+	}
+	return user, password, nil
 }

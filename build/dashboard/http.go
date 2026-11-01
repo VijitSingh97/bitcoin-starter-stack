@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,8 +19,32 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /metrics", a.metrics)
 	mux.HandleFunc("GET /api/fees", a.apiFees)
 	mux.HandleFunc("GET /api/prices", a.apiPrices)
+	mux.HandleFunc("GET /api/monero", a.apiMonero)
+	mux.HandleFunc("GET /api/{node}", a.apiAdditionalNode)
+	mux.HandleFunc("GET /api/{node}/fees", a.apiAdditionalFees)
+	mux.HandleFunc("GET /api/{node}/watch", a.apiFamilyWatchList)
+	mux.HandleFunc("POST /api/{node}/watch", a.apiFamilyWatchAdd)
+	mux.HandleFunc("DELETE /api/{node}/watch/{id}", a.apiFamilyWatchRemove)
+	mux.HandleFunc("GET /api/nodes", a.apiNodes)
+	mux.HandleFunc("POST /api/nodes/{node}/power", a.apiNodePower)
+	mux.HandleFunc("GET /api/settings/host", a.apiHostControlGet)
+	mux.HandleFunc("POST /api/settings/host", a.apiHostControlPost)
+	mux.HandleFunc("GET /api/monero/fees", a.apiMoneroFees)
+	mux.HandleFunc("GET /api/monero/watch", a.apiMoneroWatchList)
+	mux.HandleFunc("POST /api/monero/watch", a.apiMoneroWatchAdd)
+	mux.HandleFunc("DELETE /api/monero/watch/{id}", a.apiMoneroWatchRemove)
+	mux.HandleFunc("POST /api/monero/watch/{id}/key-images", a.apiMoneroWatchKeyImages)
+	mux.HandleFunc("GET /api/tari/watch", a.apiTariWatch)
+	mux.HandleFunc("POST /api/tari/watch", a.apiTariWatchAdd)
+	mux.HandleFunc("DELETE /api/tari/watch/{id}", a.apiTariWatchRemove)
+	mux.HandleFunc("POST /api/settings/password", a.apiDashboardPassword)
+	mux.HandleFunc("GET /api/settings/credentials", a.apiCredentialsGet)
+	mux.HandleFunc("POST /api/settings/credentials/reveal", a.apiCredentialsReveal)
+	mux.HandleFunc("POST /api/settings/credentials/reset", a.apiCredentialsReset)
 	mux.HandleFunc("GET /api/settings", a.apiSettingsGet)
 	mux.HandleFunc("POST /api/settings", a.apiSettingsPost)
+	mux.HandleFunc("GET /api/settings/ports", a.apiPortControlGet)
+	mux.HandleFunc("POST /api/settings/ports", a.apiPortControlPost)
 	mux.HandleFunc("GET /api/watch", a.apiWatchList)
 	mux.HandleFunc("POST /api/watch", a.apiWatchAdd)
 	mux.HandleFunc("DELETE /api/watch/{name}", a.apiWatchRemove)
@@ -36,16 +59,18 @@ func (a *app) routes() http.Handler {
 
 func (a *app) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/static/favicon.png" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if a.cfg.dashboardPassword == "" {
+		if !a.hasDashboardPassword() {
 			next.ServeHTTP(w, r)
 			return
 		}
 		_, password, ok := r.BasicAuth()
-		valid := ok && len(password) == len(a.cfg.dashboardPassword) && subtle.ConstantTimeCompare([]byte(password), []byte(a.cfg.dashboardPassword)) == 1
+		valid := ok && a.dashboardPasswordMatches(password)
 		if !valid {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Bitcoin Node Status"`)
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
@@ -55,6 +80,11 @@ func (a *app) auth(next http.Handler) http.Handler {
 	})
 }
 func (a *app) metrics(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.bitcoinDisabled {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprint(w, "# TYPE bitcoin_node_enabled gauge\nbitcoin_node_enabled 0\n# TYPE bitcoin_node_up gauge\nbitcoin_node_up 0\n")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -109,11 +139,14 @@ func (a *app) apiFees(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"fee": fees})
 }
 
-func (a *app) apiPrices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, a.prices.Snapshot())
+func (a *app) apiPrices(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, a.prices.SnapshotAsset(r.URL.Query().Get("asset")))
 }
 
 func (a *app) nodeRPC(method string, params []any) any {
+	if a.cfg.bitcoinDisabled {
+		return nil
+	}
 	var result any
 	if a.rpc.call(a.ctx, method, params, &result) != nil {
 		return nil
@@ -122,6 +155,9 @@ func (a *app) nodeRPC(method string, params []any) any {
 }
 
 func (a *app) walletRPC(wallet, method string, params []any, timeout time.Duration) any {
+	if a.cfg.bitcoinDisabled {
+		return nil
+	}
 	rpc := *a.rpc
 	rpc.url = strings.TrimRight(rpc.url, "/") + "/wallet/" + url.PathEscape(wallet)
 	rpc.client = &http.Client{Timeout: timeout}
@@ -141,19 +177,23 @@ func rejectCSRF(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (a *app) apiWatchList(w http.ResponseWriter, r *http.Request) {
+	if a.rejectDisabledBitcoin(w) {
+		return
+	}
 	if a.watch.Err() != nil {
 		http.Error(w, "watch wallet storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	entries := a.watch.Entries()
-	if a.cfg.dashboardPassword == "" && !publicExampleOnly(entries) {
+	if !a.configurationAllowed(r) && !publicExampleOnly(entries) {
 		http.Error(w, "set dashboard.password to access watch-only wallets", 403)
 		return
 	}
 	var chain blockchainInfo
 	_ = a.rpc.call(r.Context(), "getblockchaininfo", nil, &chain)
 	view := a.watch.ListWithChain(a.walletRPC, chain)
-	view["has_password"] = a.cfg.dashboardPassword != ""
+	view["has_password"] = a.hasDashboardPassword()
+	view["can_configure"] = a.configurationAllowed(r)
 	writeJSON(w, view)
 }
 
@@ -162,11 +202,10 @@ func publicExampleOnly(entries []WatchEntry) bool {
 }
 
 func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.dashboardPassword == "" {
-		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
+	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if a.watch.Err() != nil {
@@ -231,11 +270,10 @@ func (a *app) apiWatchAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.dashboardPassword == "" {
-		http.Error(w, "set dashboard.password to manage watch-only wallets", 403)
+	if a.rejectDisabledBitcoin(w) {
 		return
 	}
-	if rejectCSRF(w, r) {
+	if rejectCredentialCSRF(w, r) || a.rejectUnsafeSettingsHost(w, r) {
 		return
 	}
 	if a.watch.Err() != nil {
@@ -268,13 +306,21 @@ func (a *app) apiWatchRemove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+func (a *app) rejectDisabledBitcoin(w http.ResponseWriter) bool {
+	if !a.cfg.bitcoinDisabled {
+		return false
+	}
+	http.Error(w, "Bitcoin node is not configured", http.StatusServiceUnavailable)
+	return true
+}
+
 func (a *app) apiUpgradeStatus(w http.ResponseWriter, r *http.Request) {
 	_, err := os.Stat(filepath.Join(a.cfg.stateDir, "upgrade.request"))
 	writeJSON(w, map[string]any{"enabled": a.cfg.control, "update": a.monitor.UpdateNote(), "pending": err == nil})
 }
 
 func (a *app) apiUpgradeRequest(w http.ResponseWriter, r *http.Request) {
-	if !a.cfg.control || a.cfg.dashboardPassword == "" {
+	if !a.cfg.control || !a.hasDashboardPassword() {
 		http.Error(w, "upgrade control is disabled — set dashboard.control", 403)
 		return
 	}

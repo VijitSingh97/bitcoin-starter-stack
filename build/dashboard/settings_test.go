@@ -21,7 +21,7 @@ func settingsRequest(handler http.Handler, method, password, body string, csrf b
 
 func settingsRequestHost(handler http.Handler, method, password, body string, csrf bool, host string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "/api/settings", strings.NewReader(body))
-	req.RemoteAddr = "192.0.2.10:12345"
+	req.RemoteAddr = "192.168.1.20:12345"
 	req.Host = host
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-Host", "mini-1.local")
@@ -37,10 +37,9 @@ func settingsRequestHost(handler http.Handler, method, password, body string, cs
 }
 
 func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
-	onion := strings.Repeat("a", 56) + ".onion"
 	for _, host := range []string{
 		"localhost", "localhost:80", "mini-1", "mini-1.local", "mini-1.local:80", "node.home.arpa",
-		"127.0.0.1", "192.168.1.117", "192.168.1.117:80", "10.0.0.2", "172.16.0.2", "[::1]:80", "[fd00::1]", onion,
+		"127.0.0.1", "192.168.1.117", "192.168.1.117:80", "10.0.0.2", "172.16.0.2", "[::1]:80", "[fd00::1]",
 	} {
 		if !passwordlessSettingsHostAllowed(host) {
 			t.Errorf("host %q rejected", host)
@@ -51,10 +50,33 @@ func TestPasswordlessSettingsHostAllowlist(t *testing.T) {
 		"134744072", "0x08080808", "01002004010",
 		"user@localhost", "localhost/path", "localhost?query", "localhost?", "localhost#", "localhost:", "localhost:65536",
 		"-node.local", "node..local", "short.onion", "[::1", "[::1]:",
+		strings.Repeat("a", 56) + ".onion",
 	} {
 		if passwordlessSettingsHostAllowed(host) {
 			t.Errorf("host %q allowed", host)
 		}
+	}
+}
+
+func TestSettingsOnionHostRequiresConfiguredPassword(t *testing.T) {
+	onion := strings.Repeat("a", 56) + ".onion"
+	body := `{"telegram_enabled":false,"telegram_chat_id":"","healthchecks_enabled":false,"alert_new_block":true}`
+	passwordless, passwordlessHandler := testApp(t, &rpcFixture{}, "")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		got := settingsRequestHost(passwordlessHandler, method, "", body, true, onion)
+		if got.Code != http.StatusForbidden {
+			t.Fatalf("passwordless onion %s = %d: %s", method, got.Code, got.Body.String())
+		}
+	}
+	if passwordless.monitor.settingsOverridden {
+		t.Fatal("rejected onion request changed settings")
+	}
+	_, protectedHandler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	if got := settingsRequestHost(protectedHandler, http.MethodGet, "dashboard-secret", "", false, onion); got.Code != http.StatusOK {
+		t.Fatalf("authenticated onion GET = %d: %s", got.Code, got.Body.String())
+	}
+	if got := settingsRequestHost(protectedHandler, http.MethodPost, "dashboard-secret", body, true, onion); got.Code != http.StatusOK {
+		t.Fatalf("authenticated onion POST = %d: %s", got.Code, got.Body.String())
 	}
 }
 
@@ -82,17 +104,43 @@ func TestSettingsAPIReturnsValuesAndRespectsConfiguredPassword(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["overridden"] != false {
+	if view["telegram_enabled"] != true || view["telegram_bot_token"] != "123:top-secret" || view["telegram_chat_id"] != "-10042" || view["healthchecks_enabled"] != true || view["healthchecks_url"] != "https://hc-ping.com/private-uuid" || view["alert_new_block"] != true || view["tower_labels"] != false || view["default_currency"] != "USD" || view["overridden"] != false {
 		t.Fatalf("unexpected settings view: %#v", view)
 	}
 	if view["can_configure"] != true {
 		t.Fatalf("authenticated LAN settings view is not configurable: %#v", view)
 	}
+	if view["bitcoin_enabled"] != true || view["monero_enabled"] != false || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false {
+		t.Fatalf("node-specific settings view: %#v", view)
+	}
+}
+
+func TestSettingsAppearanceScopeOmitsNotificationCredentials(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:top-secret")
+	t.Setenv("TELEGRAM_CHAT_ID", "-10042")
+	t.Setenv("HEALTHCHECKS_URL", "https://hc-ping.com/private-uuid")
+	_, handler := testApp(t, &rpcFixture{}, "dashboard-secret")
+	req := httptest.NewRequest(http.MethodGet, "/api/settings?scope=appearance", nil)
+	req.RemoteAddr = "192.168.1.20:12345"
+	req.Host = "mini-1.local"
+	req.SetBasicAuth("dashboard", "dashboard-secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("appearance GET = %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "top-secret") || strings.Contains(w.Body.String(), "private-uuid") {
+		t.Fatalf("appearance response leaked notification settings: %s", w.Body.String())
+	}
+	var view map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || len(view) != 2 || view["tower_labels"] != false || view["default_currency"] != "USD" {
+		t.Fatalf("appearance response = %#v, %v", view, err)
+	}
 }
 
 func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *testing.T) {
 	a, handler := testApp(t, &rpcFixture{}, "")
-	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true}`
+	body := `{"telegram_enabled":true,"telegram_bot_token":"123:passwordless-secret","telegram_chat_id":"-10042","healthchecks_enabled":false,"alert_new_block":true,"tower_labels":true,"default_currency":"CNY"}`
 	if got := settingsRequest(handler, http.MethodPost, "", body, false); got.Code != http.StatusForbidden {
 		t.Fatalf("LAN POST without CSRF header = %d, want 403", got.Code)
 	}
@@ -117,7 +165,7 @@ func TestSettingsPasswordlessLANWriteRequiresCSRFAndPersistsAcrossRestart(t *tes
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatalf("restarted LAN GET = %d %#v", get.Code, view)
 	}
-	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true {
+	if view["can_configure"] != true || view["overridden"] != true || view["telegram_bot_token"] != "123:passwordless-secret" || view["alert_new_block"] != true || view["tower_labels"] != true || view["default_currency"] != "CNY" {
 		t.Fatalf("restarted LAN settings view = %#v", view)
 	}
 }
@@ -168,6 +216,9 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 		HealthchecksEnabled: boolPointer(true),
 		HealthchecksURL:     stringPointer("https://hc-ping.com/dashboard-id/"),
 		AlertNewBlock:       boolPointer(true),
+		AlertNewBlockMonero: boolPointer(true),
+		TowerLabels:         boolPointer(true),
+		DefaultCurrency:     stringPointer("EUR"),
 	}
 	if err := m.updateSettings(update); err != nil {
 		t.Fatal(err)
@@ -183,12 +234,21 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 
 	restarted := NewMonitor("dev", t.TempDir(), stateDir)
 	got := restarted.notificationSettings()
-	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock {
+	if got.TelegramBotToken != "456:dashboard-token" || got.TelegramChatID != "dashboard-chat" || got.HealthchecksURL != "https://hc-ping.com/dashboard-id" || !got.AlertNewBlock || !got.AlertNewBlockMonero || !got.TowerLabels || got.DefaultCurrency != "EUR" {
 		t.Fatalf("restarted settings = %#v", got)
 	}
 	view, err := restarted.settingsView(true)
 	if err != nil || view["overridden"] != true {
 		t.Fatalf("restarted view = %#v, %v", view, err)
+	}
+	if err := restarted.updateSettings(settingsUpdate{
+		TelegramEnabled: boolPointer(false), TelegramChatID: stringPointer(""),
+		HealthchecksEnabled: boolPointer(false), AlertNewBlock: boolPointer(false),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted.notificationSettings().TowerLabels || !restarted.notificationSettings().AlertNewBlockMonero || restarted.notificationSettings().DefaultCurrency != "EUR" {
+		t.Fatal("legacy settings update changed newer preferences")
 	}
 
 	if err := restarted.resetSettings(); err != nil {
@@ -200,6 +260,66 @@ func TestSettingsPersistRestartAndResetToServerConfig(t *testing.T) {
 	got = restarted.notificationSettings()
 	if got.TelegramBotToken != "123:server-token" || got.TelegramChatID != "server-chat" || got.HealthchecksURL != "https://hc-ping.com/server-id" || got.AlertNewBlock {
 		t.Fatalf("reset settings = %#v", got)
+	}
+}
+
+func TestSettingsLoadOldOverrideDefaultsTowerLabelsOff(t *testing.T) {
+	stateDir := t.TempDir()
+	old := `{"telegram_enabled":false,"telegram_bot_token":"","telegram_chat_id":"","healthchecks_enabled":false,"healthchecks_url":"","alert_new_block":true}`
+	if err := os.WriteFile(filepath.Join(stateDir, "notification_settings.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewMonitor("dev", t.TempDir(), stateDir)
+	view, err := m.settingsView(true)
+	if err != nil || view["overridden"] != true || view["alert_new_block"] != true || view["alert_new_block_bitcoin"] != true || view["alert_new_block_monero"] != false || view["tower_labels"] != false || view["default_currency"] != "USD" {
+		t.Fatalf("old override view = %#v, %v", view, err)
+	}
+	for _, field := range []string{"alert_monitor_online", "alert_node_down", "alert_node_recovered", "alert_sync_complete", "alert_low_disk", "alert_updates"} {
+		if view[field] != true {
+			t.Fatalf("old override %s = %#v, want true", field, view[field])
+		}
+	}
+	if view["node_down_after_minutes"] != 3 || view["low_disk_gib"] != 50 {
+		t.Fatalf("old override thresholds = down %#v disk %#v", view["node_down_after_minutes"], view["low_disk_gib"])
+	}
+}
+
+func TestGlobalAlertSettingsValidateAndPreserveScopedValues(t *testing.T) {
+	m := NewMonitor("dev", t.TempDir(), t.TempDir())
+	if err := m.updateSettingsScope(settingsUpdate{
+		AlertLowDisk:         boolPointer(false),
+		AlertNodeRecovered:   boolPointer(false),
+		NodeDownAfterMinutes: intPointer(7),
+		LowDiskGiB:           intPointer(25),
+		present: map[string]bool{
+			"alert_low_disk": true, "alert_node_recovered": true,
+			"node_down_after_minutes": true, "low_disk_gib": true,
+		},
+	}, "global"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.updateSettingsScope(settingsUpdate{
+		AlertNewBlockMonero: boolPointer(true),
+		present:             map[string]bool{"alert_new_block_monero": true},
+	}, "nodes"); err != nil {
+		t.Fatal(err)
+	}
+	got := m.notificationSettings()
+	if got.AlertLowDisk || got.AlertNodeRecovered || got.NodeDownAfterMinutes != 7 || got.LowDiskGiB != 25 || !got.AlertNewBlockMonero || !got.AlertNodeDown || !got.AlertUpdates {
+		t.Fatalf("scoped settings = %#v", got)
+	}
+	for _, test := range []settingsUpdate{
+		{NodeDownAfterMinutes: intPointer(0), present: map[string]bool{"node_down_after_minutes": true}},
+		{NodeDownAfterMinutes: intPointer(61), present: map[string]bool{"node_down_after_minutes": true}},
+		{LowDiskGiB: intPointer(0), present: map[string]bool{"low_disk_gib": true}},
+		{LowDiskGiB: intPointer(1_048_577), present: map[string]bool{"low_disk_gib": true}},
+	} {
+		if err := m.updateSettingsScope(test, "global"); !errors.Is(err, ErrSettingsInvalid) {
+			t.Fatalf("invalid thresholds accepted: %#v: %v", test, err)
+		}
+	}
+	if after := m.notificationSettings(); after != got {
+		t.Fatalf("invalid update changed settings: %#v", after)
 	}
 }
 
@@ -221,7 +341,7 @@ func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
 		t.Fatalf("valid POST = %d: %s", response.Code, response.Body.String())
 	}
 	var savedView map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" || savedView["telegram_bot_token"] != "123:original-token" || savedView["healthchecks_url"] != "https://hc-ping.com/original-id" {
+	if err := json.Unmarshal(response.Body.Bytes(), &savedView); err != nil || savedView["overridden"] != true || savedView["telegram_chat_id"] != "new-chat" || savedView["telegram_bot_token"] != "123:original-token" || savedView["healthchecks_url"] != "https://hc-ping.com/original-id" || savedView["port_control"] == nil {
 		t.Fatalf("POST response view = %#v, %v", savedView, err)
 	}
 	settings := a.monitor.notificationSettings()
@@ -233,6 +353,7 @@ func TestSettingsAPIValidationCSRFAndSecretReplacement(t *testing.T) {
 		`{"telegram_enabled":true,"telegram_chat_id":"new-chat","healthchecks_enabled":true,"alert_new_block":true,"unexpected":1}`,
 		`{"telegram_enabled":true,"telegram_bot_token":"bad token","telegram_chat_id":"new-chat","healthchecks_enabled":true,"healthchecks_url":"https://hc-ping.com/id","alert_new_block":true}`,
 		`{"telegram_enabled":true,"telegram_bot_token":"ok","telegram_chat_id":"new-chat","healthchecks_enabled":true,"healthchecks_url":"http://hc-ping.com/id","alert_new_block":true}`,
+		`{"telegram_enabled":true,"telegram_chat_id":"new-chat","healthchecks_enabled":true,"alert_new_block":true,"default_currency":"DOGE"}`,
 		`{"reset":true,"alert_new_block":true}`,
 		`{"reset":true,"alert_new_block":null}`,
 		`{"reset":false}`,
@@ -376,3 +497,4 @@ func TestSettingsBodyLimit(t *testing.T) {
 
 func boolPointer(value bool) *bool       { return &value }
 func stringPointer(value string) *string { return &value }
+func intPointer(value int) *int          { return &value }

@@ -3,7 +3,9 @@
 ## Day-to-day commands
 
 Use `./stack` for operations; it prevents implicit image downloads and builds.
-The explicit `pull` command uses the host's existing Docker settings.
+The explicit `pull` command uses the host's existing Docker settings. Package
+installs use `bitcoin-stack` instead of `./stack` (with `sudo` for APT). Direct
+`docker compose` examples run from a configured source checkout.
 
 | Command | What it does |
 |---|---|
@@ -15,11 +17,12 @@ The explicit `pull` command uses the host's existing Docker settings.
 | `./stack status` | Container + health summary; exits non-zero if anything is down. |
 | `./stack doctor` | Read-only health report: deps, config freshness, disk, containers, sync state, tor bootstrap, onion addresses. |
 | `./stack backup` / `restore [-y] <archive>` | See [Backup](#backup). |
-| `docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
+| `docker compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo` | Talk to the node directly (cookie auth, no credentials needed). |
 
 ## Health checks
 
-All three services define Docker health checks:
+Shared services and configured node services define Docker health checks. For
+the core Bitcoin deployment:
 
 - `tor` — SOCKS port accepting connections (5 min grace for bootstrap).
 - `bitcoin` — RPC answers `getblockchaininfo`, authenticated with Core's
@@ -28,8 +31,61 @@ All three services define Docker health checks:
 - `dashboard` — any HTTP response on port 8000 (inside the container); a
   401 under basic auth still counts as healthy.
 
-`docker ps` shows the state; `docker inspect --format '{{json .State.Health}}' bitcoin`
+`docker ps` shows the state. Run `./stack doctor` or `bitcoin-stack doctor` for
+a health report. From a source checkout,
+`docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q bitcoin)"`
 shows recent probe output when diagnosing.
+
+## Startup and external configuration changes
+
+The application starts only when you run `init` or `up`, unless **Launch at
+boot/login** is enabled in global Settings. APT uses Docker's startup policy;
+Homebrew uses its user service after login and waits for Docker. The host
+management helper remains available independently of the application startup
+preference. Turning the preference off leaves running nodes alone. Fresh
+containers use `on-failure:5` while it is off and `unless-stopped` while on.
+Existing installations preserve their previous behavior until explicitly changed.
+
+Private `.approved-config.json` and `.approved.env` snapshots retain the last
+approved host configuration. If `config.json` changes while stopped, a manual
+start asks before applying it. A background start keeps the approved version;
+global Settings offers the pending file for approval. Approval is tied to that
+file revision, so a second edit requires a fresh review. `apply` is explicit
+approval. On an older installation with no approval snapshot, the existing
+rendered runtime is retained until the file is explicitly approved once.
+
+## Dashboard and node credentials
+
+Open the gear menu to change the dashboard login. Enter the current password,
+then the new password twice. It must contain 12–128 characters and no control
+characters. The old password stops working immediately; reload and sign in
+with the new one. The dashboard stores only a salted hash in
+`/state/dashboard_auth.json` inside the `dashboard_state` named volume. That
+saved login takes precedence over the baseline in `config.json` and `.env`.
+If authentication is currently disabled, leave the current-password field blank
+to add a password from Settings. Existing logins still require their current
+password. A passwordless dashboard allows trusted LAN users to manage the
+application; add a password before sharing access with less-trusted devices.
+
+If the dashboard password is forgotten, set a new baseline
+`dashboard.password` in the installation's `config.json`, then stop the
+dashboard before touching its state. While it is stopped, remove only
+`/state/dashboard_auth.json` from the correct deployment's `dashboard_state`
+named volume. Keep every other file and never delete the volume. Run the
+installation's normal apply/start flow to render `.env` and recreate the
+dashboard; it then uses the new baseline. Compose project names determine the
+actual volume name, so inspect the deployment before making this offline change
+or ask the installer administrator to perform it.
+
+Node credentials are in the selected tower's settings, after its wallet
+section. Add a dashboard password before revealing or resetting RPC credentials.
+For an enabled authenticated LAN RPC listener, **Show password**
+reveals that node's username and password only after an explicit click. To
+rotate the password, type `reset`. The host helper creates a new 48-character
+hex password, updates the private node configuration and `.env`, and restarts
+the affected services. Reveal the new login and update every external client.
+Reset is unavailable for an inactive node. Monero ZMQ and Tari gRPC have no
+application authentication and therefore no password to reveal or reset.
 
 ## Upgrading
 
@@ -40,6 +96,7 @@ restarts containers or changes node data. Run:
 sudo bitcoin-stack backup
 sudo apt update
 sudo apt install --only-upgrade bitcoin-starter-stack
+sudo bitcoin-stack pull
 sudo bitcoin-stack apply
 ```
 
@@ -90,7 +147,9 @@ Enabling it is one setting: answer **y** at the Upgrade-button question in
 `./stack apply`. That's it: `up`/`apply` start the host-side agent for you,
 detached and logging to `~/upgrade-agent.log`, and install a `@reboot` cron
 entry so it survives reboots (no sudo needed). Setting `control` back to
-`false` and re-applying stops the agent and removes the cron entry.
+`false` disables upgrades. The agent continues to handle validated LAN port
+requests while a dashboard password is configured; clearing that password and
+applying removes its automatic source-install startup.
 `./stack doctor` reports whether the agent is running.
 
 The source upgrade's Git fetch requires the running Tor proxy. A failed Tor check
@@ -140,7 +199,8 @@ WantedBy=multi-user.target
 APT installations use `sudo bitcoin-stack backup` and write archives under
 `/var/lib/bitcoin-starter-stack/backups`; restore and apply with `sudo` as well.
 
-A backup holds everything that can't be re-derived — and nothing else:
+A backup holds the stack configuration and dashboard state, but excludes chain
+data and encrypted Monero wallet files:
 
 - `config.json` and `.env` (settings + credentials)
 - the node's inbound-onion key (`onion_v3_private_key`, if enabled)
@@ -148,7 +208,14 @@ A backup holds everything that can't be re-derived — and nothing else:
 - the full `dashboard_state` volume: watch-only wallet roster and balance
   history (including entries that still need a rescan), pending upgrade
   request, event log, and dashboard-saved notification settings
-  (`notification_settings.json`)
+  (`notification_settings.json`), plus the saved dashboard password hash
+  (`dashboard_auth.json`)
+
+The `monero_wallets` volume is intentionally excluded because its encrypted
+wallet files contain private view-key material. After restoring onto a new
+machine, remove each unavailable Monero row and add it again with its address
+and private view key. Release archives and Debian packages never contain this
+runtime volume.
 
 Losing the onion keys means new `.onion` addresses, so back up after
 enabling either onion feature. The chain itself is re-derivable from the
@@ -170,7 +237,9 @@ first — a live copy of `chainstate/` is corrupt by construction.
 
 ## Self-healing (a deliberate non-feature)
 
-`restart: unless-stopped` already restarts any container that *crashes*.
+Fresh installs use `on-failure:5` to retry a crashed container up to five times.
+With launch at boot/login enabled, `unless-stopped` also restarts crashed
+containers and brings them back after Docker restarts.
 The remaining case — running but unhealthy — would need something with
 Docker-socket access to act on, and a socket proxy is a bigger attack
 surface than the failure it heals on a single-node stack. So: unhealthy
@@ -196,6 +265,14 @@ During startup that's normal (block verification can take minutes). If it
 persists: `docker compose logs bitcoin` — and if you recently changed
 credentials, make sure you re-ran `./configure.sh` *and*
 `./stack apply` so both containers got the new values.
+
+**The dashboard rejects the password from `.env`** — a password changed in the
+gear menu takes precedence over that baseline. Use the changed password or the
+offline recovery procedure in [Dashboard and node credentials](#dashboard-and-node-credentials).
+
+**A wallet app fails after an RPC credential reset** — reveal the new login in
+that node's tower settings and update the app. The previous password is no
+longer valid.
 
 **Node syncs but peer count is 0 after hours** — tor container unhealthy or
 restarted with a new identity mid-session. `docker compose restart tor bitcoin`.

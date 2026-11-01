@@ -40,6 +40,14 @@ environment. Pushes use a fixed HTTPS repository URL, ignore configured credenti
 helpers and Git hooks, and never put the token in an argument. The wrapper has no
 command that prints a token and does not change global Git or GitHub CLI settings.
 
+For GitHub Actions, add `DEVELOPER_BOT_APP_ID` as a repository variable or secret
+and `DEVELOPER_BOT_PRIVATE_KEY` as a repository secret containing the PEM file's
+contents. If both App ID locations exist, the variable takes precedence. The
+scheduled node updater and release tap updater use these settings; no extra App
+permission to manage secrets is needed. The node-update workflow becomes
+available after it is merged into the default branch, where it can also be run
+manually from Actions.
+
 Read-only bootstrap checks can continue to use ordinary `git` and unauthenticated
 GitHub access. If the helper is not configured, stop before a repository write and
 ask the owner for the App ID and local PEM path; do not fall back to a human token.

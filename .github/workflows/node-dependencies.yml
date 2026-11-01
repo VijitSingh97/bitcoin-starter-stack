@@ -1,0 +1,61 @@
+name: Node dependency updates
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-dependency-updates
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BSS_DEVELOPER_BOT_APP_ID: ${{ vars.DEVELOPER_BOT_APP_ID || secrets.DEVELOPER_BOT_APP_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure developer bot
+        env:
+          PRIVATE_KEY: ${{ secrets.DEVELOPER_BOT_PRIVATE_KEY }}
+        run: |
+          : "${BSS_DEVELOPER_BOT_APP_ID:?set the DEVELOPER_BOT_APP_ID repository variable or secret}"
+          : "${PRIVATE_KEY:?set the DEVELOPER_BOT_PRIVATE_KEY repository secret}"
+          key="$RUNNER_TEMP/developer-bot.pem"
+          printf '%s' "$PRIVATE_KEY" >"$key"
+          chmod 600 "$key"
+          tools/developer-bot.py configure "$BSS_DEVELOPER_BOT_APP_ID" "$key"
+
+      - name: Check for an existing update
+        id: existing
+        run: |
+          count=$(tools/developer-bot.py gh pr list --state open --search 'in:title Update node dependencies' --json number --jq length)
+          test "$count" = 0 || echo "skip=true" >>"$GITHUB_OUTPUT"
+
+      - name: Update release pins
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: tools/update-node-dependencies.py --apply
+
+      - name: Open update pull request
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          git diff --quiet -- build/monero/Dockerfile build/litecoin/Dockerfile build/dogecoin/Dockerfile build/bitcoincash/Dockerfile && exit 0
+          branch="automation/node-dependencies-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          git add build/monero/Dockerfile build/litecoin/Dockerfile build/dogecoin/Dockerfile build/bitcoincash/Dockerfile
+          tools/developer-bot.py git commit -m 'Update node dependencies'
+          tools/developer-bot.py git push "HEAD:$branch"
+          body="$RUNNER_TEMP/node-dependencies.md"
+          printf '%s\n' 'Updates stable Monero, Litecoin, Dogecoin, and Bitcoin Cash node binaries and their verified SHA-256 pins. Direct node images remain monitored by Dependabot.' >"$body"
+          tools/developer-bot.py gh pr create --base main --head "$branch" --title 'Update node dependencies' --body-file "$body"

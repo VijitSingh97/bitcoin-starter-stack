@@ -65,10 +65,10 @@ export function genesisNote(w) {
 }
 
 export function editAccess(view) {
-  const enabled = !!view.has_password;
+  const enabled = view.can_configure === true || view.has_password === true;
   return {
     enabled,
-    warning: enabled ? "" : "Set a dashboard password to add or remove watch-only wallets.",
+    warning: enabled ? "" : "Open this dashboard from its trusted LAN address to manage watch-only wallets.",
   };
 }
 
@@ -82,6 +82,21 @@ export function walletKeyForPost(key, scriptType = "legacy") {
   if (scriptType === "native") return `wpkh(${publicKey}/<0;1>/*)`;
   if (scriptType === "nested") return `sh(wpkh(${publicKey}/<0;1>/*))`;
   return publicKey;
+}
+
+export function walletPost(name, key, scriptType, birthday, wallets = []) {
+  let walletName = String(name || "").trim();
+  if (!walletName) {
+    const identifier = value => [...String(value || "")].slice(0, 40)
+      .map(char => /[\p{L}\p{N}_-]/u.test(char) ? char : "_").join("");
+    const names = new Set(wallets.map(wallet => String(wallet?.name || "").toLocaleLowerCase()));
+    const identifiers = new Set(wallets.map(wallet => identifier(wallet?.name)));
+    for (let number = 1; !walletName; number += 1) {
+      const candidate = `Wallet ${number}`;
+      if (!names.has(candidate.toLocaleLowerCase()) && !identifiers.has(identifier(candidate))) walletName = candidate;
+    }
+  }
+  return { name: walletName, key: walletKeyForPost(key, scriptType), birthday: String(birthday || "") };
 }
 
 // first 4 … last 4 of a key/address/descriptor; full string if it's short.
@@ -108,7 +123,7 @@ if (typeof document !== "undefined") {
 
   const form = el("form", "watch-add");
   const name = el("input");
-  name.placeholder = "Label (e.g. Cold storage)";
+  name.placeholder = "Label (optional)";
   name.maxLength = 40;
   name.setAttribute("aria-label", "Wallet label");
   const key = el("input");
@@ -146,6 +161,7 @@ if (typeof document !== "undefined") {
     editingEnabled = access.enabled;
     add.disabled = !editingEnabled;
     bday.disabled = !!view.pruned;
+    bday.hidden = !!view.pruned;
     if (view.pruned) bday.value = "";
     hint.textContent = watchHint(!!view.pruned);
     list.textContent = "";
@@ -321,11 +337,7 @@ if (typeof document !== "undefined") {
       const res = await fetch("/api/watch", {
         method: "POST",
         headers: { ...CSRF, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.value,
-          key: walletKeyForPost(key.value, scriptType.value),
-          birthday: bday.value,
-        }),
+        body: JSON.stringify(walletPost(name.value, key.value, scriptType.value, bday.value, last.wallets)),
       });
       if (res.ok) {
         name.value = key.value = bday.value = "";

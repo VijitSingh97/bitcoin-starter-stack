@@ -20,6 +20,9 @@ if [ -f "$src/config.json" ] || [ -f "$src/.env" ]; then
   exit 0
 fi
 
+export BITCOIN_STACK_PROJECT_NAME="node-manager-upgrade-$$-$RANDOM"
+export COMPOSE_PROJECT_NAME="$BITCOIN_STACK_PROJECT_NAME"
+
 work=$(mktemp -d)
 bare="$(mktemp -d)/upstream.git"
 data=$(mktemp -d)
@@ -29,6 +32,36 @@ fail() {
   echo "FAIL: $1"
   (cd "$work" && docker compose logs --tail 30 2>/dev/null) || true
   exit 1
+}
+
+service_id() {
+  docker compose ps -q "$1"
+}
+
+service_inspect() {
+  local service id
+  service=$1
+  shift
+  id=$(service_id "$service")
+  [ -n "$id" ] || return 1
+  docker inspect "$id" "$@"
+}
+
+stack_network_id() {
+  local project
+  project=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | tail -n 1)
+  [ -n "$project" ] || return 1
+  docker network ls -q \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.network=$1" | head -n 1
+}
+
+stack_network_inspect() {
+  local id
+  id=$(stack_network_id "$1")
+  shift
+  [ -n "$id" ] || return 1
+  docker network inspect "$id" "$@"
 }
 cleanup() {
   (cd "$work" && docker compose down -v --remove-orphans >/dev/null 2>&1) || true
@@ -52,7 +85,7 @@ git remote add origin "$bare"
 git push -q origin HEAD --tags
 # Pin the datadir via config.json (gitignored, so it survives the upgrade's
 # checkout and is re-rendered identically on every configure).
-printf '{"bitcoin": {"data_dir": "%s"}, "dashboard": {"password": "upgradetest"}}\n' "$data" >config.json
+printf '{"bitcoin": {"data_dir": "%s"}, "dashboard": {"password": "upgradetest", "bind_ip": "127.0.0.1"}}\n' "$data" >config.json
 
 # Pre-build both releases' images and tag them as the compose image refs
 # (ghcr…:0.0.2 / :0.0.1). The dashboard bakes VERSION at build time, so each
@@ -67,12 +100,12 @@ done
 
 # Boot the OLD release (uses the local ghcr…:0.0.1 images just built).
 docker compose up -d --wait --wait-timeout 300 || fail "v0.0.1 did not come up healthy"
-[ "$(docker network inspect btc_net --format '{{.Internal}}')" = false ] || fail "old release did not start with the legacy external network"
+[ "$(stack_network_inspect btc_net --format '{{.Internal}}')" = false ] || fail "old release did not start with the legacy external network"
 
 # Seed a safe dashboard override so the upgrade backup proves UI-managed state
 # survives independently of config.json and .env.
 notification_settings='{"telegram_enabled":false,"telegram_bot_token":"","telegram_chat_id":"","healthchecks_enabled":false,"healthchecks_url":"","alert_new_block":true}'
-printf '%s\n' "$notification_settings" | docker exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/notification_settings.json' ||
+printf '%s\n' "$notification_settings" | docker compose exec -T -u 1000 dashboard sh -c 'umask 077; cat > /state/notification_settings.json' ||
   fail "could not seed notification settings"
 
 # The upgrade: fetch tags, see v0.0.2 is newer, back up, check out, re-apply.
@@ -81,7 +114,7 @@ $out"
 echo "$out" | grep -q "Upgrading v0.0.1 -> v0.0.2" || fail "upgrade did not move 0.0.1 -> 0.0.2:
 $out"
 [ "$(cat VERSION)" = "0.0.2" ] || fail "checkout did not land on v0.0.2 (VERSION=$(cat VERSION))"
-[ "$(docker network inspect btc_net --format '{{.Internal}}')" = true ] || fail "upgrade retained the legacy external network"
+[ "$(stack_network_inspect btc_net --format '{{.Internal}}')" = true ] || fail "upgrade retained the legacy external network"
 archive=$(find backups -maxdepth 1 -type f -name 'stack-backup-*.tar.gz' -print | sort | tail -1)
 [ -n "$archive" ] || fail "no pre-upgrade backup was written"
 tar tzf "$archive" | grep -Eq '^\.?/?dashboard_state/notification_settings\.json$' ||
@@ -98,7 +131,7 @@ ok=
 for _ in $(seq 1 30); do
   unhealthy=
   for c in tor bitcoin dashboard; do
-    h=$(docker inspect "$c" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+    h=$(service_inspect "$c" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
     [ "$h" = healthy ] || unhealthy="$c=$h"
   done
   [ -z "$unhealthy" ] && {
@@ -109,18 +142,18 @@ for _ in $(seq 1 30); do
 done
 [ -n "$ok" ] || fail "stack not healthy after upgrade ($unhealthy)"
 # and serving the new baked version
-curl -fsS -u x:upgradetest localhost 2>/dev/null | grep -q "v0.0.2" || fail "dashboard not serving v0.0.2 after upgrade"
-docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
+curl -fsS -u x:upgradetest localhost 2>/dev/null | grep "v0.0.2" >/dev/null || fail "dashboard not serving v0.0.2 after upgrade"
+docker compose exec -T dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
   fail "notification settings did not survive upgrade"
 
 # Change the live file, restore the pre-upgrade archive, then recreate the
 # dashboard to prove it loads the restored override.
-docker exec -u 1000 dashboard sed -i 's/"alert_new_block":true/"alert_new_block":false/' /state/notification_settings.json ||
+docker compose exec -T -u 1000 dashboard sed -i 's/"alert_new_block":true/"alert_new_block":false/' /state/notification_settings.json ||
   fail "could not alter notification settings before restore"
 ./stack restore -y "$archive" >/dev/null || fail "could not restore pre-upgrade backup"
-docker exec dashboard sh -c 'test "$(stat -c %u:%a /state/notification_settings.json)" = 1000:600' ||
+docker compose exec -T dashboard sh -c 'test "$(stat -c %u:%a /state/notification_settings.json)" = 1000:600' ||
   fail "restore did not preserve private settings ownership and permissions"
-docker exec dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
+docker compose exec -T dashboard grep -q '"alert_new_block":true' /state/notification_settings.json ||
   fail "restore did not recover notification settings"
 ./stack apply >/dev/null || fail "could not apply configuration after restore"
 ./stack restart dashboard >/dev/null || fail "dashboard did not restart with restored notification settings"
@@ -134,13 +167,13 @@ curl -fsS -u x:upgradetest localhost/api/settings 2>/dev/null | grep -q '"alert_
 # the dashboard's state volume; the host agent must see it and run an upgrade. We're
 # already on the latest tag, so the upgrade no-ops — clearing the marker is the proof
 # the agent detected the request and invoked do_upgrade.
-docker exec -u 1000 dashboard sh -c 'echo requested > /state/upgrade.request' ||
+docker compose exec -T -u 1000 dashboard sh -c 'echo requested > /state/upgrade.request' ||
   fail "could not seed the upgrade request marker"
 ./stack upgrade-agent >/dev/null 2>&1 &
 agent_pid=$!
 consumed=
 for _ in $(seq 1 12); do
-  docker exec dashboard test -f /state/upgrade.request 2>/dev/null || {
+  docker compose exec -T dashboard test -f /state/upgrade.request 2>/dev/null || {
     consumed=1
     break
   }

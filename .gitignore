@@ -1,10 +1,22 @@
 .env
 .env.tmp.*
+.env.before-apply.*
+.env.before-init.*
+.approved-config.json
+.approved-config.*
+.approved.env
+.approved-env.*
+.approved-runtime.*
 data/
 __pycache__/
 .pytest_cache/
 .venv/
 config.json
+/credential-control/
+/port-control/
+/node-control/
+.host-service.pid
+host-service.log
 backups/
 
 # coverage data

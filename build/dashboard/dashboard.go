@@ -52,6 +52,8 @@ type diskInfo struct {
 }
 
 type pageData struct {
+	NodeName             string
+	BitcoinEnabled       bool
 	Loading              bool
 	LastKnownSync        bool
 	LastSyncTime         string
@@ -80,23 +82,34 @@ type pageData struct {
 	FeeHour              string
 	NextBlock            int64
 	LastUpdate           string
+	BitcoinRPCEndpoint   string
 }
 
 type app struct {
-	cfg      config
-	rpc      *rpcClient
-	template *template.Template
-	static   http.Handler
-	feesMu   sync.RWMutex
-	fees     []float64
-	syncMu   sync.RWMutex
-	lastSync *syncSnapshot
-	log      *log.Logger
-	watch    *WatchStore
-	monitor  *Monitor
-	prices   *PriceCache
-	scanner  *prunedScanner
-	ctx      context.Context
+	cfg              config
+	rpc              *rpcClient
+	template         *template.Template
+	static           http.Handler
+	feesMu           sync.RWMutex
+	fees             []float64
+	additionalFeesMu sync.RWMutex
+	additionalFees   map[string][]float64
+	nodeHealthMu     sync.RWMutex
+	nodeHealth       map[string]nodeHealthSnapshot
+	syncMu           sync.RWMutex
+	lastSync         *syncSnapshot
+	log              *log.Logger
+	watch            *WatchStore
+	monitor          *Monitor
+	prices           *PriceCache
+	scanner          *prunedScanner
+	moneroWatch      *MoneroWatchStore
+	moneroFees       *MoneroFeeHistory
+	familyWatch      *familyWatchManager
+	tariWatch        *TariWatchStore
+	dashboardAuth    *dashboardAuth
+	controlMu        sync.Mutex
+	ctx              context.Context
 }
 
 type syncSnapshot struct {
@@ -111,17 +124,31 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 	if err != nil {
 		return nil, err
 	}
-	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger}
+	a := &app{cfg: cfg, rpc: rpc, template: t, static: http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))), log: logger, additionalFees: make(map[string][]float64), nodeHealth: make(map[string]nodeHealthSnapshot)}
+	a.dashboardAuth, err = newDashboardAuth(cfg.stateDir, cfg.dashboardPassword)
+	if err != nil {
+		return nil, err
+	}
 	a.watch = NewWatchStore(cfg.stateDir)
 	if a.watch.ScanErr() != nil {
 		a.log.Print("watch balance cache unavailable; pruned balance scans disabled until the cache is repaired and the dashboard restarts")
 	}
 	a.scanner = newPrunedScanner(a)
 	a.monitor = NewMonitor(cfg.version, cfg.dataDir, cfg.stateDir)
+	a.monitor.configureNodes(!cfg.bitcoinDisabled, cfg.moneroEnabled, cfg.moneroDataDir)
+	a.monitor.configureAdditionalNodes(cfg.nodes)
+	a.monitor.transitioning = a.nodeTransitioning
 	if a.monitor.settingsErr != nil {
 		a.log.Print("notification settings unavailable; alerts disabled until the state file is repaired and the dashboard restarts")
 	}
 	a.prices = NewPriceCache()
+	a.moneroWatch = NewMoneroWatchStore(cfg)
+	a.moneroFees = NewMoneroFeeHistory(cfg.stateDir)
+	a.familyWatch = newFamilyWatchManager(a)
+	a.tariWatch = NewTariWatchStore(cfg)
+	if a.moneroWatch.Err() != nil {
+		a.log.Print("Monero watch-only wallet state unavailable until the state file is repaired and the dashboard restarts")
+	}
 	a.ctx = context.Background()
 	a.fees = []float64{}
 	return a, nil
@@ -129,6 +156,10 @@ func newApp(cfg config, rpc *rpcClient, templatePath, staticPath string, logger 
 func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
+		return
+	}
+	if a.cfg.bitcoinDisabled {
+		a.render(w, pageData{Version: versionLabel(a.cfg.version)})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -161,6 +192,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 	}
 	disk := diskUsage(a.cfg.dataDir)
 	data := pageData{
+		BitcoinEnabled:       true,
 		InitialBlockDownload: chain.InitialBlockDownload,
 		Version:              versionLabel(a.cfg.version), CoreVersion: network.Subversion, Uptime: uptimeLabel,
 		Blocks: chain.Blocks, Headers: chain.Headers, Progress: chain.VerificationProgress * 100,
@@ -169,6 +201,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 		TotalGB: gibU(disk.Total), FreeGB: gibU(disk.Free), DiskWarn: disk.Free < 50*1024*1024*1024,
 		NextBlock: chain.Blocks + 1, LastUpdate: time.Now().Format("15:04:05"),
 		FeeNext: "—", Fee30m: "—", FeeHour: "—",
+		BitcoinRPCEndpoint: a.cfg.bitcoinRPCEndpoint,
 	}
 	if disk.Total > 0 {
 		data.DiskPercent = float64(chain.SizeOnDisk) / float64(disk.Total) * 100
@@ -198,7 +231,7 @@ func (a *app) rememberSync(chain blockchainInfo) {
 }
 
 func (a *app) loadingPageData() pageData {
-	data := pageData{Loading: true, Version: versionLabel(a.cfg.version)}
+	data := pageData{BitcoinEnabled: true, Loading: true, Version: versionLabel(a.cfg.version)}
 	a.syncMu.RLock()
 	defer a.syncMu.RUnlock()
 	if a.lastSync != nil {
@@ -212,6 +245,7 @@ func (a *app) loadingPageData() pageData {
 }
 
 func (a *app) render(w http.ResponseWriter, data pageData) {
+	data.NodeName = a.monitor.nodeName
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := a.template.ExecuteTemplate(w, "index.html", data); err != nil {
 		a.log.Printf("render dashboard: %v", err)
@@ -231,7 +265,8 @@ func diskUsage(path string) diskInfo {
 	if syscall.Statfs(path, &stat) != nil {
 		return diskInfo{}
 	}
-	return diskInfo{Total: uint64(stat.Blocks) * uint64(stat.Bsize), Free: uint64(stat.Bavail) * uint64(stat.Bsize)}
+	blockSize := statfsBlockSize(&stat)
+	return diskInfo{Total: uint64(stat.Blocks) * blockSize, Free: uint64(stat.Bavail) * blockSize}
 }
 
 func gib(v int64) float64   { return float64(v) / (1024 * 1024 * 1024) }

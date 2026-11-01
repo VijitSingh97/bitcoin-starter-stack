@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,21 +16,49 @@ import (
 )
 
 type config struct {
-	rpcURL            string
-	rpcUser           string
-	rpcPassword       string
-	dashboardPassword string
-	dataDir           string
-	stateDir          string
-	version           string
-	port              string
-	settingsPort      string
-	control           bool
+	bitcoinDisabled         bool
+	bitcoinActive           bool
+	bitcoinActiveSet        bool
+	rpcURL                  string
+	rpcUser                 string
+	rpcPassword             string
+	dashboardPassword       string
+	dataDir                 string
+	stateDir                string
+	version                 string
+	port                    string
+	settingsPort            string
+	control                 bool
+	moneroEnabled           bool
+	moneroActive            bool
+	moneroActiveSet         bool
+	moneroRPCURL            string
+	moneroRPCUser           string
+	moneroRPCPassword       string
+	moneroDataDir           string
+	moneroWalletEnabled     bool
+	moneroPublicExample     bool
+	moneroWalletRPCURL      string
+	moneroWalletRPCUser     string
+	moneroWalletRPCPassword string
+	moneroWalletPassword    string
+	tariWalletEnabled       bool
+	tariWalletURL           string
+	tariWalletDir           string
+	tariWalletRPCUser       string
+	tariWalletRPCPassword   string
+	bitcoinRPCEndpoint      string
+	moneroRPCEndpoint       string
+	moneroZMQEndpoint       string
+	nodes                   map[string]nodeConfig
 }
 
 func envConfig() (config, error) {
 	cfg := config{
-		rpcURL: os.Getenv("RPC_URL"), rpcUser: os.Getenv("RPC_USER"), rpcPassword: os.Getenv("RPC_PASSWORD"),
+		bitcoinDisabled:  explicitlyDisabled(os.Getenv("BITCOIN_ENABLED")),
+		bitcoinActive:    !explicitlyDisabled(os.Getenv("BITCOIN_ACTIVE")),
+		bitcoinActiveSet: true,
+		rpcURL:           os.Getenv("RPC_URL"), rpcUser: os.Getenv("RPC_USER"), rpcPassword: os.Getenv("RPC_PASSWORD"),
 		dashboardPassword: os.Getenv("DASHBOARD_PASSWORD"), dataDir: os.Getenv("DATA_DIR"), stateDir: os.Getenv("STATE_DIR"), version: strings.TrimSpace(os.Getenv("STACK_VERSION")), port: os.Getenv("PORT"), settingsPort: os.Getenv("SETTINGS_PORT"),
 	}
 	if cfg.rpcURL == "" {
@@ -64,10 +93,120 @@ func envConfig() (config, error) {
 		}
 	}
 	cfg.control = enabled(os.Getenv("DASHBOARD_CONTROL"))
-	if cfg.rpcUser == "" || cfg.rpcPassword == "" {
+	cfg.moneroEnabled = enabled(os.Getenv("MONERO_ENABLED"))
+	cfg.moneroActive = !explicitlyDisabled(os.Getenv("MONERO_ACTIVE"))
+	cfg.moneroActiveSet = true
+	cfg.moneroRPCURL = strings.TrimSpace(os.Getenv("MONERO_RPC_URL"))
+	if cfg.moneroRPCURL == "" {
+		cfg.moneroRPCURL = "http://172.29.0.30:18085"
+	}
+	cfg.moneroRPCUser = os.Getenv("MONERO_RPC_USER")
+	cfg.moneroRPCPassword = os.Getenv("MONERO_RPC_PASSWORD")
+	cfg.moneroDataDir = envOr("MONERO_DATA_DIR", "/data-monero")
+	cfg.moneroWalletRPCURL = strings.TrimSpace(os.Getenv("MONERO_WALLET_RPC_URL"))
+	if cfg.moneroWalletRPCURL == "" {
+		cfg.moneroWalletRPCURL = "http://172.29.0.31:18082"
+	}
+	cfg.moneroWalletRPCUser = os.Getenv("MONERO_WALLET_RPC_USER")
+	cfg.moneroWalletRPCPassword = os.Getenv("MONERO_WALLET_RPC_PASSWORD")
+	cfg.moneroWalletPassword = os.Getenv("MONERO_WALLET_PASSWORD")
+	walletValues := 0
+	for _, value := range []string{cfg.moneroWalletRPCUser, cfg.moneroWalletRPCPassword, cfg.moneroWalletPassword} {
+		if value != "" {
+			walletValues++
+		}
+	}
+	if walletValues != 0 && walletValues != 3 {
+		return config{}, errors.New("MONERO_WALLET_RPC_USER, MONERO_WALLET_RPC_PASSWORD, and MONERO_WALLET_PASSWORD must be set together")
+	}
+	cfg.moneroWalletEnabled = cfg.moneroEnabled && walletValues == 3
+	cfg.moneroPublicExample = cfg.moneroWalletEnabled && !explicitlyDisabled(os.Getenv("MONERO_PUBLIC_EXAMPLE"))
+	var exposureErr error
+	if !cfg.bitcoinDisabled {
+		if cfg.bitcoinRPCEndpoint, exposureErr = exposedLANEndpoint("BITCOIN_RPC_EXPOSE", "BITCOIN_RPC_BIND_IP", "BITCOIN_RPC_PORT", "8332"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+	}
+	if cfg.moneroEnabled {
+		if cfg.moneroRPCEndpoint, exposureErr = exposedLANEndpoint("MONERO_RPC_EXPOSE", "MONERO_RPC_BIND_IP", "MONERO_RPC_PORT", "18081"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+		if cfg.moneroZMQEndpoint, exposureErr = exposedLANEndpoint("MONERO_ZMQ_EXPOSE", "MONERO_ZMQ_BIND_IP", "MONERO_ZMQ_PORT", "18083"); exposureErr != nil {
+			return config{}, exposureErr
+		}
+	}
+	if err := loadAdditionalNodes(&cfg); err != nil {
+		return config{}, err
+	}
+	cfg.tariWalletEnabled = cfg.nodes[nodeTari].Enabled && enabled(os.Getenv("TARI_WALLET_ENABLED"))
+	cfg.tariWalletURL = strings.TrimSpace(envOr("TARI_WALLET_GRPC_URL", "http://172.29.0.37:18143"))
+	cfg.tariWalletDir = envOr("TARI_WALLET_DIR", "/tari-wallet")
+	cfg.tariWalletRPCUser = os.Getenv("TARI_WALLET_RPC_USER")
+	cfg.tariWalletRPCPassword = os.Getenv("TARI_WALLET_RPC_PASSWORD")
+	if cfg.tariWalletEnabled {
+		if err := validateInternalHTTPURL("TARI_WALLET_GRPC_URL", cfg.tariWalletURL); err != nil {
+			return config{}, err
+		}
+		if !filepath.IsAbs(cfg.tariWalletDir) {
+			return config{}, errors.New("TARI_WALLET_DIR must be an absolute path")
+		}
+		if cfg.tariWalletRPCUser == "" || cfg.tariWalletRPCPassword == "" {
+			return config{}, errors.New("TARI_WALLET_RPC_USER and TARI_WALLET_RPC_PASSWORD are required when TARI_WALLET_ENABLED is true")
+		}
+	}
+	if (cfg.tariWalletRPCUser == "") != (cfg.tariWalletRPCPassword == "") {
+		return config{}, errors.New("TARI_WALLET_RPC_USER and TARI_WALLET_RPC_PASSWORD must be set together")
+	}
+	if node := cfg.nodes[nodeZcash]; node.Enabled && node.RPCEndpoint != "" && (cfg.port == "18232" || cfg.settingsPort == "18232") {
+		return config{}, errors.New("PORT and SETTINGS_PORT must differ from the internal Zcash proxy port 18232")
+	}
+	if cfg.moneroWalletEnabled {
+		if err := validateInternalHTTPURL("MONERO_WALLET_RPC_URL", cfg.moneroWalletRPCURL); err != nil {
+			return config{}, err
+		}
+	}
+	if cfg.moneroEnabled {
+		if err := validateInternalHTTPURL("MONERO_RPC_URL", cfg.moneroRPCURL); err != nil {
+			return config{}, err
+		}
+		if cfg.moneroRPCUser == "" || cfg.moneroRPCPassword == "" {
+			return config{}, errors.New("MONERO_RPC_USER and MONERO_RPC_PASSWORD are required when MONERO_ENABLED is true")
+		}
+	}
+	if !cfg.bitcoinDisabled && (cfg.rpcUser == "" || cfg.rpcPassword == "") {
 		return config{}, errors.New("RPC_USER and RPC_PASSWORD are required")
 	}
+	if !cfg.bitcoinDisabled {
+		if err := validateInternalHTTPURL("RPC_URL", cfg.rpcURL); err != nil {
+			return config{}, err
+		}
+	}
 	return cfg, nil
+}
+
+func exposedLANEndpoint(enabledName, addressName, portName, defaultPort string) (string, error) {
+	if !enabled(os.Getenv(enabledName)) {
+		return "", nil
+	}
+	address := strings.TrimSpace(os.Getenv(addressName))
+	ip := net.ParseIP(address)
+	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback()) {
+		return "", errors.New(addressName + " must be a private or loopback IP address when exposure is enabled")
+	}
+	port := strings.TrimSpace(os.Getenv(portName))
+	if port == "" {
+		port = defaultPort
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", errors.New(portName + " must be between 1 and 65535")
+	}
+	return net.JoinHostPort(address, port), nil
+}
+
+func explicitlyDisabled(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "0" || value == "false"
 }
 
 func serveHTTPServers(ctx context.Context, servers []*http.Server) error {
@@ -151,6 +290,10 @@ func main() {
 	if cfg.settingsPort != "" {
 		servers = append(servers, &http.Server{Addr: ":" + cfg.settingsPort, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 6 * time.Minute, IdleTimeout: 60 * time.Second})
 		logger.Printf("onion settings listener enabled on :%s", cfg.settingsPort)
+	}
+	if node, ok := cfg.nodes[nodeZcash]; ok && node.Enabled && node.RPCEndpoint != "" {
+		servers = append(servers, &http.Server{Addr: ":18232", Handler: a.zcashRPCProxy(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second})
+		logger.Print("authenticated Zcash read-only RPC proxy enabled on :18232")
 	}
 	logger.Printf("dashboard listening on :%s", cfg.port)
 	if err := runDashboardServers(ctx, stop, a, servers); err != nil {

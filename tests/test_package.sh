@@ -43,14 +43,46 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/stack \
   ./usr/lib/bitcoin-starter-stack/configure.sh \
   ./usr/lib/bitcoin-starter-stack/docker-compose.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.tari-wallet.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.tari-grpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.litecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.dogecoin-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.bitcoincash-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.zcash-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
+  ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/monero/wallet-healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/tari/config.toml \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/launcher.go \
+  ./usr/lib/bitcoin-starter-stack/build/tari-wallet/config.toml \
+  ./usr/lib/bitcoin-starter-stack/build/litecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/dogecoin/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/Dockerfile \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/entrypoint.sh \
+  ./usr/lib/bitcoin-starter-stack/build/bitcoincash/healthcheck.sh \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/zakurad.toml \
+  ./usr/lib/bitcoin-starter-stack/build/zcash/healthcheck.sh \
   ./usr/lib/bitcoin-starter-stack/build/tor/torrc \
+  ./usr/lib/bitcoin-starter-stack/node-resource-profile \
+  ./usr/lib/bitcoin-starter-stack/node-port-control \
+  ./usr/lib/bitcoin-starter-stack/node-control \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-resource-profile.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-port-control.timer \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.service \
+  ./usr/lib/systemd/system/bitcoin-starter-stack-node-control.timer \
   ./usr/share/doc/bitcoin-starter-stack/README.md \
+  ./usr/share/doc/bitcoin-starter-stack/docs/nodes.md \
   ./usr/share/doc/bitcoin-starter-stack/docs/privacy.md; do
   grep -q " $required$" "$tmp/contents" || fail "package is missing $required"
 done
-if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
+if grep -Eq '/(tests|parity|experiments|images|__pycache__|\.pytest_cache)/|_test\.go$|\.test\.mjs$|\.proto$|package\.json$|/\.coverage$|\.pyc$|docs/releasing\.md$|\.(jpg|jpeg)$' "$tmp/contents"; then
   fail "package contains development-only files"
 fi
 if grep -Eq ' \./(etc|var)/' "$tmp/contents"; then
@@ -59,6 +91,8 @@ fi
 depends=$(dpkg-deb -f "$deb" Depends)
 printf '%s' "$depends" | grep -q 'docker-ce | docker.io' || fail "Docker Engine dependency alternatives are missing"
 printf '%s' "$depends" | grep -q 'curl' || fail "curl dependency is missing"
+printf '%s' "$depends" | grep -q 'util-linux' || fail "resource profile lock dependency is missing"
+printf '%s' "$depends" | grep -q 'iproute2' || fail "port listener inspection dependency is missing"
 printf '%s' "$depends" | grep -q 'docker-compose-plugin (>= 2.33.1) | docker-compose-v2 (>= 2.33.1) | docker-compose (>= 2.33.1)' || fail "Compose v2 dependency alternatives are missing minimum versions"
 
 mkdir "$tmp/control"
@@ -85,22 +119,39 @@ mkdir "$fake"
 cat >"$fake/docker" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+if [ "${1:-}" = ps ] && [ "${2:-}" = -aq ]; then
+  requested_service=
+  for arg in "$@"; do
+    case "$arg" in label=com.docker.compose.service=*) requested_service=${arg##*=} ;; esac
+  done
+  if [ -n "${FAKE_EXISTING_CONFIG:-}" ]; then
+    existing_service=${FAKE_EXISTING_SERVICE:-tor}
+    [ "$requested_service" != "$existing_service" ] || printf 'existing-id\n'
+  fi
+  exit 0
+fi
 if [ "${1:-}" = inspect ]; then
   [ -n "${FAKE_EXISTING_CONFIG:-}" ] || exit 1
   printf '%s\n' "$FAKE_EXISTING_CONFIG"
 fi
 if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
   case " $* " in
-    *' --project-name bitcoin-starter-stack-apt '*) ;;
+    *' --project-name node-manager-apt '*) ;;
     *) exit 88 ;;
   esac
 fi
 case " $* " in
   *' config --images '*) printf 'example.invalid/stack:test\n' ;;
-  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ]; exit ;;
+  *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_DOCKER_LOG.images-ready" ]; exit ;;
+  *' pull '*) touch "$FAKE_DOCKER_LOG.images-ready" ;;
 esac
 EOF
 chmod +x "$fake/docker"
+cat >"$fake/systemctl" <<'EOF'
+#!/bin/sh
+printf 'systemctl %s\n' "$*" >>"$FAKE_DOCKER_LOG"
+EOF
+chmod +x "$fake/systemctl"
 
 home=$tmp/home
 config_dir=$tmp/etc/bitcoin-starter-stack
@@ -118,32 +169,43 @@ out=$("$wrapper" upgrade)
 printf '%s' "$out" | grep -q 'sudo apt install --only-upgrade bitcoin-starter-stack' || fail "upgrade omitted APT instructions"
 [ ! -e "$log" ] || fail "package upgrade invoked Docker"
 
-wizard_out=$(printf 'packagepassword1234567890\n\n\nn\n\nn\n' | "$wrapper" init)
-printf '%s' "$wizard_out" | grep -q 'Publish the dashboard' && fail "package wizard still prompts for dashboard onion publishing"
-printf '%s' "$wizard_out" | grep -q 'Accept inbound Bitcoin' && fail "package wizard still prompts for inbound onion connections"
-printf '%s' "$wizard_out" | grep -q 'One-click upgrades' && fail "package wizard offered unsupported dashboard upgrades"
-[ "$(jq -r '.bitcoin.node_password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not save the shared password"
-[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = packagepassword1234567890 ] || fail "package wizard did not share the dashboard password"
-[ "$(jq -r '.bitcoin.prune_mb' "$config_dir/config.json")" = 10000 ] || fail "package wizard did not keep the fresh pruning default"
-[ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package wizard stored the default FHS data path"
-[ "$(printf '%s' "$wizard_out" | grep -c 'Password: packagepassword1234567890')" = 1 ] || fail "package wizard did not print the new login exactly once"
-printf '%s' "$wizard_out" | grep -q 'Download missing containers and start the stack now? \[Y/n\]' || fail "package wizard omitted explicit download/start prompt"
-printf '%s' "$wizard_out" | grep -q 'Later: bitcoin-stack pull && bitcoin-stack up' || fail "package wizard deferred-start instructions omit image download"
-rm -f "$config_dir/config.json"
-
 : >"$log"
-printf 'packagepassword1234567890\n\n\nn\n\n\n' |
-  FAKE_IMAGES_MISSING=1 "$wrapper" init >/dev/null
-grep -q -- 'compose .* pull' "$log" || fail "package wizard did not pull missing images"
-grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package wizard start allows implicit pulls or builds"
+init_out=$(BITCOIN_STACK_DEFAULT_BIND_IP=192.168.1.116 FAKE_IMAGES_MISSING=1 "$wrapper" init)
+[ "$(jq -r '.bitcoin.enabled' "$config_dir/config.json")" = true ] || fail "package init did not default to Bitcoin"
+[ "$(jq -r '.bitcoin.resource_profile' "$config_dir/config.json")" = compact ] || fail "package init did not select the compact Bitcoin profile"
+[ "$(jq -r '.dashboard.password' "$config_dir/config.json")" = "" ] || fail "package init did not default to a passwordless dashboard"
+[ "$(jq -r '.dashboard.bind_ip' "$config_dir/config.json")" = auto ] || fail "package init did not preserve automatic LAN binding"
+[ "$(jq -r '.dashboard.launch_at_boot' "$config_dir/config.json")" = false ] || fail "package init enabled launch at boot"
+[ "$(jq -r '.bitcoin.data_dir // empty' "$config_dir/config.json")" = "" ] || fail "package init stored the default FHS data path"
+jq -e '(.bitcoin | has("node_password") | not)' "$config_dir/config.json" >/dev/null || fail "package init stored generated credentials in config"
+printf '%s' "$init_out" | grep -q 'Dashboard password — default off' || fail "package init did not report its passwordless default"
+printf '%s' "$init_out" | grep -q 'Bitcoin RPC — username: admin  password:' || fail "package init did not print the Bitcoin credentials"
+printf '%s' "$init_out" | grep -q 'Monero RPC' && fail "package init printed credentials for an unselected node"
+printf '%s' "$init_out" | grep -qE 'Dashboard password \(|Nodes to run \(|data directory \[|Download missing containers' && fail "package init still prompts for setup answers"
+grep -q -- 'compose .* pull' "$log" || fail "package init did not pull missing images"
+grep -q -- 'compose .* up -d --pull never --no-build' "$log" || fail "package init start allows implicit pulls or builds"
+grep -q 'systemctl enable --now bitcoin-starter-stack-resource-profile.timer' "$log" || fail "package init did not start the resource profile timer"
+grep -q 'systemctl enable --now bitcoin-starter-stack-port-control.timer' "$log" || fail "package init did not start the LAN port-control timer"
+grep -q 'systemctl enable --now bitcoin-starter-stack-node-control.timer' "$log" || fail "package init did not start the node-control timer"
 
-"$wrapper" apply >/dev/null
 env_file=$state_dir/.env
 [ -f "$env_file" ] || fail "generated state is outside the package state directory"
+grep -q '^DASHBOARD_PASSWORD=$' "$env_file" || fail "fresh package install enabled dashboard authentication"
+grep -q '^DASHBOARD_BIND_IP=192.168.1.116$' "$env_file" || fail "fresh package install did not use the detected LAN address"
+grep -q '^BITCOIN_RPC_USER=admin$' "$env_file" || fail "fresh package install did not generate the Bitcoin RPC user"
+bitcoin_password=$(sed -n 's/^BITCOIN_RPC_PASSWORD=//p' "$env_file")
+printf '%s' "$bitcoin_password" | grep -qE '^[0-9a-f]{48}$' || fail "fresh package install did not generate a Bitcoin RPC password"
 grep -q "^BITCOIN_DATA_DIR=$data_root/bitcoin$" "$env_file" || fail "data path is outside the package data directory"
 grep -q '^BITCOIN_DBCACHE=128$' "$env_file" || fail "fresh package install dbcache default is not 128 MB"
 grep -q '^BITCOIN_PRUNE=10000$' "$env_file" || fail "fresh package install is not pruned to 10000 MB"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$env_file" || fail "fresh package install exposed RPC"
+grep -q '^MONERO_ENABLED=0$' "$env_file" || fail "fresh package install enabled Monero"
+grep -q '^COMPOSE_PROFILES=bitcoin$' "$env_file" || fail "fresh package install did not select Bitcoin"
+grep -q '^BITCOIN_RESOURCE_PROFILE=compact$' "$env_file" || fail "package init did not enable the compact Bitcoin profile"
+grep -q '^MONERO_RESOURCE_PROFILE=off$' "$env_file" || fail "package init enabled the compact profile for an unselected node"
+grep -q '^BITCOIN_STEADY_CPUS=1$' "$env_file" || fail "package init did not render the Bitcoin steady CPU default"
+grep -q '^BITCOIN_STEADY_MEM_LIMIT_MB=2048$' "$env_file" || fail "package init did not render the Bitcoin steady memory default"
+grep -q '^STACK_RESTART_POLICY=on-failure:5$' "$env_file" || fail "fresh package install enabled launch at boot"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$env_file" || fail "fresh package install enabled an optional Compose override"
 grep -q "^STACK_ROOT=$runtime$" "$env_file" || fail "immutable payload path was not rendered"
 wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)
@@ -151,13 +213,34 @@ wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)
 [ -d "$data_root/bitcoin" ] || fail "data directory was not created"
 [ "$(stat -c %u "$data_root/bitcoin")" = 1000 ] || fail "data directory is not owned by the container uid"
 [ "$(stat -c %a "$data_root/bitcoin")" = 700 ] || fail "data directory permissions are not private"
+[ "$(stat -c %u "$data_root/zcash")" = 10001 ] || fail "Zcash data directory is not owned by the Zakura uid"
+[ "$(stat -c %g "$data_root/zcash")" = 1000 ] || fail "Zcash data directory is not readable by the dashboard group"
+[ "$(stat -c %a "$data_root/zcash")" = 750 ] || fail "Zcash data directory permissions block its runtime handoff"
 [ ! -e "$home" ] || fail "package wrote configuration or data under HOME"
 [ ! -e "$runtime/.env" ] || fail "package wrote state into /usr/lib payload"
 grep -q -- "--project-directory $state_dir" "$log" || fail "Compose project directory is not package state"
-grep -q -- "--project-name bitcoin-starter-stack-apt" "$log" || fail "package Compose project is not isolated from source installs"
+grep -q '^COMPOSE_PROJECT_NAME=node-manager-apt$' "$env_file" || fail "fresh package did not persist its Compose identity"
+grep -q -- "--project-name node-manager-apt" "$log" || fail "package Compose project is not isolated from source installs"
 grep -q -- "--env-file $env_file" "$log" || fail "Compose did not use package state env"
 grep -q -- "-f $runtime/docker-compose.yml up -d" "$log" || fail "Compose did not use immutable payload"
 grep -q -- "-f $runtime/docker-compose.rpc.yml" "$log" && fail "default package startup loaded the RPC override"
+
+preset_config_dir=$tmp/preset/etc/bitcoin-starter-stack
+preset_state_dir=$tmp/preset/var/lib/bitcoin-starter-stack
+preset_data_root=$preset_state_dir/data
+mkdir -p "$preset_config_dir"
+jq -nc --arg data_dir "$preset_data_root/custom-monero" \
+  '{bitcoin:{enabled:false},monero:{enabled:true,data_dir:$data_dir,node_password:"presetmoneropassword123456789012"},dashboard:{password:"presetdashboardpassword",bind_ip:"192.168.1.118",launch_at_boot:true}}' \
+  >"$preset_config_dir/config.json"
+cp "$preset_config_dir/config.json" "$tmp/preset-config.before"
+: >"$log"
+BITCOIN_STACK_CONFIG_DIR=$preset_config_dir BITCOIN_STACK_STATE_DIR=$preset_state_dir BITCOIN_STACK_DATA_DIR=$preset_data_root \
+  "$wrapper" init >/dev/null
+cmp -s "$tmp/preset-config.before" "$preset_config_dir/config.json" || fail "package init replaced an explicit preset config"
+grep -q '^COMPOSE_PROFILES=monero$' "$preset_state_dir/.env" || fail "package init replaced a preset node selection"
+grep -q '^DASHBOARD_PASSWORD=presetdashboardpassword$' "$preset_state_dir/.env" || fail "package init replaced a preset dashboard password"
+grep -q '^MONERO_RPC_PASSWORD=presetmoneropassword123456789012$' "$preset_state_dir/.env" || fail "package init replaced a preset node credential"
+grep -q '^STACK_RESTART_POLICY=unless-stopped$' "$preset_state_dir/.env" || fail "package init replaced a preset launch setting"
 
 sed -i 's/^BITCOIN_DBCACHE=.*/BITCOIN_DBCACHE=512/' "$env_file"
 "$wrapper" apply >/dev/null
@@ -176,7 +259,7 @@ grep -q -- "-f $runtime/docker-compose.yml -f $runtime/docker-compose.rpc.yml up
 
 : >"$log"
 FAKE_SOURCE_VOLUMES=1 "$wrapper" apply >/dev/null || fail "stale source volumes blocked the isolated package project"
-grep -q -- "--project-name bitcoin-starter-stack-apt" "$log" || fail "package could reuse source-managed named volumes"
+grep -q -- "--project-name node-manager-apt" "$log" || fail "package could reuse source-managed named volumes"
 
 printf '%s\n' '{"bitcoin":{"prune_mb":0,"rpc_expose":true,"rpc_bind_ip":"192.168.1.117","rpc_port":18332}}' >"$config_dir/config.json"
 : >"$log"
@@ -194,6 +277,12 @@ grep -q '^BITCOIN_PRUNE=0$' "$env_file" || fail "existing full-node state was co
 FAKE_EXISTING_CONFIG=/source/bitcoin-starter-stack/docker-compose.yml "$wrapper" up >"$tmp/existing.out" 2>&1 && fail "package startup replaced a source-managed container"
 grep -q 'belongs to another installation' "$tmp/existing.out" || fail "existing deployment refusal is unclear"
 grep -q 'compose .* up ' "$log" && fail "existing deployment refusal reached Compose up"
+
+: >"$log"
+FAKE_EXISTING_SERVICE=tari-wallet FAKE_EXISTING_CONFIG=/source/bitcoin-starter-stack/docker-compose.yml \
+  "$wrapper" up >"$tmp/existing-tari-wallet.out" 2>&1 && fail "package startup replaced a source-managed Tari wallet container"
+grep -q 'Existing tari-wallet container belongs to another installation' "$tmp/existing-tari-wallet.out" || fail "Tari wallet deployment refusal is unclear"
+grep -q 'compose .* up ' "$log" && fail "Tari wallet deployment refusal reached Compose up"
 
 printf '%s\n' '{"dashboard":{"control":true}}' >"$config_dir/config.json"
 rm -f "$log"

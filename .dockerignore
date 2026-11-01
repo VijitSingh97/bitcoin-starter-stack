@@ -13,5 +13,6 @@ experiments/
 build/dashboard/tests/
 build/dashboard/parity/
 build/dashboard/*_test.go
+build/dashboard/*.proto
 build/dashboard/static/*.test.mjs
 build/dashboard/package.json

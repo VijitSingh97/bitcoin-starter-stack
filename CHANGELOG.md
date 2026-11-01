@@ -8,6 +8,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- Rebranded the dashboard as Node Starter Stack while preserving package names,
+  commands, configuration paths, and existing Docker volumes for upgrades.
+- Fresh wizard installs generate separate dashboard and per-node RPC passwords.
+  Existing saved credentials remain unchanged.
 - Fresh installs default Bitcoin Core's UTXO cache to 128 MiB. Existing installs
   retain their rendered cache setting when no explicit override is configured.
 - Replaced the Python dashboard runtime with a standard-library Go server while
@@ -33,6 +37,13 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Optional pruned Monero node with restricted Digest RPC, separate trusted-LAN
+  RPC/ZMQ relays for Pithead, and public runtime traffic routed through Tor.
+- Bitcoin/Monero selection in setup and gold/orange dashboard towers that open
+  each chain's status card. Monero-only installs skip Bitcoin polling and alerts.
+- Experimental APT compact profile: uncapped initial sync followed by guarded,
+  per-node 1 CPU / 2 GiB limits. Source and existing installs leave it disabled.
+- Node comparison covering Litecoin, Dogecoin, Tari, Zebra/Zcash, and Bitcoin Cash.
 - A notification settings menu with persistent JSON overrides, live updates,
   visible saved values, and the dashboard's optional password on LAN or onion access.
 - Prepared an Ubuntu 24.04 APT package with a global `bitcoin-stack` command,

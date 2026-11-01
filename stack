@@ -6,13 +6,195 @@ state_dir=${BITCOIN_STACK_STATE_DIR:-$stack_root}
 config_dir=${BITCOIN_STACK_CONFIG_DIR:-$state_dir}
 config_file=$config_dir/config.json
 env_file=$state_dir/.env
+approved_config_file=$state_dir/.approved-config.json
+approved_env_file=$state_dir/.approved.env
 stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
+legacy_project=bitcoin-starter-stack
+fresh_project='node-manager-source'
+case "$package_managed" in
+  brew) legacy_project=bitcoin-starter-stack-brew; fresh_project='node-manager-brew' ;;
+  1 | apt) legacy_project=bitcoin-starter-stack-apt; fresh_project='node-manager-apt' ;;
+esac
+project_name=${BITCOIN_STACK_PROJECT_NAME:-}
+if [ -z "$project_name" ] && [ -f "$env_file" ]; then
+  project_name=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$env_file" 2>/dev/null | tail -n 1)
+fi
+if [ -z "$project_name" ]; then
+  if [ -f "$env_file" ]; then project_name=$legacy_project; else project_name=$fresh_project; fi
+fi
+export BITCOIN_STACK_PROJECT_NAME="$project_name"
+config_lock_owned=0
+
+lock_config() {
+  [ "${BITCOIN_STACK_CONFIG_LOCK_HELD:-0}" != 1 ] || return 0
+  mkdir -p "$state_dir"
+  exec 8>"$state_dir/.config.lock"
+  flock 8
+  export BITCOIN_STACK_CONFIG_LOCK_HELD=1
+  config_lock_owned=1
+}
+
+unlock_config() {
+  [ "$config_lock_owned" = 1 ] || return 0
+  flock -u 8
+  unset BITCOIN_STACK_CONFIG_LOCK_HELD
+  config_lock_owned=0
+}
+
+replace_config() {
+  local source=$1 target
+  mkdir -p "$state_dir" "$config_dir"
+  lock_config
+  target=$(mktemp "$config_dir/.config.write.XXXXXX")
+  chmod 600 "$target"
+  cat "$source" >"$target"
+  mv "$target" "$config_file"
+  unlock_config
+}
+
+approve_current_config() {
+  local source=${1:-$config_file} target env_target config_backup env_backup
+  [ -f "$env_file" ] || {
+    echo "Cannot approve configuration before it has been rendered." >&2
+    return 1
+  }
+  target=$(mktemp "$state_dir/.approved-config.write.XXXXXX") || return 1
+  env_target=$(mktemp "$state_dir/.approved-env.write.XXXXXX") || {
+    rm -f "$target"
+    return 1
+  }
+  if [ -f "$source" ]; then
+    jq -S . "$source" >"$target" || {
+      rm -f "$target" "$env_target"
+      return 1
+    }
+  else
+    printf '{}\n' >"$target"
+  fi
+  if ! cp "$env_file" "$env_target" || ! chmod 600 "$target" "$env_target"; then
+    rm -f "$target" "$env_target"
+    return 1
+  fi
+  config_backup=$(mktemp "$state_dir/.approved-config.backup.XXXXXX") || {
+    rm -f "$target" "$env_target"
+    return 1
+  }
+  env_backup=$(mktemp "$state_dir/.approved-env.backup.XXXXXX") || {
+    rm -f "$target" "$env_target" "$config_backup"
+    return 1
+  }
+  if [ -f "$approved_config_file" ] && ! cp "$approved_config_file" "$config_backup"; then
+    rm -f "$target" "$env_target" "$config_backup" "$env_backup"
+    return 1
+  fi
+  if [ -f "$approved_env_file" ] && ! cp "$approved_env_file" "$env_backup"; then
+    rm -f "$target" "$env_target" "$config_backup" "$env_backup"
+    return 1
+  fi
+  mv "$target" "$approved_config_file" || {
+    rm -f "$target" "$env_target" "$config_backup" "$env_backup"
+    return 1
+  }
+  mv "$env_target" "$approved_env_file" || {
+    if [ -s "$config_backup" ]; then cp "$config_backup" "$approved_config_file"; else rm -f "$approved_config_file"; fi
+    if [ -s "$env_backup" ]; then cp "$env_backup" "$approved_env_file"; else rm -f "$approved_env_file"; fi
+    rm -f "$config_backup" "$env_backup"
+    return 1
+  }
+  rm -f "$config_backup" "$env_backup"
+}
+
+approve_existing_runtime() {
+  local source
+  source=$(mktemp "$state_dir/.approved-runtime.XXXXXX")
+  printf 'null\n' >"$source"
+  approve_current_config "$source"
+  rm -f "$source"
+}
+
+config_matches_approved() {
+  [ -f "$approved_config_file" ] || return 1
+  if [ ! -f "$config_file" ]; then
+    jq -e 'type == "object" and length == 0' "$approved_config_file" >/dev/null
+    return
+  fi
+  diff -q <(jq -S . "$config_file") "$approved_config_file" >/dev/null 2>&1
+}
+
+render_config_file() {
+  local source=$1 temporary_config_dir
+  if [ "$source" = "$config_file" ]; then
+    "$stack_root/configure.sh"
+    return
+  fi
+  temporary_config_dir=$(mktemp -d "$state_dir/.approved-config.XXXXXX")
+  cp "$source" "$temporary_config_dir/config.json"
+  BITCOIN_STACK_CONFIG_DIR="$temporary_config_dir" "$stack_root/configure.sh"
+  rm -f "$temporary_config_dir/config.json"
+  rmdir "$temporary_config_dir"
+}
+
+render_current_config() {
+  render_config_file "$config_file"
+}
+
+render_approved_config() {
+  [ ! -f "$approved_env_file" ] || cp "$approved_env_file" "$env_file"
+  if jq -e 'type == "null"' "$approved_config_file" >/dev/null; then
+    return
+  fi
+  render_config_file "$approved_config_file"
+  approve_current_config "$approved_config_file"
+}
+
+prepare_config_for_start() {
+  config_was_applied=0
+  if [ ! -f "$approved_config_file" ]; then
+    if [ -f "$env_file" ]; then
+      approve_existing_runtime
+    else
+      render_current_config
+      approve_current_config
+      config_was_applied=1
+      return
+    fi
+  fi
+  if config_matches_approved; then
+    if [ -f "$config_file" ]; then
+      render_current_config
+      approve_current_config
+    else
+      cp "$approved_env_file" "$env_file"
+      chmod 600 "$env_file"
+    fi
+    return
+  fi
+
+  echo "Config change detected."
+  reply=n
+  if [ -t 0 ] || [ "${BITCOIN_STACK_INTERACTIVE:-0}" = 1 ]; then
+    printf "Run new config? [y/N] "
+    read -r reply || true
+  else
+    echo "Keeping the last approved config. Run $stack_command apply to approve the pending change."
+  fi
+  case "$reply" in
+    y | Y)
+      render_current_config
+      approve_current_config
+      config_was_applied=1
+      ;;
+    *)
+      render_approved_config
+      ;;
+  esac
+}
 cd "$state_dir"
 
 compose() {
   if [ "$state_dir" = "$stack_root" ]; then
-    docker compose "$@"
+    docker compose --project-name "$project_name" "$@"
   else
     local compose_file compose_files=()
     compose_file=$(env_get COMPOSE_FILE)
@@ -21,7 +203,7 @@ compose() {
     local compose_args=()
     for compose_file in "${compose_files[@]}"; do
       case "$compose_file" in
-        docker-compose.yml | docker-compose.rpc.yml)
+        docker-compose.yml | docker-compose.tari-wallet.yml | docker-compose.rpc.yml | docker-compose.monero-rpc.yml | docker-compose.monero-zmq.yml | docker-compose.tari-grpc.yml | docker-compose.litecoin-rpc.yml | docker-compose.dogecoin-rpc.yml | docker-compose.bitcoincash-rpc.yml | docker-compose.zcash-rpc.yml)
           compose_args+=( -f "$stack_root/$compose_file" )
           ;;
         *)
@@ -30,17 +212,25 @@ compose() {
           ;;
       esac
     done
-    docker compose --project-name bitcoin-starter-stack-apt \
+    docker compose --project-name "$project_name" \
       --project-directory "$state_dir" --env-file "$env_file" \
       "${compose_args[@]}" "$@"
   fi
 }
 
+container_id() {
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=$project_name" \
+    --filter "label=com.docker.compose.service=$1" | head -n 1
+}
+
 guard_package_containers() {
-  [ "$package_managed" = "1" ] || return 0
-  local service config
-  for service in tor bitcoin dashboard; do
-    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
+  [ "$package_managed" != 0 ] || return 0
+  local service id config working_dir
+  for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
+    id=$(container_id "$service")
+    [ -n "$id" ] || continue
+    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$id" 2>/dev/null) || continue
     case ",$config," in
       *",$stack_root/docker-compose.yml,"*) ;;
       *)
@@ -49,6 +239,11 @@ guard_package_containers() {
         return 1
         ;;
     esac
+    working_dir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id" 2>/dev/null) || return 1
+    if [ "$working_dir" != "$state_dir" ]; then
+      echo "Existing $service container belongs to another installation; this installation will not replace it." >&2
+      return 1
+    fi
   done
 }
 
@@ -58,12 +253,13 @@ Usage: $stack_command <command> [args]
 
   up | down | restart [svc]  Start / stop / restart the stack (or one service)
   pull                       Download container images using host Docker settings
-  init                       Interactive setup wizard (optional; up uses defaults)
+  init                       Create the default config, download images, and start
   logs [svc]                 Follow logs (all services, or one)
   events                     Incident history (down/recovered, failed pings) — survives restarts
   apply                      Re-render .env from config.json and apply changes
   upgrade                    Fetch the latest release and apply it (backs up first)
-  upgrade-agent              Watch for dashboard Upgrade-button requests (auto-managed)
+  upgrade-agent              Watch for source-install dashboard requests (auto-managed)
+  host-service               Supervise configured nodes and host controls (Homebrew service)
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -74,6 +270,33 @@ EOF
 
 env_get() { sed -n "s/^$1=//p" "$env_file" 2>/dev/null || true; }
 
+print_selected_credentials() {
+  echo "Generated credentials:"
+  if [ -n "$(env_get DASHBOARD_PASSWORD)" ]; then
+    echo "  Dashboard — username: admin  password: $(env_get DASHBOARD_PASSWORD)"
+  else
+    echo "  Dashboard password — default off; any password saved in Settings still applies"
+  fi
+  for node in bitcoin monero litecoin dogecoin bitcoincash zcash; do
+    upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    [ "$(env_get "${upper}_ENABLED")" = 1 ] || continue
+    label=$node
+    case "$node" in
+      bitcoin) label=Bitcoin ;;
+      monero) label=Monero ;;
+      litecoin) label=Litecoin ;;
+      dogecoin) label=Dogecoin ;;
+      bitcoincash) label="Bitcoin Cash" ;;
+      zcash) label=Zcash ;;
+    esac
+    echo "  $label RPC — username: $(env_get "${upper}_RPC_USER")  password: $(env_get "${upper}_RPC_PASSWORD")"
+  done
+  if [ "$(env_get TARI_ENABLED)" = 1 ]; then
+    echo "  Tari gRPC — no password; keep LAN exposure on a trusted network"
+  fi
+}
+
+
 init() {
   umask 077
   for tool in jq openssl; do
@@ -83,129 +306,240 @@ init() {
     }
   done
 
-  old_config='{}'
-  [ -f "$config_file" ] && old_config=$(cat "$config_file")
-  if [ -f "$config_file" ]; then
-    printf "config.json already exists — overwrite it? [y/N] "
-    read -r reply
-    case "$reply" in y | Y) ;; *)
-      echo "Kept existing config.json. (Edit it and $stack_command apply, or $stack_command up.)"
+  if [ ! -f "$config_file" ]; then
+    config_source=$(mktemp)
+    if [ "$package_managed" = "0" ]; then
+      printf '%s\n' '{"bitcoin":{"enabled":true},"dashboard":{"password":"","bind_ip":"auto","launch_at_boot":false}}' >"$config_source"
+    else
+      printf '%s\n' '{"bitcoin":{"enabled":true,"resource_profile":"compact"},"dashboard":{"password":"","bind_ip":"auto","launch_at_boot":false}}' >"$config_source"
+    fi
+    replace_config "$config_source"
+    rm -f "$config_source"
+    echo "Created a Bitcoin-only pruned configuration."
+  else
+    echo "Using the existing config.json."
+  fi
+
+  lock_config
+  previous_env=$(mktemp "$state_dir/.env.before-init.XXXXXX")
+  previous_approved_config=$(mktemp "$state_dir/.approved-config.before-init.XXXXXX")
+  previous_approved_env=$(mktemp "$state_dir/.approved-env.before-init.XXXXXX")
+  had_previous_env=0
+  had_previous_approved_config=0
+  had_previous_approved_env=0
+  if [ -f "$env_file" ]; then cp "$env_file" "$previous_env"; had_previous_env=1; fi
+  if [ -f "$approved_config_file" ]; then cp "$approved_config_file" "$previous_approved_config"; had_previous_approved_config=1; fi
+  if [ -f "$approved_env_file" ]; then cp "$approved_env_file" "$previous_approved_env"; had_previous_approved_env=1; fi
+  render_current_config
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    if [ "$had_previous_env" = 1 ]; then cp "$previous_env" "$env_file"; else rm -f "$env_file"; fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    unlock_config
+    echo "Configuration was saved, but Docker is not ready. Start Docker, then run $stack_command init again." >&2
+    return 1
+  fi
+  if ! guard_package_containers || { ! images_available && ! pull_images --policy missing; }; then
+    if [ "$had_previous_env" = 1 ]; then cp "$previous_env" "$env_file"; else rm -f "$env_file"; fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    unlock_config
+    echo "Initialization did not start; the previous runtime settings remain selected." >&2
+    return 1
+  fi
+  if ! offline_up; then
+    rollback_failed=0
+    if [ "$had_previous_env" = 1 ]; then
+      cp "$previous_env" "$env_file"
+      offline_up >/dev/null 2>&1 || rollback_failed=1
+    else
+      compose down >/dev/null 2>&1 || rollback_failed=1
+      rm -f "$env_file"
+    fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    unlock_config
+    [ "$rollback_failed" = 0 ] || echo "Initialization failed, and the previous runtime could not be fully restored." >&2
+    echo "Initialization did not start; the previous runtime settings remain selected." >&2
+    return 1
+  fi
+  if ! approve_current_config; then
+    rollback_failed=0
+    if [ "$had_previous_env" = 1 ]; then
+      cp "$previous_env" "$env_file"
+      offline_up >/dev/null 2>&1 || rollback_failed=1
+    else
+      compose down >/dev/null 2>&1 || rollback_failed=1
+      rm -f "$env_file"
+    fi
+    if [ "$had_previous_approved_config" = 1 ]; then cp "$previous_approved_config" "$approved_config_file"; else rm -f "$approved_config_file"; fi
+    if [ "$had_previous_approved_env" = 1 ]; then cp "$previous_approved_env" "$approved_env_file"; else rm -f "$approved_env_file"; fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    unlock_config
+    [ "$rollback_failed" = 0 ] || echo "Initialization approval failed, and the previous runtime could not be fully restored." >&2
+    echo "Initialization approval failed; the new runtime was not retained." >&2
+    return 1
+  fi
+  rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+  unlock_config
+  ensure_resource_profile_timer
+  ensure_port_control_timer
+  ensure_node_control_timer
+  ensure_agent
+  echo "Nodes: $(env_get COMPOSE_PROFILES)"
+  echo "Started. Dashboard: http://$(env_get DASHBOARD_BIND_IP):$(env_get DASHBOARD_PORT)/"
+  print_selected_credentials
+  echo "Edit config.json before init for custom first-boot settings, or use the dashboard after startup."
+}
+
+ensure_resource_profile_timer() {
+  [ "$package_managed" = "1" ] || return 0
+  unit=bitcoin-starter-stack-resource-profile.timer
+  if [ "$(env_get BITCOIN_RESOURCE_PROFILE)" = compact ] || [ "$(env_get MONERO_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get TARI_RESOURCE_PROFILE)" = compact ] || [ "$(env_get LITECOIN_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get DOGECOIN_RESOURCE_PROFILE)" = compact ] || [ "$(env_get BITCOINCASH_RESOURCE_PROFILE)" = compact ] ||
+    [ "$(env_get ZCASH_RESOURCE_PROFILE)" = compact ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now "$unit" >/dev/null 2>&1 ||
+      echo "WARN  could not enable automatic post-sync resource limits; run: sudo systemctl enable --now $unit"
+  else
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_port_control_timer() {
+  [ "$package_managed" = "1" ] || return 0
+  unit=bitcoin-starter-stack-port-control.timer
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now "$unit" >/dev/null 2>&1 ||
+    echo "WARN  could not enable LAN port controls; run: sudo systemctl enable --now $unit"
+}
+
+ensure_node_control_timer() {
+  [ "$package_managed" = "1" ] || return 0
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now bitcoin-starter-stack-node-control.timer >/dev/null 2>&1 ||
+    echo "WARN  could not enable node controls; run: sudo systemctl enable --now bitcoin-starter-stack-node-control.timer"
+}
+
+sync_node_runtime() {
+  local dashboard_id
+  dashboard_id=$(container_id dashboard)
+  [ -n "$dashboard_id" ] || return 0
+  [ "$(docker inspect --format '{{.State.Running}}' "$dashboard_id" 2>/dev/null || true)" = true ] || return 0
+  local runtime='{}' node prefix enabled active
+  for node in bitcoin monero tari litecoin dogecoin bitcoincash zcash; do
+    prefix=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    enabled=$(env_get "${prefix}_ENABLED")
+    [ "$enabled" = 1 ] || continue
+    active=$(env_get "${prefix}_ACTIVE")
+    [ "$active" != 0 ] && active=true || active=false
+    runtime=$(jq -c --arg node "$node" --argjson active "$active" '. + {($node):$active}' <<<"$runtime")
+  done
+  for _ in 1 2 3 4 5; do
+    if printf '%s\n' "$runtime" | compose exec -T -u 1000 dashboard sh -c \
+      'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null 2>&1; then
       return 0
-      ;;
-    esac
-  fi
+    fi
+    sleep 0.2
+  done
+  return 1
+}
 
-  echo "Setup — press Enter to accept the [default]. Nothing here is required."
-  echo "The default keeps 10 GB of recent blocks and needs about 30–60 GB total disk."
-  echo "Bitcoin Core still downloads and validates the whole chain; over Tor, first sync can take days."
-  echo
-  yes() { case "$1" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac; }
-  if [ -n "${BITCOIN_STACK_DATA_DIR:-}" ]; then
-    default_data_dir=$BITCOIN_STACK_DATA_DIR/bitcoin
-  else
-    default_data_dir=./data/bitcoin
+prepare_linuxbrew_data_dirs() {
+  [ "$package_managed" = brew ] && [ "$(uname -s)" = Linux ] || return 0
+  local data_root=${BITCOIN_STACK_DATA_DIR:-} root_real node upper dir dir_real owner mode contents expected_owner expected_mode
+  local tor_image commands='' mounts=()
+  if [ -z "$data_root" ] || [ ! -d "$data_root" ] || [ -L "$data_root" ]; then
+    echo "Linuxbrew data directory is missing or is a symbolic link: $data_root" >&2
+    return 1
   fi
-  current_data_dir=$(jq -r '.bitcoin.data_dir // empty' <<<"$old_config")
-  [ -n "$current_data_dir" ] || current_data_dir=$(env_get BITCOIN_DATA_DIR)
-  [ -n "$current_data_dir" ] || current_data_dir=$default_data_dir
-  current_bind_ip=$(jq -r '.dashboard.bind_ip // empty' <<<"$old_config")
-  [ -n "$current_bind_ip" ] || current_bind_ip=$(env_get DASHBOARD_BIND_IP)
-  [ -n "$current_bind_ip" ] || current_bind_ip=127.0.0.1
-  current_prune=$(jq -r '.bitcoin.prune_mb // empty' <<<"$old_config")
-  [ -n "$current_prune" ] || current_prune=$(env_get BITCOIN_PRUNE)
-  [ -n "$current_prune" ] || if [ -f "$env_file" ]; then current_prune=0; else current_prune=10000; fi
-  current_dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$old_config")
-  [ -n "$current_dashboard_onion" ] || current_dashboard_onion=$(env_get DASHBOARD_ONION)
-  [ -n "$current_dashboard_onion" ] || current_dashboard_onion=0
-  current_inbound_onion=$(jq -r 'if ((.bitcoin // {}) | has("inbound_onion")) then if .bitcoin.inbound_onion == true then 1 else 0 end else empty end' <<<"$old_config")
-  [ -n "$current_inbound_onion" ] || current_inbound_onion=$(env_get BITCOIN_INBOUND_ONION)
-  [ -n "$current_inbound_onion" ] || current_inbound_onion=0
-  read -rsp "Shared RPC and dashboard password (letters/numbers) [Enter = strong random]: " w_password; echo
-  if [ -z "$w_password" ]; then
-    w_password=$(openssl rand -hex 24)
-  fi
-  case "$w_password" in *[!a-zA-Z0-9]*) echo "Password must contain only letters and numbers."; return 1 ;; esac
-  read -r -p "Bitcoin data directory [$current_data_dir]: " w_data_dir
-  [ -n "$w_data_dir" ] || w_data_dir=$current_data_dir
-  read -r -p "Dashboard bind address (loopback or private LAN) [$current_bind_ip]: " w_bind_ip
-  [ -n "$w_bind_ip" ] || w_bind_ip=$current_bind_ip
-  if [ "$package_managed" = "1" ]; then
-    w_control=n
-  else
-    read -r -p "One-click upgrades from the dashboard (Upgrade button)? [y/N] " w_control
-  fi
-  read -r -p "Expose Bitcoin RPC to trusted LAN wallet apps? [y/N] " w_rpc_expose
-  w_rpc_bind_ip=
-  w_rpc_port=
-  if yes "$w_rpc_expose"; then
-    read -r -p "Private LAN address assigned to this host [required]: " w_rpc_bind_ip
-    read -r -p "Host RPC port [8332]: " w_rpc_port
-  fi
-  if [ "$current_prune" = "0" ]; then
-    prune_prompt="Recent-block retention in GB [keep existing archival node]: "
-  elif [ "$current_prune" -lt 1000 ]; then
-    prune_prompt="Recent-block retention in GB [keep existing $current_prune MB]: "
-  else
-    prune_prompt="Recent-block retention in GB [$((current_prune / 1000))]: "
-  fi
-  read -r -p "$prune_prompt" w_prune_gb
+  root_real=$(readlink -f -- "$data_root") || return 1
+  [ "$root_real" = "$data_root" ] || {
+    echo "Linuxbrew data directory must use its canonical path: $root_real" >&2
+    return 1
+  }
+  case "$data_root" in *:* | *,* | *$'\n'*) echo "Linuxbrew data directory contains unsupported characters." >&2; return 1 ;; esac
 
-  cfg=$(jq -n '{}')
-  cfg=$(jq --arg v "$w_password" '.bitcoin.node_password=$v | .dashboard.password=$v' <<<"$cfg")
-  [ "$w_data_dir" != "$default_data_dir" ] && cfg=$(jq --arg v "$w_data_dir" '.bitcoin.data_dir=$v' <<<"$cfg")
-  [ "$w_bind_ip" != "127.0.0.1" ] && cfg=$(jq --arg v "$w_bind_ip" '.dashboard.bind_ip=$v' <<<"$cfg")
-  [ "$current_dashboard_onion" = "1" ] && cfg=$(jq '.dashboard.onion=true' <<<"$cfg")
-  [ "$current_inbound_onion" = "1" ] && cfg=$(jq '.bitcoin.inbound_onion=true' <<<"$cfg")
-  yes "$w_control" && cfg=$(jq '.dashboard.control=true' <<<"$cfg")
-  if yes "$w_rpc_expose"; then
-    cfg=$(jq --arg ip "$w_rpc_bind_ip" '.bitcoin.rpc_expose=true | .bitcoin.rpc_bind_ip=$ip' <<<"$cfg")
-    [ -n "$w_rpc_port" ] && cfg=$(jq --argjson port "$w_rpc_port" '.bitcoin.rpc_port=$port' <<<"$cfg")
-  fi
-  if [ -n "$w_prune_gb" ]; then
-    case "$w_prune_gb" in
-      *[!0-9]*) echo "  (retention must be a whole number of GB — keeping the default)" ;;
-      *) current_prune=$((w_prune_gb * 1000)) ;;
-    esac
-  fi
-  cfg=$(jq --argjson v "$current_prune" '.bitcoin.prune_mb=$v' <<<"$cfg")
-
-  printf '%s\n' "$cfg" | jq . >"$config_file"
-  chmod 600 "$config_file"
-  echo
-  echo "Wrote private config.json (mode 600)."
-  echo
-  printf "Download missing containers and start the stack now? [Y/n] "
-  read -r reply
-  case "$reply" in n | N) echo "Later: $stack_command pull && $stack_command up" ;; *)
-    "$stack_root/configure.sh"
-    guard_package_containers
-    images_available || pull_images
-    offline_up
-    ensure_agent
-    ;;
-  esac
-  echo
-  echo "Dashboard login (shown once):"
-  echo "  Username: admin"
-  echo "  Password: $w_password"
+  for node in bitcoin monero tari litecoin dogecoin bitcoincash zcash; do
+    upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    dir=$(env_get "${upper}_DATA_DIR")
+    expected_owner=1000:1000
+    expected_mode=700
+    if [ "$node" = zcash ]; then
+      expected_owner=10001:1000
+      expected_mode=750
+    fi
+    if [ "$dir" != "$data_root/$node" ]; then
+      if [ ! -d "$dir" ] || [ -L "$dir" ] ||
+        [ "$(stat -c '%u:%g' "$dir" 2>/dev/null)" != "$expected_owner" ] ||
+        [ "$(stat -c '%a' "$dir" 2>/dev/null)" != "$expected_mode" ]; then
+        echo "Custom $node data needs owner $expected_owner and mode $expected_mode: $dir" >&2
+        printf 'Prepare it explicitly, then retry: sudo chown -R %s %q; sudo chmod %s %q\n' "$expected_owner" "$dir" "$expected_mode" "$dir" >&2
+        return 1
+      fi
+      continue
+    fi
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+      echo "Default $node data directory is missing or is a symbolic link: $dir" >&2
+      return 1
+    fi
+    dir_real=$(readlink -f -- "$dir") || return 1
+    [ "$dir_real" = "$root_real/$node" ] || {
+      echo "Default $node data directory escapes the managed data root." >&2
+      return 1
+    }
+    owner=$(stat -c '%u:%g' "$dir") || return 1
+    mode=$(stat -c '%a' "$dir") || return 1
+    [ "$owner" = "$expected_owner" ] && [ "$mode" = "$expected_mode" ] && continue
+    contents=$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || {
+      echo "Linuxbrew cannot inspect $node data ownership: $dir" >&2
+      return 1
+    }
+    if [ -n "$contents" ]; then
+      echo "Linuxbrew will not change ownership or permissions of non-empty $node data: $dir" >&2
+      printf 'Migrate it explicitly, then retry: sudo chown -R %s %q; sudo chmod %s %q\n' "$expected_owner" "$dir" "$expected_mode" "$dir" >&2
+      return 1
+    fi
+    mounts+=( --mount "type=bind,src=$dir,dst=/node-data/$node" )
+    commands+="chown $expected_owner /node-data/$node && chmod $expected_mode /node-data/$node && "
+  done
+  [ "${#mounts[@]}" -gt 0 ] || return 0
+  tor_image=$(compose config --format json | jq -er '.services.tor.image') || return 1
+  docker image inspect "$tor_image" >/dev/null 2>&1 || {
+    echo "The local Tor image is required before Linuxbrew can prepare node data; run: $stack_command pull" >&2
+    return 1
+  }
+  docker run --rm --network none --read-only --security-opt no-new-privileges \
+    --cap-drop ALL --cap-add CHOWN --cap-add DAC_READ_SEARCH --cap-add FOWNER \
+    --user 0:0 --entrypoint /bin/sh "${mounts[@]}" "$tor_image" -eu -c "${commands% && }" >/dev/null || {
+    echo "Linuxbrew could not prepare the default node data directories." >&2
+    return 1
+  }
 }
 
 offline_up() {
-  guard_package_containers
+  guard_package_containers || return 1
   for arg in "$@"; do
     case "$arg" in
-      tor | bitcoin | dashboard) ;;
+      tor | bitcoin | monero | monero-wallet | tari | tari-wallet | litecoin | dogecoin | bitcoincash | zcash | dashboard) ;;
       *) echo "up accepts service names only; image downloads are separate: $stack_command pull."; return 1 ;;
     esac
   done
+  images_available || {
+    echo "Start failed. Missing images? Run $stack_command pull, then retry."
+    return 1
+  }
+  prepare_linuxbrew_data_dirs || return 1
   compose up -d --pull never --no-build "$@" || {
     echo "Start failed. Missing images? Run $stack_command pull, then retry."
+    return 1
+  }
+  sync_node_runtime || {
+    echo "Start succeeded, but the dashboard node state could not be synchronized."
     return 1
   }
 }
 
 pull_images() {
-  compose pull
+  compose pull "$@"
 }
 
 images_available() {
@@ -219,8 +553,19 @@ images_available() {
 status() {
   compose ps
   bad=0
-  for svc in tor bitcoin dashboard; do
-    st=$(docker inspect "$svc" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+  services="tor dashboard"
+  [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_ACTIVE)" != "0" ] && services="$services bitcoin"
+  [ "$(env_get MONERO_ENABLED)" = "1" ] && [ "$(env_get MONERO_ACTIVE)" != "0" ] && services="$services monero monero-wallet"
+  for node in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+    [ "$(env_get "${node}_ENABLED")" = 1 ] && [ "$(env_get "${node}_ACTIVE")" != 0 ] && services="$services $(printf '%s' "$node" | tr '[:upper:]' '[:lower:]')"
+  done
+  for svc in $services; do
+    id=$(container_id "$svc")
+    if [ -n "$id" ]; then
+      st=$(docker inspect "$id" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+    else
+      st=missing
+    fi
     case "$st" in
       "running healthy") echo "OK    $svc" ;;
       "running health: starting" | "running starting") echo "WAIT  $svc (health check warming up)" ;;
@@ -258,30 +603,63 @@ doctor() {
   fi
 
   echo "== Disk"
-  data_dir=$(env_get BITCOIN_DATA_DIR)
-  df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
+  if [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_ACTIVE)" != "0" ]; then
+    data_dir=$(env_get BITCOIN_DATA_DIR)
+    df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      Bitcoin: %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
+  fi
+  if [ "$(env_get MONERO_ENABLED)" = "1" ] && [ "$(env_get MONERO_ACTIVE)" != "0" ]; then
+    data_dir=$(env_get MONERO_DATA_DIR)
+    df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk '{printf "      Monero: %s free of %s (%s used) at %s\n", $4, $2, $5, $6}'
+  fi
+  for node in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
+    [ "$(env_get "${node}_ENABLED")" = 1 ] || continue
+    data_dir=$(env_get "${node}_DATA_DIR")
+    label=$(printf '%s' "$node" | tr '[:upper:]' '[:lower:]')
+    df -h "${data_dir:-.}" 2>/dev/null | tail -1 | awk -v node="$label" '{printf "      %s: %s free of %s (%s used) at %s\n", node, $4, $2, $5, $6}'
+  done
 
   echo "== Containers"
   status || true
 
-  echo "== Node"
-  if docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
-    jq -r '"      blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
-    echo "      RPC unreachable (normal during startup; if it's been up a while, check $stack_command logs bitcoin)"
+  echo "== Nodes"
+  if [ "$(env_get BITCOIN_ENABLED)" != "0" ]; then
+    if compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
+      jq -r '"      Bitcoin: blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
+      echo "      Bitcoin RPC unreachable (normal during startup; if it persists, check $stack_command logs bitcoin)"
+    fi
   fi
+  if [ "$(env_get MONERO_ENABLED)" = "1" ]; then
+    if compose exec -T monero /usr/local/bin/monero-healthcheck >/dev/null 2>&1; then
+      echo "      Monero RPC reachable"
+    else
+      echo "      Monero RPC unreachable (normal during startup; if it persists, check $stack_command logs monero)"
+    fi
+  fi
+  for node in tari litecoin dogecoin bitcoincash zcash; do
+    upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
+    [ "$(env_get "${upper}_ENABLED")" = 1 ] || continue
+    [ "$(env_get "${upper}_ACTIVE")" != 0 ] || continue
+    node_id=$(container_id "$node")
+    if [ -n "$node_id" ] && docker inspect "$node_id" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null | grep -q '^running healthy$'; then
+      echo "      $node RPC reachable"
+    else
+      echo "      $node unavailable (normal during startup; if it persists, check $stack_command logs $node)"
+    fi
+  done
 
   echo "== Tor"
-  docker logs tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
+  compose logs --no-color tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
   if [ "$(env_get DASHBOARD_ONION)" = "1" ]; then
-    echo "      dashboard onion: $(docker exec tor cat /var/lib/tor/dashboard_onion/hostname 2>/dev/null || echo 'not provisioned yet')"
+    echo "      dashboard onion: $(compose exec -T tor cat /var/lib/tor/dashboard_onion/hostname 2>/dev/null || echo 'not provisioned yet')"
   fi
-  if [ "$(env_get BITCOIN_INBOUND_ONION)" = "1" ]; then
-    echo "      node onion: $(docker exec bitcoin bitcoin-cli -datadir=/data getnetworkinfo 2>/dev/null | jq -r '.localaddresses[0].address // "not registered yet"')"
+  if [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_INBOUND_ONION)" = "1" ]; then
+    echo "      node onion: $(compose exec -T bitcoin bitcoin-cli -datadir=/data getnetworkinfo 2>/dev/null | jq -r '.localaddresses[0].address // "not registered yet"')"
   fi
 }
 
 do_backup() {
-  mkdir -p backups
+  umask 077
+  mkdir -p "$state_dir/backups"
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   [ -f "$config_file" ] && cp "$config_file" "$tmp/config.json"
@@ -298,7 +676,7 @@ do_backup() {
   # UI-managed dashboard state is not otherwise re-derivable.
   compose cp dashboard:/state "$tmp/dashboard_state" >/dev/null 2>&1 ||
     echo "WARN: dashboard state not captured (is the dashboard container up?)"
-  out="backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  out="$state_dir/backups/stack-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   tar czf "$out" -C "$tmp" .
   chmod 600 "$out"
   echo "Wrote $out (config, credentials, onion keys, dashboard state — chain data excluded, it's re-derivable)"
@@ -329,9 +707,7 @@ do_restore() {
   trap 'rm -rf "$tmp"' EXIT
   tar xzf "$archive" -C "$tmp"
   if [ -f "$tmp/config.json" ]; then
-    chmod 600 "$config_file" 2>/dev/null || true
-    cp "$tmp/config.json" "$config_file"
-    chmod 600 "$config_file"
+    replace_config "$tmp/config.json"
     echo "Restored config.json"
   fi
   if [ -f "$tmp/.env" ]; then
@@ -361,18 +737,31 @@ do_restore() {
       exit 1
     fi
   fi
+  [ ! -f "$env_file" ] || approve_current_config
   echo "Done. Apply with: $stack_command apply"
 }
 
 # One-command upgrade: fetch the latest release tag and apply it. Backs up
 # first, only ever moves forward (never downgrades), and prints a rollback line.
 do_upgrade() {
+  if [ "$package_managed" = brew ]; then
+    cat <<EOF
+This installation is managed by Homebrew. Upgrade manually:
+  $stack_command backup
+  brew update
+  brew upgrade bitcoin-starter-stack
+  $stack_command pull
+  $stack_command apply
+EOF
+    return 0
+  fi
   if [ "$package_managed" = "1" ]; then
     cat <<EOF
 This installation is managed by APT. Upgrade manually:
   $stack_command backup
   sudo apt update
   sudo apt install --only-upgrade bitcoin-starter-stack
+  $stack_command pull
   $stack_command apply
 EOF
     return 0
@@ -431,9 +820,11 @@ EOF
     exit 1
   }
   echo "== Applying (pull new images, recreate changed containers)"
+  lock_config
   "$stack_root/configure.sh"
   images_available || pull_images
   offline_up
+  unlock_config
   echo
   echo "Upgraded to v$latest. Verify with: ./stack status"
   echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
@@ -445,50 +836,115 @@ EOF
 # privileges. up/apply manage it automatically via ensure_agent below; running
 # it by hand just watches in the foreground.
 upgrade_agent() {
-  if [ "$package_managed" = "1" ]; then
-    echo "The dashboard upgrade agent is unavailable for APT installations." >&2
+  if [ "$package_managed" != "0" ]; then
+    echo "Use the package manager to upgrade this installation." >&2
     exit 1
   fi
-  echo "upgrade-agent: watching for dashboard upgrade requests (Ctrl-C to stop)."
-  echo "  The button appears when dashboard.control=true; requests run ./stack upgrade here."
+  echo "upgrade-agent: watching for dashboard host-control requests (Ctrl-C to stop)."
+  echo "  Host controls require same-origin dashboard requests; upgrades also require dashboard.control=true."
   while true; do
-    if docker exec dashboard test -f /state/upgrade.request 2>/dev/null; then
-      docker exec -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
-      # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
-      (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+      "$stack_root/scripts/node-control" || echo "upgrade-agent: node control check failed; still watching"
+    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+      "$stack_root/scripts/node-port-control" || echo "upgrade-agent: LAN port control check failed; still watching"
+    if compose exec -T dashboard test -f /state/upgrade.request 2>/dev/null; then
+      compose exec -T -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
+      if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
+        # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
+        (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
+      else
+        echo "upgrade-agent: ignored an upgrade request because dashboard.control is off"
+      fi
     fi
     sleep 10
   done
 }
 
-# Keep the agent in sync with dashboard.control: when on, start it detached and
-# install a @reboot cron entry (no sudo needed); when off, remove both. Skips
-# entirely if the operator runs the agent under systemd (docs/operations.md).
+# Keep the source-install host agent running and install a @reboot cron entry.
+# Skips entirely if the operator runs the agent under systemd (docs/operations.md).
 # ponytail: cron can't restart a crashed agent until reboot — use the systemd
 # unit if that matters to you.
 ensure_agent() {
+  if [ "$package_managed" = brew ]; then
+    command -v brew >/dev/null 2>&1 || {
+      echo "Homebrew is required to start dashboard host controls." >&2
+      return 1
+    }
+    brew services start bitcoin-starter-stack >/dev/null || {
+      echo "Homebrew could not start dashboard host controls." >&2
+      return 1
+    }
+    echo "Host controls and automatic post-sync caps are running through Homebrew."
+    return 0
+  fi
   [ "$package_managed" = "1" ] && return 0
+  if [ "$(uname -s)" = Darwin ]; then
+    exec 9>"$state_dir/.host-service.lock"
+    if flock -n 9; then
+      flock -u 9
+      host_log=$state_dir/host-service.log
+      touch "$host_log"
+      chmod 600 "$host_log"
+      nohup env BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+        "$stack_root/stack" host-service >>"$host_log" 2>&1 </dev/null &
+      echo $! >"$state_dir/.host-service.pid"
+      echo "host-service: started for this login session (log: $host_log)"
+    else
+      echo "host-service: already running"
+    fi
+    return 0
+  fi
   if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
     return 0 # managed by systemd — stay out of its way
   fi
-  if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
-    line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
-    (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
-      echo "WARN  could not install the upgrade-agent @reboot cron entry"
-    if ! pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
-      (setsid ./stack upgrade-agent >>"$HOME/upgrade-agent.log" 2>&1 </dev/null &)
-      echo "upgrade-agent: started (log: ~/upgrade-agent.log; restarts on reboot via cron)"
-    fi
-  else
-    if crontab -l 2>/dev/null | grep -qF "stack upgrade-agent"; then
-      # grep -v exits 1 when ours is the only line — that's fine, write it empty
-      crontab -l 2>/dev/null | { grep -vF "stack upgrade-agent" || true; } | crontab -
-    fi
-    if pkill -f "stack upgrade-agen[t]" 2>/dev/null; then
-      echo "upgrade-agent: stopped (dashboard.control is off)"
-    fi
+  line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
+  (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
+    echo "WARN  could not install the upgrade-agent @reboot cron entry"
+  if ! pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
+    (setsid ./stack upgrade-agent >>"$HOME/upgrade-agent.log" 2>&1 </dev/null &)
+    echo "upgrade-agent: started (log: ~/upgrade-agent.log; restarts on reboot via cron)"
   fi
+}
+
+host_service() {
+  umask 077
+  exec 7>"$state_dir/.host-service.lock"
+  flock -n 7 || { echo "Another host service is already running." >&2; return 1; }
+  trap 'exit 0' TERM INT
+  local started=0 ticks=0 helper
+  echo "host-service: waiting for saved configuration and Docker."
+  while true; do
+    if { [ -r "$config_file" ] || { [ -r "$approved_config_file" ] && [ -r "$approved_env_file" ]; }; } &&
+      docker info >/dev/null 2>&1; then
+      if [ "$started" = 0 ]; then
+        lock_config
+        prepare_config_for_start
+        unlock_config
+        if [ "$(env_get STACK_RESTART_POLICY)" != unless-stopped ]; then
+          started=1
+          echo "host-service: launch at login is off; supervising controls only."
+        elif (lock_config; offline_up || exit 1; unlock_config); then
+          started=1
+          echo "host-service: supervising node controls and post-sync limits."
+        fi
+      fi
+      if [ "$started" = 1 ]; then
+        guard_package_containers || return 1
+        for helper in node-control node-port-control; do
+          BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+            "$stack_root/scripts/$helper" || echo "host-service: $helper check failed; will retry."
+        done
+        if [ "$ticks" = 0 ]; then
+          BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" \
+            "$stack_root/scripts/node-resource-profile" || echo "host-service: resource check failed; will retry."
+        fi
+        ticks=$(((ticks + 1) % 6))
+      fi
+    fi
+    sleep 10 7>&- &
+    wait $! || true
+  done
 }
 
 cmd=${1:-help}
@@ -496,26 +952,179 @@ cmd=${1:-help}
 
 case "$cmd" in
   up)
-    [ -f "$env_file" ] || "$stack_root/configure.sh"
+    lock_config
+    prepare_config_for_start
     offline_up "$@"
+    unlock_config
+    ensure_resource_profile_timer
+    ensure_port_control_timer
+    ensure_node_control_timer
     ensure_agent
     ;;
   init) init ;;
   down) guard_package_containers && compose down "$@" ;;
-  restart) guard_package_containers && compose restart "$@" ;;
+  stop) guard_package_containers && compose stop "$@" ;;
+  restart)
+    lock_config
+    prepare_config_for_start
+    if [ "$config_was_applied" = 1 ]; then
+      offline_up "$@"
+    else
+      guard_package_containers && compose restart "$@"
+    fi
+    unlock_config
+    ;;
   logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
-  events) guard_package_containers && docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
+  events) guard_package_containers && compose exec -T dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
-    "$stack_root/configure.sh"
-    offline_up
+    lock_config
+    previous_env=$(mktemp "$state_dir/.env.before-apply.XXXXXX")
+    previous_approved_config=$(mktemp "$state_dir/.approved-config.before-apply.XXXXXX")
+    previous_approved_env=$(mktemp "$state_dir/.approved-env.before-apply.XXXXXX")
+    had_previous_env=0
+    had_previous_approved_config=0
+    had_previous_approved_env=0
+    if [ -f "$env_file" ]; then
+      cp "$env_file" "$previous_env"
+      had_previous_env=1
+    fi
+    if [ -f "$approved_config_file" ]; then cp "$approved_config_file" "$previous_approved_config"; had_previous_approved_config=1; fi
+    if [ -f "$approved_env_file" ]; then cp "$approved_env_file" "$previous_approved_env"; had_previous_approved_env=1; fi
+    apply_failed=0
+    runtime_attempted=0
+    if render_current_config; then
+      runtime_attempted=1
+      if ! offline_up || ! approve_current_config; then
+        apply_failed=1
+      fi
+    else
+      apply_failed=1
+    fi
+    if [ "$apply_failed" = 1 ]; then
+      rollback_failed=0
+      if [ "$had_previous_env" = 1 ]; then
+        cp "$previous_env" "$env_file"
+        if [ "$runtime_attempted" = 1 ]; then
+          offline_up >/dev/null 2>&1 || rollback_failed=1
+        fi
+      else
+        if [ "$runtime_attempted" = 1 ]; then
+          compose down >/dev/null 2>&1 || rollback_failed=1
+        fi
+        rm -f "$env_file"
+      fi
+      if [ "$had_previous_approved_config" = 1 ]; then cp "$previous_approved_config" "$approved_config_file"; else rm -f "$approved_config_file"; fi
+      if [ "$had_previous_approved_env" = 1 ]; then cp "$previous_approved_env" "$approved_env_file"; else rm -f "$approved_env_file"; fi
+      rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+      unlock_config
+      [ "$rollback_failed" = 0 ] || echo "New configuration failed, and the previous runtime could not be fully restored." >&2
+      echo "New configuration was not approved; the previous runtime settings remain selected." >&2
+      exit 1
+    fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    unlock_config
+    ensure_resource_profile_timer
+    ensure_port_control_timer
+    ensure_node_control_timer
     ensure_agent
+    ;;
+  approve-rendered-config)
+    [ "${BITCOIN_STACK_CONFIG_LOCK_HELD:-0}" = 1 ] || {
+      echo "approve-rendered-config requires the configuration lock." >&2
+      exit 1
+    }
+    approve_current_config
+    ;;
+  apply-port-settings)
+    lock_config
+    "$stack_root/configure.sh"
+    guard_package_containers
+    compose up -d --pull never --no-build --no-deps tor dashboard || {
+      echo "Port settings could not be applied with the installed images."
+      exit 1
+    }
+    approve_current_config
+    unlock_config
+    ;;
+  apply-credential-settings)
+    node=${1:-}
+    case "$node" in
+      bitcoin) services=(bitcoin dashboard) ;;
+      monero) services=(monero monero-wallet dashboard) ;;
+      litecoin | dogecoin | bitcoincash) services=("$node" dashboard) ;;
+      zcash) services=(dashboard) ;;
+      *) echo "Unsupported credential target: $node" >&2; exit 1 ;;
+    esac
+    lock_config
+    [ "$(jq -r --arg node "$node" 'if .[$node] | has("active") then .[$node].active == true else true end' "$config_file")" = true ] || {
+      echo "Cannot apply credentials for an inactive node." >&2
+      exit 1
+    }
+    credential_limits=${BITCOIN_STACK_CREDENTIAL_LIMITS:-}
+    if [ "$node" != zcash ] && [ -z "$credential_limits" ]; then
+      node_id=$(container_id "$node")
+      [ -n "$node_id" ] || {
+        echo "Current node container could not be found." >&2
+        exit 1
+      }
+      credential_limits=$(docker inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$node_id")
+    fi
+    if [ "$node" != zcash ] && [[ ! "$credential_limits" =~ ^[0-9]+\ [0-9]+\ -?[0-9]+$ ]]; then
+      echo "Current node resource limits could not be preserved." >&2
+      exit 1
+    fi
+    "$stack_root/configure.sh"
+    guard_package_containers
+    compose up -d --pull never --no-build --no-deps "${services[@]}" || {
+      echo "RPC credentials could not be applied with the installed images."
+      exit 1
+    }
+    if [ "$node" != zcash ]; then
+      read -r nano_cpus memory_bytes memory_swap <<<"$credential_limits"
+      update_args=()
+      [ "$nano_cpus" = 0 ] || update_args+=(--cpus "$(awk -v value="$nano_cpus" 'BEGIN { printf "%.9f", value / 1000000000 }')")
+      if [ "$memory_bytes" != 0 ]; then
+        update_args+=(--memory "$memory_bytes" --memory-swap "$memory_swap")
+      elif [ "$memory_swap" != 0 ]; then
+        echo "Current node resource limits are inconsistent." >&2
+        exit 1
+      fi
+      [ "${#update_args[@]}" = 0 ] || docker update "${update_args[@]}" "$node_id" >/dev/null || {
+        echo "Current node resource limits could not be restored." >&2
+        exit 1
+      }
+    fi
+    credential_wait=${BITCOIN_STACK_CREDENTIAL_WAIT_SECONDS:-300}
+    [[ "$credential_wait" =~ ^[0-9]+$ ]] && [ "$credential_wait" -ge 1 ] && [ "$credential_wait" -le 3600 ] || {
+      echo "Invalid credential readiness timeout." >&2
+      exit 1
+    }
+    credential_deadline=$((SECONDS + credential_wait))
+    while true; do
+      credential_ready=1
+      for service in "${services[@]}"; do
+        service_id=$(container_id "$service")
+        [ -n "$service_id" ] && [ "$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$service_id" 2>/dev/null || true)" = "running healthy" ] || credential_ready=0
+      done
+      [ "$credential_ready" = 0 ] || break
+      [ "$SECONDS" -lt "$credential_deadline" ] || {
+        echo "Credential services did not become ready." >&2
+        exit 1
+      }
+      sleep 2
+    done
+    approve_current_config
+    unlock_config
     ;;
   upgrade) do_upgrade ;;
   pull)
-    [ -f "$env_file" ] || "$stack_root/configure.sh"
-    pull_images
+    lock_config
+    "$stack_root/configure.sh"
+    pull_images "$@"
+    unlock_config
     ;;
   upgrade-agent) upgrade_agent ;;
+  host-service) host_service ;;
   status) status ;;
   doctor) doctor ;;
   backup) guard_package_containers && do_backup ;;

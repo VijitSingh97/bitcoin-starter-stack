@@ -1,0 +1,16 @@
+#!/bin/sh
+user=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --user ]; then
+    [ "$#" -ge 2 ] || exit 64
+    user=$2
+    shift 2
+  else
+    shift
+  fi
+done
+if [ -n "${FAKE_CURL_EXPECT_USER:-}" ] && [ "$user" != "$FAKE_CURL_EXPECT_USER" ]; then
+  exit 65
+fi
+printf '%s' "${FAKE_CURL_RESPONSE:-}"
+exit "${FAKE_CURL_EXIT:-0}"

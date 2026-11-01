@@ -181,6 +181,16 @@ class DashboardContracts(unittest.TestCase):
         self.assertEqual(status, 200)
         return json.loads(body)
 
+    def bitcoin_panel(self, body):
+        marker = 'id="bitcoin-panel"'
+        if marker not in body:
+            return body
+        start = body.index(marker)
+        end = body.find('id="monero-panel"', start)
+        if end < 0:
+            return body[start:]
+        return body[start:end]
+
     def add(self, name='Cold', key=ADDRESS, birthday='2021-03-15'):
         status, body, _ = self.call('/api/watch', 'POST', {'name': name, 'key': key, 'birthday': birthday})
         self.assertEqual((status, json.loads(body)), (200, {'ok': True}))
@@ -224,7 +234,10 @@ class DashboardContracts(unittest.TestCase):
     def test_synced_ui_and_rpc_auth(self):
         status, body, _ = self.call('/')
         self.assertEqual(status, 200)
-        for value in ['Bitcoin Node Status', '/Satoshi:31.1.0/', '1d 1h 1m', '123 / 123', 'Sync Progress', 'Mempool:', '42 tx', '0.4', 'v1.31.1', '/static/watch.js', '/static/upgrade.js', 'id="watch"', 'data-blocks="123"']:
+        bitcoin = self.bitcoin_panel(body)
+        for value in ['Bitcoin Node Status', '/Satoshi:31.1.0/', '1d 1h 1m', '123 / 123', 'Sync Progress', 'Mempool:', '42 tx', '0.4', 'v1.31.1', 'id="watch"', 'data-blocks="123"']:
+            self.assertIn(value, bitcoin)
+        for value in ['/static/watch.js', '/static/upgrade.js']:
             self.assertIn(value, body)
         expected = 'Basic '+base64.b64encode(b'parityuser:parityrpc').decode()
         self.assertTrue(all(call[3] == expected for call in self.fixture.state['calls']))
@@ -238,7 +251,7 @@ class DashboardContracts(unittest.TestCase):
         self.fixture.state['ibd'] = True
         with self.fixture.lock:
             self.fixture.state['calls'].clear()
-        body = self.call('/')[1]
+        body = self.bitcoin_panel(self.call('/')[1])
         self.assertNotIn('Mempool:', body)
         methods = [row[1] for row in self.fixture.state['calls']]
         self.assertNotIn('getmempoolinfo', methods)
@@ -354,9 +367,10 @@ class DashboardContracts(unittest.TestCase):
         self.fixture.state['failed_methods']=['getnetworkinfo','uptime','getmempoolinfo','estimatesmartfee']
         status, body, _=self.call('/')
         self.assertEqual(status,200)
-        self.assertIn('Unknown',body)
-        self.assertIn('N/A',body)
-        self.assertNotIn('Mempool:',body)
+        bitcoin = self.bitcoin_panel(body)
+        self.assertIn('Unknown',bitcoin)
+        self.assertIn('N/A',bitcoin)
+        self.assertNotIn('Mempool:',bitcoin)
 
     def test_node_version_escaped(self):
         self.fixture.state['version']='<script>alert(1)</script>'

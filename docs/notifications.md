@@ -2,8 +2,10 @@
 
 ## Dashboard settings
 
-The gear at the bottom right opens Telegram, Healthchecks, and new-block alert
-settings. Changes apply immediately without restarting Bitcoin. A dashboard
+The gear at the bottom right opens node installation, launch at boot/login,
+Appearance, Dashboard password, Telegram, and Healthchecks. Each tower contains
+its own separate Alerts and LAN access sections under Node controls. Changes apply
+immediately unless LAN port settings change. A dashboard
 password protects the gear when configured; without one, it follows the same
 access policy as the rest of the dashboard. The gear works from localhost, a
 configured private LAN address, or the Tor onion dashboard (enable
@@ -23,7 +25,17 @@ edited directly. Anyone with dashboard access can view those values. Disabling a
 service clears its credentials from the dashboard override; the server
 configuration is unchanged.
 
-Three opt-in ways to keep an eye on the node when you're off the LAN:
+Each configured tower's LAN access section shows whether RPC or ZMQ is exposed.
+With the installed host helper, its Save button can open or close ports using the
+server's configured private LAN address. The port number is editable; the
+address stays in server configuration. Port edits stay local until Save. The button reads
+**Save & restart** when a port change will recreate the Tor relay and dashboard;
+the blockchain node processes keep running. The helper validates the address,
+port, enabled node, saved credentials, and actual host/Docker port conflicts
+before updating `config.json` or restarting services. A conflict names the
+selected listener and leaves the edits available for correction.
+
+Three opt-in ways to keep an eye on the node set when you're off the LAN:
 Telegram alerts, a Healthchecks.io dead-man's switch, and dashboard access
 over Tor. All three are off until configured, and every outbound
 notification rides the stack's Tor proxy (`socks5h`, so even DNS resolves
@@ -45,19 +57,22 @@ read alerts but never change anything.
 | Alert | When it fires |
 |---|---|
 | 🚀 **Monitor online** | The dashboard started with an already-synced node — confirms the bot works after setup. |
-| 🔴 **Node down** | RPC unreachable for 3 consecutive minutes. |
-| 🟢 **Node recovered** | RPC answering again after a down alert. |
-| ✅ **Sync complete** | Initial block download finished — handy on first run, when it takes days. |
-| 💾 **Disk low** | Free space fell below 50 GB. Re-arms if space is freed. |
+| 🔴 **Node down** | One configured node's RPC is unreachable for 3 consecutive minutes. |
+| 🟢 **Node recovered** | That node's RPC answers again after a down alert. |
+| ✅ **Sync complete** | A node's initial sync finished. |
+| 💾 **Disk low** | A node's data volume has less than 50 GB free. Re-arms if space is freed. |
 | 🆕 **Update available** | A new stack release exists (checked daily, over Tor). Also a dashboard badge. Informational only. |
-| 🟧 **New block** | The node accepted a new block (synced only). **Off by default** — a synced node finds ~144 a day. Enable with `notifications.alert_new_block: true`. |
+| 🟧 **New block** | A synced node accepted a new block. **Off by default**; Bitcoin produces about 144 a day and Monero about 720. Enable either node separately. |
 
 Every message is prefixed with the host's name (`NODE_NAME`, the box's
-hostname by default), so several nodes can share one chat.
+hostname by default), and node alerts identify Bitcoin or Monero. Several hosts
+and both chains can safely share one chat.
 
-Automatic Telegram alerts stay quiet during initial sync. When syncing
-finishes, the bot sends the single ✅ sync-complete message; normal node,
-disk, release, and optional new-block alerts begin after that.
+Automatic Telegram alerts stay quiet while each node performs its initial sync.
+When a chain finishes, the bot sends one chain-labelled ✅ sync-complete
+message; normal down, disk, and optional new-block alerts then begin for it.
+Bitcoin and Monero keep separate incident state in the persistent dashboard
+volume, so a dashboard restart does not duplicate an alert or confuse recovery.
 
 ### 1. Create a bot and get its token
 
@@ -77,7 +92,9 @@ is positive.
 ```json
 "notifications": {
     "telegram_bot_token": "1234567890:AAF...",
-    "telegram_chat_id": "-1001234567890"
+    "telegram_chat_id": "-1001234567890",
+    "alert_new_block": false,
+    "alert_new_block_monero": false
 }
 ```
 
@@ -135,9 +152,13 @@ together.
 Ping** flips from *Never* to a timestamp almost immediately — that's your
 confirmation it works.
 
-While the node's RPC is down but the box is alive, the stack pings the
-check's `/fail` endpoint instead, so Healthchecks shows *down* rather than
-*late* — you can tell "node broken" from "box dark".
+The one Healthchecks URL represents the whole configured node set. It receives a
+normal ping only when every enabled node is answering. If Bitcoin or Monero
+remains unreachable for three checks while the box is alive, the stack pings
+the check's `/fail` endpoint instead, so Healthchecks shows *down* rather than
+*late*. Disabled nodes are excluded. A live node that is still performing its
+initial sync remains healthy for this aggregate check; its operational Telegram
+alerts stay suppressed until sync completes.
 
 ---
 
@@ -153,16 +174,17 @@ port-forwarding, via a Tor onion service:
 }
 ```
 
-`./stack apply`, then read your address:
+`./stack apply`, then find the dashboard onion address in the doctor report
+(use `bitcoin-stack` instead of `./stack` for a package installation):
 
 ```bash
-docker exec tor cat /var/lib/tor/dashboard_onion/hostname
+./stack doctor
 ```
 
 Open that `.onion` in [Tor Browser](https://www.torproject.org/). The address
-is unguessable (an ed25519 key), but treat it as a secret and **set
-`dashboard.password`** — `configure.sh` warns if you enable the onion without
-one. The onion adds no host port; the ordinary dashboard port keeps its
+is unguessable (an ed25519 key), but treat it as a secret. A non-empty
+`dashboard.password` is required; `configure.sh` rejects onion publication
+without one. The onion adds no host port; the ordinary dashboard port keeps its
 configured loopback or private-LAN bind.
 
 > NOTE: The onion keys live in the `tor_data` volume. Recreating it (e.g.
