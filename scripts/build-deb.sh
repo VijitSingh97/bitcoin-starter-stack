@@ -13,6 +13,12 @@ if [ "${#version}" -gt 128 ]; then
   echo "package version exceeds Docker's 128-character tag limit" >&2
   exit 1
 fi
+image_digests=${RUNTIME_IMAGE_DIGESTS_FILE:?Set RUNTIME_IMAGE_DIGESTS_FILE to the published image digest JSON.}
+jq -e '
+  type == "object" and
+  keys == (["tor", "dashboard", "monero", "tari-wallet", "litecoin", "dogecoin", "bitcoincash"] | sort) and
+  all(.[]; type == "string" and test("^sha256:[a-f0-9]{64}$"))
+' "$image_digests" >/dev/null || { echo "Invalid runtime image digest file." >&2; exit 1; }
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
 export SOURCE_DATE_EPOCH
 package=$(mktemp -d)
@@ -22,6 +28,8 @@ docs=$package/usr/share/doc/bitcoin-starter-stack
 share=$package/usr/share/bitcoin-starter-stack
 
 install -d "$package/DEBIAN" "$package/usr/bin" "$root" "$docs/docs" "$share"
+sed "s/@VERSION@/$version/g" packaging/postinst >"$package/DEBIAN/postinst"
+chmod 755 "$package/DEBIAN/postinst"
 install -m 755 scripts/bitcoin-stack "$package/usr/bin/bitcoin-stack"
 install -m 755 stack configure.sh "$root/"
 install -m 755 scripts/node-resource-profile "$root/node-resource-profile"
@@ -36,6 +44,24 @@ install -m 644 docker-compose.yml docker-compose.rpc.yml docker-compose.monero-r
   docker-compose.tari-wallet.yml docker-compose.tari-grpc.yml docker-compose.litecoin-rpc.yml docker-compose.dogecoin-rpc.yml docker-compose.bitcoincash-rpc.yml \
   docker-compose.zcash-rpc.yml VERSION .dockerignore "$root/"
 printf '%s\n' "$version" >"$root/VERSION"
+install -m 644 "$image_digests" "$root/runtime-images.json"
+for service in tor dashboard monero tari-wallet litecoin dogecoin bitcoincash; do
+  digest=$(jq -er --arg service "$service" '.[$service]' "$image_digests")
+  compose_file=$root/docker-compose.yml
+  count=1
+  case "$service" in tari-wallet) compose_file=$root/docker-compose.tari-wallet.yml ;; monero) count=2 ;; esac
+  image="ghcr.io/vijitsingh97/bitcoin-starter-stack-$service:"
+  awk -v image="$image" -v replacement="$image$version@$digest" -v expected="$count" '
+    $1 == "image:" && index($2, image) == 1 {
+      print substr($0, 1, index($0, image) - 1) replacement
+      changed++
+      next
+    }
+    { print }
+    END { if (changed != expected) exit 1 }
+  ' "$compose_file" >"$compose_file.pinned" || { echo "Could not pin $service runtime image." >&2; exit 1; }
+  mv "$compose_file.pinned" "$compose_file"
+done
 cp -R build "$root/"
 rm -rf "$root/build/dashboard/tests" "$root/build/dashboard/parity" \
   "$root/build/dashboard/.pytest_cache" "$root/build/dashboard/__pycache__"

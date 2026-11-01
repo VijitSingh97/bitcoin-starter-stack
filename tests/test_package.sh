@@ -14,6 +14,21 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+export RUNTIME_IMAGE_DIGESTS_FILE=$tmp/runtime-images.json
+jq -n '{
+  tor:"sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  dashboard:"sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  monero:"sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "tari-wallet":"sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  litecoin:"sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  dogecoin:"sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  bitcoincash:"sha256:7777777777777777777777777777777777777777777777777777777777777777"
+}' >"$RUNTIME_IMAGE_DIGESTS_FILE"
+RUNTIME_IMAGE_DIGESTS_FILE=$tmp/missing.json SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null 2>&1 &&
+  fail "package build accepted a missing runtime digest file"
+jq 'del(.tor)' "$RUNTIME_IMAGE_DIGESTS_FILE" >"$tmp/invalid-runtime-images.json"
+RUNTIME_IMAGE_DIGESTS_FILE=$tmp/invalid-runtime-images.json SOURCE_DATE_EPOCH=1700000000 scripts/build-deb.sh >/dev/null 2>&1 &&
+  fail "package build accepted an incomplete runtime digest file"
 
 source_version=$(cat VERSION)
 unset PACKAGE_VERSION
@@ -52,6 +67,7 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/docker-compose.dogecoin-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.bitcoincash-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.zcash-rpc.yml \
+  ./usr/lib/bitcoin-starter-stack/runtime-images.json \
   ./usr/lib/bitcoin-starter-stack/build/dashboard/main.go \
   ./usr/lib/bitcoin-starter-stack/build/monero/Dockerfile \
   ./usr/lib/bitcoin-starter-stack/build/monero/wallet-entrypoint.sh \
@@ -97,13 +113,77 @@ printf '%s' "$depends" | grep -q 'docker-compose-plugin (>= 2.33.1) | docker-com
 
 mkdir "$tmp/control"
 dpkg-deb -e "$deb" "$tmp/control"
-for hook in preinst postinst prerm postrm; do
+for hook in preinst prerm postrm; do
   [ ! -e "$tmp/control/$hook" ] || fail "package contains lifecycle hook $hook"
 done
+[ -x "$tmp/control/postinst" ] || fail "package is missing its post-upgrade activation hook"
+grep -q 'dpkg --compare-versions.* gt ' "$tmp/control/postinst" || fail "postinst does not reject reinstalls and downgrades"
+grep -q 'env -i' "$tmp/control/postinst" || fail "postinst passes the package-manager environment to Docker"
+grep -q '/usr/bin/bitcoin-stack package-upgrade' "$tmp/control/postinst" || fail "postinst does not use the package activation command"
+if grep -q '@VERSION@' "$tmp/control/postinst"; then
+  fail "postinst package version placeholder was not rendered"
+fi
+
+postinst_fixture=$tmp/postinst-fixture
+postinst_state=$tmp/postinst-state
+postinst_helper=$tmp/postinst-helper
+postinst_log=$tmp/postinst.log
+mkdir "$postinst_state"
+printf 'ready\n' >"$postinst_state/.env"
+printf 'ready\n' >"$postinst_state/.approved-config.json"
+printf 'ready\n' >"$postinst_state/.approved.env"
+sed \
+  -e "s|state=/var/lib/bitcoin-starter-stack|state=$postinst_state|" \
+  -e "s|/usr/bin/bitcoin-stack package-upgrade|$postinst_helper package-upgrade|" \
+  "$tmp/control/postinst" >"$postinst_fixture"
+chmod 755 "$postinst_fixture"
+cat >"$postinst_helper" <<'EOF'
+#!/bin/sh
+printf 'command=%s docker_host=%s compose_file=%s stack_root=%s home=%s path=%s\n' \
+  "$*" "${DOCKER_HOST-unset}" "${COMPOSE_FILE-unset}" "${BITCOIN_STACK_ROOT-unset}" "$HOME" "$PATH" >>"@POSTINST_LOG@"
+[ ! -e "@POSTINST_FAIL@" ] || exit 42
+EOF
+sed -i.bak -e "s|@POSTINST_LOG@|$postinst_log|g" -e "s|@POSTINST_FAIL@|$tmp/postinst-fail|g" "$postinst_helper"
+rm -f "$postinst_helper.bak"
+chmod 755 "$postinst_helper"
+
+"$postinst_fixture" configure
+[ ! -e "$postinst_log" ] || fail "fresh install invoked package activation"
+"$postinst_fixture" configure "$PACKAGE_VERSION"
+[ ! -e "$postinst_log" ] || fail "package reinstall invoked activation"
+"$postinst_fixture" configure 9.99.0
+[ ! -e "$postinst_log" ] || fail "package downgrade invoked activation"
+DOCKER_HOST=ssh://hostile COMPOSE_FILE=/hostile BITCOIN_STACK_ROOT=/hostile HOME=/hostile PATH=/hostile \
+  "$postinst_fixture" configure 1.0.0
+grep -q 'command=package-upgrade docker_host=unset compose_file=unset stack_root=unset home=/root path=/usr/sbin:/usr/bin:/sbin:/bin' "$postinst_log" ||
+  fail "postinst did not sanitize its activation environment"
+: >"$postinst_log"
+touch "$tmp/postinst-fail"
+"$postinst_fixture" configure 1.0.0 || fail "postinst failure blocked package configuration"
+grep -q 'command=package-upgrade' "$postinst_log" || fail "postinst did not invoke activation on upgrade"
 
 root=$tmp/root
 dpkg-deb -x "$deb" "$root"
 [ "$(cat "$root/usr/lib/bitcoin-starter-stack/VERSION")" = "$PACKAGE_VERSION" ] || fail "payload VERSION does not match package metadata"
+packaged_main=$root/usr/lib/bitcoin-starter-stack/docker-compose.yml
+packaged_tari=$root/usr/lib/bitcoin-starter-stack/docker-compose.tari-wallet.yml
+total_pinned=0
+for service in tor dashboard monero tari-wallet litecoin dogecoin bitcoincash; do
+  digest=$(jq -r --arg service "$service" '.[$service]' "$RUNTIME_IMAGE_DIGESTS_FILE")
+  expected=1
+  [ "$service" != monero ] || expected=2
+  count=$({ grep -hF "ghcr.io/vijitsingh97/bitcoin-starter-stack-$service:$PACKAGE_VERSION@$digest" "$packaged_main" "$packaged_tari" || true; } | wc -l | tr -d ' ')
+  [ "$count" = "$expected" ] || fail "package did not bind $service to its published digest"
+  total_pinned=$((total_pinned + count))
+done
+[ "$total_pinned" = 8 ] || fail "package runtime digest set is incomplete"
+if grep -hEq 'ghcr.io/vijitsingh97/bitcoin-starter-stack-[^:]+:\$\{STACK_VERSION' "$packaged_main" "$packaged_tari"; then
+  fail "package retained a mutable first-party runtime tag"
+fi
+awk '$1 == "image:" && ($2 ~ /^bitcoin\/bitcoin:/ || $2 ~ /^ghcr.io\/tari-project\// || $2 ~ /^zakuracore\/zakura:/) { print $2 }' docker-compose.yml |
+  while IFS= read -r image; do
+    grep -Fq "image: $image" "$packaged_main" || fail "package changed external image pin $image"
+  done
 privacy=$root/usr/share/doc/bitcoin-starter-stack/docs/privacy.md
 grep -q "^expected='72FD656754BD7534E274360A37070C2730C0B4EA'$" "$privacy" || fail "published feed fingerprint is missing"
 grep -q 'bitcoin-starter-stack.asc' "$privacy" || fail "feed key download is missing"

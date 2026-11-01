@@ -5,6 +5,7 @@
 CONTRIBUTING.md export-ignore
 scripts/build-apt.sh export-ignore
 scripts/build-deb.sh export-ignore
+scripts/resolve-runtime-images.sh export-ignore
 scripts/release-notes.sh export-ignore
 scripts/release.sh export-ignore
 packaging export-ignore

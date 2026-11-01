@@ -24,10 +24,17 @@ command -v gpg >/dev/null || {
   exit 0
 }
 
-for guide in README.md docs/getting-started.md docs/privacy.md; do
-  grep -Fq "listing=\$(gpg --batch --show-keys --with-colons \"\$key\") || {" "$guide" || fail "$guide does not reject GPG parse failures"
-  grep -Fq 'primary_keys++' "$guide" || fail "$guide does not count primary keys"
-  grep -Fq "1:\$expected" "$guide" || fail "$guide does not require exactly the expected primary key"
+guide=docs/privacy.md
+grep -Fq "listing=\$(gpg --batch --show-keys --with-colons \"\$key\") || {" "$guide" || fail "$guide does not reject GPG parse failures"
+grep -Fq 'primary_keys++' "$guide" || fail "$guide does not count primary keys"
+grep -Fq "1:\$expected" "$guide" || fail "$guide does not require exactly the expected primary key"
+
+for guide in README.md docs/getting-started.md; do
+  grep -Fq 'Types: deb' "$guide" || fail "$guide does not use deb822 sources"
+  grep -Fq 'URIs: https://vijitsingh97.github.io/node-manager/' "$guide" || fail "$guide uses the wrong APT feed"
+  grep -Fq 'Suites: ./' "$guide" || fail "$guide does not use the flat repository"
+  grep -Fq 'Signed-By: /etc/apt/keyrings/bitcoin-starter-stack.asc' "$guide" || fail "$guide does not scope the signing key"
+  grep -Fq '72FD656754BD7534E274360A37070C2730C0B4EA' "$guide" || fail "$guide omits the published key fingerprint"
 done
 
 tmp=$(mktemp -d)
@@ -74,6 +81,11 @@ for tool in apt-ftparchive apt-get; do
   }
 done
 
+export RUNTIME_IMAGE_DIGESTS_FILE=$tmp/runtime-images.json
+jq -n '
+  ["tor", "dashboard", "monero", "tari-wallet", "litecoin", "dogecoin", "bitcoincash"] |
+  map({key: ., value: ("sha256:" + ("a" * 64))}) | from_entries
+' >"$RUNTIME_IMAGE_DIGESTS_FILE"
 scripts/build-deb.sh >/dev/null
 scripts/build-apt.sh
 gpg --verify public/InRelease >/dev/null 2>&1 || fail "InRelease signature did not verify"
@@ -83,8 +95,13 @@ mkdir -p "$state/lists/partial" "$state/download"
 chmod 755 "$state"
 cp -R public "$state/feed"
 chmod -R a+rX "$state/feed"
-printf 'deb [signed-by=%s/feed/bitcoin-starter-stack.asc] file:%s/feed ./\n' "$state" "$state" >"$state/sources.list"
-options=(-o "Dir::Etc::sourcelist=$state/sources.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/lists")
+cat >"$state/sources.sources" <<EOF
+Types: deb
+URIs: file:$state/feed/
+Suites: ./
+Signed-By: $state/feed/bitcoin-starter-stack.asc
+EOF
+options=(-o "Dir::Etc::sourcelist=$state/sources.sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/lists")
 apt-get "${options[@]}" update >/dev/null
 (cd "$state/download" && apt-get "${options[@]}" download bitcoin-starter-stack >/dev/null)
 
@@ -99,8 +116,13 @@ mkdir -m 700 "$other"
 GNUPGHOME=$other gpg --batch --passphrase '' --quick-generate-key 'wrong package key' rsa2048 sign 0 >/dev/null 2>&1
 GNUPGHOME=$other gpg --batch --armor --export >"$state/wrong.asc"
 mkdir -p "$state/wrong-lists/partial"
-printf 'deb [signed-by=%s/wrong.asc] file:%s/feed ./\n' "$state" "$state" >"$state/wrong.list"
-wrong_options=(-o "Dir::Etc::sourcelist=$state/wrong.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/wrong-lists")
+cat >"$state/wrong.sources" <<EOF
+Types: deb
+URIs: file:$state/feed/
+Suites: ./
+Signed-By: $state/wrong.asc
+EOF
+wrong_options=(-o "Dir::Etc::sourcelist=$state/wrong.sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$state/wrong-lists")
 if apt-get "${wrong_options[@]}" update >/dev/null 2>&1; then
   fail "APT accepted a feed signed by an untrusted key"
 fi

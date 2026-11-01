@@ -93,6 +93,19 @@ confirm all of the following repository settings:
 4. The `github-pages` environment permits the release workflow to deploy.
 
 The APT job waits for both the source release and all multi-architecture images.
+It resolves each first-party manifest digest and bakes those exact references into
+the signed Debian package. Local package builds require a digest map:
+
+```bash
+scripts/resolve-runtime-images.sh > /tmp/node-manager-runtime-images.json
+RUNTIME_IMAGE_DIGESTS_FILE=/tmp/node-manager-runtime-images.json scripts/build-deb.sh
+```
+
+A first installation remains inert. On an actual version upgrade, the package's
+`postinst` activates images only for an initialized, running package deployment.
+It preserves approved settings, data, volumes, and deliberately stopped services.
+Activation failures are reported for retry with `bitcoin-stack package-upgrade`;
+Docker or registry outages do not leave dpkg unconfigured.
 It builds the architecture-independent package, creates and signs the feed,
 verifies that feed with an isolated APT client, uploads the package and checksum
 to the GitHub Release, and deploys the feed to Pages. Do not advertise APT

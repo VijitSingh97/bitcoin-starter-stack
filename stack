@@ -193,8 +193,18 @@ prepare_config_for_start() {
 cd "$state_dir"
 
 compose() {
+  local -a runner=(docker compose)
+  if [ -n "${BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS:-}" ]; then
+    [[ "$BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] &&
+      [ "$BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS" -ge 1 ] &&
+      [ "$BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS" -le 3600 ] || {
+      echo "Invalid Compose timeout." >&2
+      return 1
+    }
+    runner=(timeout --foreground "$BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS" docker compose)
+  fi
   if [ "$state_dir" = "$stack_root" ]; then
-    docker compose --project-name "$project_name" "$@"
+    "${runner[@]}" --project-name "$project_name" "$@"
   else
     local compose_file compose_files=()
     compose_file=$(env_get COMPOSE_FILE)
@@ -212,25 +222,40 @@ compose() {
           ;;
       esac
     done
-    docker compose --project-name "$project_name" \
+    "${runner[@]}" --project-name "$project_name" \
       --project-directory "$state_dir" --env-file "$env_file" \
       "${compose_args[@]}" "$@"
   fi
 }
 
 container_id() {
-  docker ps -aq \
+  local output
+  local -a ids
+  output=$(docker ps -aq \
     --filter "label=com.docker.compose.project=$project_name" \
-    --filter "label=com.docker.compose.service=$1" | head -n 1
+    --filter "label=com.docker.compose.service=$1") || return 1
+  ids=()
+  [ -z "$output" ] || mapfile -t ids <<<"$output"
+  if [ "${#ids[@]}" -gt 1 ]; then
+    echo "Multiple $1 containers use the $project_name project identity." >&2
+    return 1
+  fi
+  [ "${#ids[@]}" = 0 ] || printf '%s\n' "${ids[0]}"
 }
 
 guard_package_containers() {
   [ "$package_managed" != 0 ] || return 0
   local service id config working_dir
   for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
-    id=$(container_id "$service")
+    if ! id=$(container_id "$service"); then
+      echo "Existing $service container ownership could not be queried; package mode will not replace it." >&2
+      return 1
+    fi
     [ -n "$id" ] || continue
-    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$id" 2>/dev/null) || continue
+    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$id" 2>/dev/null) || {
+      echo "Existing $service container ownership could not be verified; package mode will not replace it." >&2
+      return 1
+    }
     case ",$config," in
       *",$stack_root/docker-compose.yml,"*) ;;
       *)
@@ -543,6 +568,173 @@ pull_images() {
   compose pull "$@"
 }
 
+running_package_services() {
+  local service id running
+  for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
+    if ! id=$(container_id "$service"); then
+      echo "Running $service container state could not be queried." >&2
+      return 1
+    fi
+    [ -n "$id" ] || continue
+    if ! running=$(docker inspect --format '{{.State.Running}}' "$id" 2>/dev/null); then
+      echo "Running $service container state could not be inspected." >&2
+      return 1
+    fi
+    case "$running" in
+      true) printf '%s\n' "$service" ;;
+      false) ;;
+      *) echo "Running $service container returned an invalid state." >&2; return 1 ;;
+    esac
+  done
+}
+
+render_package_upgrade_env() {
+  local version target
+  version=$(cat "$stack_root/VERSION") || return 1
+  case "$version" in
+    '' | [!0-9]* | *[!A-Za-z0-9.-]* | *[.-]) echo "Installed package version is invalid." >&2; return 1 ;;
+  esac
+  [ "${#version}" -le 128 ] || { echo "Installed package version is invalid." >&2; return 1; }
+  target=$(mktemp "$state_dir/.env.package-upgrade.XXXXXX") || return 1
+  if ! awk -v version="$version" '
+    /^STACK_VERSION=/ { print "STACK_VERSION=" version; found++; next }
+    { print }
+    END { if (found != 1) exit 1 }
+  ' "$approved_env_file" >"$target"; then
+    rm -f "$target"
+    echo "Approved runtime is missing a single package version field." >&2
+    return 1
+  fi
+  chmod 600 "$target"
+  mv "$target" "$env_file"
+}
+
+restore_package_upgrade_state() {
+  cp "$1" "$env_file"
+  cp "$2" "$approved_config_file"
+  cp "$3" "$approved_env_file"
+  chmod 600 "$env_file" "$approved_config_file" "$approved_env_file"
+}
+
+mark_package_upgrade_pending() {
+  touch "$state_dir/.package-upgrade-pending"
+  chmod 600 "$state_dir/.package-upgrade-pending"
+}
+
+package_upgrade() {
+  local service current package_upgrade_failed running_output
+  local previous_env previous_approved_config previous_approved_env
+  local -a running_before running_now upgrade_services
+  case "$package_managed" in 1 | apt) ;; *) echo "package-upgrade is available only to the APT package." >&2; return 1 ;; esac
+  [ -s "$env_file" ] && [ -s "$approved_config_file" ] && [ -s "$approved_env_file" ] || return 0
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "Docker is not ready; the package is installed but its containers were not updated." >&2
+    mark_package_upgrade_pending
+    return 1
+  fi
+
+  lock_config
+  guard_package_containers || { mark_package_upgrade_pending; unlock_config; return 1; }
+  if ! running_output=$(running_package_services); then
+    mark_package_upgrade_pending
+    unlock_config
+    return 1
+  fi
+  running_before=()
+  [ -z "$running_output" ] || mapfile -t running_before <<<"$running_output"
+  if [ "${#running_before[@]}" = 0 ]; then
+    unlock_config
+    return 0
+  fi
+
+  previous_env=$(mktemp "$state_dir/.env.before-package-upgrade.XXXXXX")
+  previous_approved_config=$(mktemp "$state_dir/.approved-config.before-package-upgrade.XXXXXX")
+  previous_approved_env=$(mktemp "$state_dir/.approved-env.before-package-upgrade.XXXXXX")
+  cp "$env_file" "$previous_env"
+  cp "$approved_config_file" "$previous_approved_config"
+  cp "$approved_env_file" "$previous_approved_env"
+  chmod 600 "$previous_env" "$previous_approved_config" "$previous_approved_env"
+
+  package_upgrade_failed=0
+  if ! render_package_upgrade_env; then
+    package_upgrade_failed=1
+  elif ! BITCOIN_STACK_COMPOSE_TIMEOUT_SECONDS=1800 pull_images "${running_before[@]}"; then
+    package_upgrade_failed=1
+  fi
+  if [ "$package_upgrade_failed" = 1 ]; then
+    restore_package_upgrade_state "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    mark_package_upgrade_pending
+    unlock_config
+    echo "Container activation failed before any running service was changed." >&2
+    return 1
+  fi
+
+  guard_package_containers || {
+    restore_package_upgrade_state "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    mark_package_upgrade_pending
+    unlock_config
+    return 1
+  }
+  if ! running_output=$(running_package_services); then
+    restore_package_upgrade_state "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    mark_package_upgrade_pending
+    unlock_config
+    return 1
+  fi
+  running_now=()
+  [ -z "$running_output" ] || mapfile -t running_now <<<"$running_output"
+  upgrade_services=()
+  for service in "${running_before[@]}"; do
+    for current in "${running_now[@]}"; do
+      if [ "$service" = "$current" ]; then upgrade_services+=("$service"); break; fi
+    done
+  done
+  if [ "${#upgrade_services[@]}" = 0 ]; then
+    if ! approve_current_config "$approved_config_file"; then
+      restore_package_upgrade_state "$previous_env" "$previous_approved_config" "$previous_approved_env"
+      rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+      mark_package_upgrade_pending
+      unlock_config
+      return 1
+    fi
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env" "$state_dir/.package-upgrade-pending"
+    unlock_config
+    ensure_resource_profile_timer
+    ensure_port_control_timer
+    ensure_node_control_timer
+    return 0
+  fi
+
+  if ! approve_current_config "$approved_config_file"; then
+    restore_package_upgrade_state "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    mark_package_upgrade_pending
+    unlock_config
+    return 1
+  fi
+
+  if ! compose up -d --pull never --no-build --no-deps "${upgrade_services[@]}"; then
+    rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env"
+    mark_package_upgrade_pending
+    unlock_config
+    echo "The new containers could not be fully activated; no automatic image downgrade was attempted." >&2
+    echo "Check the current state with: sudo bitcoin-stack status" >&2
+    echo "Restart the services interrupted by activation with: sudo bitcoin-stack up ${upgrade_services[*]}" >&2
+    echo "Retry activation with: sudo bitcoin-stack package-upgrade" >&2
+    return 1
+  fi
+  sync_node_runtime || echo "WARN  containers were updated, but dashboard node state will synchronize on its next refresh." >&2
+  rm -f "$previous_env" "$previous_approved_config" "$previous_approved_env" "$state_dir/.package-upgrade-pending"
+  unlock_config
+  ensure_resource_profile_timer
+  ensure_port_control_timer
+  ensure_node_control_timer
+  echo "Updated the running Node Manager services."
+}
+
 images_available() {
   local images image
   images=$(compose config --images) || return 1
@@ -744,8 +936,6 @@ Back up first if you want a restore point:
   Ubuntu / APT
     sudo apt update
     sudo apt install --only-upgrade bitcoin-starter-stack
-    $stack_command pull
-    $stack_command apply
 
   macOS / Homebrew
     brew update
@@ -1076,6 +1266,7 @@ case "$cmd" in
     unlock_config
     ;;
   upgrade) do_upgrade ;;
+  package-upgrade) package_upgrade ;;
   pull)
     lock_config
     "$stack_root/configure.sh"

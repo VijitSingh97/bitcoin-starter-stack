@@ -98,10 +98,21 @@ installation method you used originally and back up before updating.
 ```bash
 sudo bitcoin-stack backup
 sudo apt update
-sudo apt install --only-upgrade bitcoin-starter-stack
-sudo bitcoin-stack pull
-sudo bitcoin-stack apply
+sudo apt upgrade
 ```
+
+APT upgrades automatically download the new release images and recreate the
+services that were running. Changed services may restart. A stopped deployment
+stays stopped, and configuration edits still awaiting approval are not applied.
+If Docker or the registry is unavailable, APT keeps the package installed and
+reports activation as pending. After correcting the problem, retry with
+`sudo bitcoin-stack package-upgrade`. Inspect `sudo bitcoin-stack status` and
+`sudo bitcoin-stack doctor` if activation reports a failure. If activation partly
+started and left a service stopped, use the specific `bitcoin-stack up` command
+printed in the error before retrying. Recovery starts are explicit so later
+upgrades cannot override a service you deliberately stopped. No volumes or old
+images are deleted, and a failed partial activation never automatically downgrades
+a node database.
 
 **macOS / Homebrew:**
 

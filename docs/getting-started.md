@@ -5,9 +5,10 @@
 - **Linux** with [Docker Engine](https://docs.docker.com/engine/install/ubuntu/),
   or **macOS** with Docker Desktop. Docker Compose **2.33.1 or newer** must be
   available to the account running Node Manager.
-- APT/source installs need `jq`, `openssl`, `curl`, and `iproute2`. Homebrew
-  installs bring their command-line dependencies with the formula; Docker is
-  still installed separately.
+- The APT package installs its host dependencies. Source installs need
+  `ca-certificates`, `curl`, `git`, `iproute2`, `jq`, `openssl`, and
+  `util-linux`. Homebrew installs bring their command-line dependencies with
+  the formula; Docker is still installed separately.
 - Hardware per [Hardware Requirements](hardware.md) — Bitcoin plans for
   28–56 GiB SSD space and Monero for 120–150 GiB. The other nodes need expandable
   storage until their current full-sync totals are measured. Bitcoin and Monero
@@ -91,62 +92,67 @@ A source-managed deployment keeps its own configuration and upgrade commands;
 installing the package does not migrate it automatically. Package mode refuses
 to operate on services owned by another installation.
 
-After the `v1.32.0` APT job and Pages deployment succeed, verify and install the
-dedicated feed key before adding the repository:
+For an initialized APT deployment that is running, later package upgrades
+download the new release images and recreate only changed services. An affected
+node may restart briefly during `apt upgrade`. If the stack was stopped, the
+upgrade leaves it stopped. A configuration file that differs from its last
+approved state remains pending and is not applied by the unattended upgrade.
+Homebrew and source installations continue to use their manual update flows.
+
+After the `v1.32.0` APT job and Pages deployment succeed, add its dedicated
+signed repository:
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl gnupg
-
-expected='72FD656754BD7534E274360A37070C2730C0B4EA'
-key=$(mktemp)
-trap 'rm -f "$key"' EXIT
-curl --fail --show-error --silent \
-  https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
-  --output "$key"
-listing=$(gpg --batch --show-keys --with-colons "$key") || {
-  echo 'Unable to parse the APT signing key.' >&2
-  exit 1
-}
-actual=$(awk -F: '
-  $1 == "pub" { primary_keys++ }
-  $1 == "fpr" && primary_fingerprint == "" { primary_fingerprint = $10 }
-  END { print primary_keys ":" primary_fingerprint }
-' <<<"$listing") || exit 1
-[ "$actual" = "1:$expected" ] || {
-  echo 'APT signing key does not contain exactly the expected primary key.' >&2
-  exit 1
-}
-sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
-echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/node-manager ./' \
-  | sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo apt install ca-certificates curl
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
+  | sudo tee /etc/apt/keyrings/bitcoin-starter-stack.asc >/dev/null
+sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://vijitsingh97.github.io/node-manager/
+Suites: ./
+Signed-By: /etc/apt/keyrings/bitcoin-starter-stack.asc
+EOF
 sudo apt update
 sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
+
+The signing key fingerprint is
+`72FD656754BD7534E274360A37070C2730C0B4EA`. `Signed-By` limits that key to
+this repository. See the [privacy guide](privacy.md#package-feed) for manual
+fingerprint verification.
 
 `init` downloads missing images using the host's existing Docker settings and
 starts a pruned Bitcoin node. It does not ask setup questions. Docker stores
 image layers in its managed storage. Setup does not change Docker's daemon or
 proxy configuration. Use **Settings → Node set** later to install another chain.
 
-### Release tarball on Linux
+### Install from source on Ubuntu
 
-For the current release-tarball installation:
+Install Docker Engine and Docker Compose 2.33.1 or newer using the
+[official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/).
+Complete Docker's
+[Linux post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
+so your user can run Docker without `sudo`, then install Node Manager's host
+tools and check out the published release:
 
 ```bash
-curl --fail --location --output bitcoin-starter-stack.tar.gz \
-  https://github.com/VijitSingh97/node-manager/releases/latest/download/bitcoin-starter-stack.tar.gz
-tar -xzf bitcoin-starter-stack.tar.gz
-cd bitcoin-starter-stack
+sudo apt update
+sudo apt install ca-certificates curl git iproute2 jq openssl util-linux
+git clone --branch v1.32.0 --depth 1 https://github.com/VijitSingh97/node-manager.git
+cd node-manager
 ./stack init
 ```
 
-The tarball's semantic version matches its published container images. Starting
-with `v1.32.0`, `./stack init` uses the no-question defaults below; customize
-`config.json` before running it when you need different first-boot settings.
-Development branches use unpublished image tags and require images built in a
-separate development environment; do not use a branch checkout for installation.
+The release checkout uses published container images; it does not build the
+application. Configuration, generated state, and node data stay in the checkout.
+`./stack init` uses the no-question defaults below; customize `config.json`
+before running it when you need different first-boot settings. Use
+`./stack status`, `./stack up`, and `./stack down` to manage it. Development
+branches use unpublished image tags and require images built in a separate
+development environment, so do not use one for installation.
 
 For an offline installation, unpack the source and load all required images
 locally. `init` sees that they are present and starts without downloading.

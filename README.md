@@ -48,54 +48,62 @@ sudo docker info
 sudo docker compose version
 ```
 
-The commands verify the release signing key before adding the APT repository.
-
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl gnupg
-
-expected='72FD656754BD7534E274360A37070C2730C0B4EA'
-printf '%s\n' "$expected" | grep -Eq '^[0-9A-Fa-f]{40}$' || {
-  echo 'Set the published Node Manager APT signing fingerprint first.' >&2
-  exit 1
-}
-
-key=$(mktemp)
-trap 'rm -f "$key"' EXIT
-curl --fail --show-error --silent \
-  https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
-  --output "$key"
-listing=$(gpg --batch --show-keys --with-colons "$key") || {
-  echo 'Unable to parse the APT signing key.' >&2
-  exit 1
-}
-actual=$(awk -F: '
-  $1 == "pub" { primary_keys++ }
-  $1 == "fpr" && primary_fingerprint == "" { primary_fingerprint = $10 }
-  END { print primary_keys ":" primary_fingerprint }
-' <<<"$listing") || exit 1
-[ "$actual" = "1:$expected" ] || {
-  echo 'APT signing key does not contain exactly the expected primary key.' >&2
-  exit 1
-}
-
-sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
-echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/node-manager ./' |
-  sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
+sudo apt install ca-certificates curl
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
+  | sudo tee /etc/apt/keyrings/bitcoin-starter-stack.asc >/dev/null
+sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://vijitsingh97.github.io/node-manager/
+Suites: ./
+Signed-By: /etc/apt/keyrings/bitcoin-starter-stack.asc
+EOF
 sudo apt update
 sudo apt install bitcoin-starter-stack
 sudo bitcoin-stack init
 ```
 
+The signing key fingerprint is
+`72FD656754BD7534E274360A37070C2730C0B4EA`. `Signed-By` limits that key to
+this repository.
+
 `init` creates a private configuration, downloads the required container images,
 starts a pruned Bitcoin node, and prints the dashboard URL. The package itself
 does not start containers during installation.
+
+Later `apt upgrade` runs download the release images and recreate changed
+services for an initialized, running stack. This may briefly restart affected
+nodes. A stopped stack stays stopped, and pending configuration edits are not
+applied automatically.
 
 Configuration: `/etc/bitcoin-starter-stack/config.json`<br>
 State and chain data: `/var/lib/bitcoin-starter-stack/`
 
 See the [getting-started guide](docs/getting-started.md) for custom storage,
 first-boot configuration, upgrades, and package-feed trust details.
+
+## Install from source on Ubuntu
+
+Install Docker Engine and Docker Compose 2.33.1 or newer using the
+[official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/).
+Complete Docker's
+[Linux post-install steps](https://docs.docker.com/engine/install/linux-postinstall/)
+so your user can run Docker without `sudo`, then install the host tools and
+check out the published release:
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl git iproute2 jq openssl util-linux
+git clone --branch v1.32.0 --depth 1 https://github.com/VijitSingh97/node-manager.git
+cd node-manager
+./stack init
+```
+
+This uses the published container images; it does not build the application.
+Configuration and node data stay in the checkout. Use `./stack status`,
+`./stack up`, and `./stack down` to manage it.
 
 ## macOS install with Homebrew
 
@@ -163,7 +171,7 @@ bitcoin-stack down
 
 Use `sudo` with an APT installation. Configure nodes from the dashboard and see
 [Operations](docs/operations.md) for backups, upgrades, logs, and troubleshooting.
-The dashboard reports new versions; install updates yourself through APT,
+The dashboard reports new versions. Install them through `sudo apt upgrade`,
 Homebrew, or the [GitHub release](https://github.com/VijitSingh97/node-manager/releases/latest).
 
 ## Documentation
