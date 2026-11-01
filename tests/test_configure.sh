@@ -486,7 +486,7 @@ cat >"$tmp/config.json" <<'EOF'
 {"bitcoin":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118"},"monero":{"enabled":false,"rpc_expose":true,"rpc_bind_ip":"192.168.1.118","zmq_expose":true,"zmq_bind_ip":"192.168.1.118"},"tari":{"enabled":true}}
 EOF
 (cd "$tmp" && ./configure.sh) >/dev/null
-grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "disabled nodes retained stale LAN relay overrides"
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.tari-wallet.yml$' "$tmp/.env" || fail "disabled nodes retained stale LAN relay overrides"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Bitcoin retained stale RPC exposure"
 grep -q '^MONERO_RPC_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale RPC exposure"
 grep -q '^MONERO_ZMQ_EXPOSE=0$' "$tmp/.env" || fail "disabled Monero retained stale ZMQ exposure"
