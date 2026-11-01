@@ -228,6 +228,15 @@ BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-contro
 [ "$(jq -r .dashboard.launch_at_boot "$config/config.json")" = true ] || fail "launch-at-boot setting was not saved"
 grep -q '^update --restart=unless-stopped dashboard-id$' "$tmp/stack.log" || fail "running containers did not receive launch policy"
 [ "$(status .enabled)" = true ] || fail "launch status omitted its state"
+[ "$(jq -r .boot_enabled "$dashboard_state/node-control.capability")" = true ] || fail "enabled launch state was stale after save"
+request '{"action":"launch_at_boot","enabled":false,"id":"72727272727272727272727272727272","requested_at":1000}'
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+[ "$(status .state)" = applied ] || fail "launch-at-login disable did not complete"
+[ "$(status .enabled)" = false ] || fail "disabled launch status omitted its state"
+jq -e '.boot_kind=="login" and (.boot_enabled|not)' "$dashboard_state/node-control.capability" >/dev/null || fail "disabled launch state was stale after save"
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+jq -e '.boot_kind=="login" and (.boot_enabled|not)' "$dashboard_state/node-control.capability" >/dev/null || fail "disabled launch state changed when reopened"
+
 
 approved_before=$(shasum -a 256 "$state/.approved-config.json" "$state/.approved.env")
 rm -f "$FAKE_STACK_FAIL_MARKER"

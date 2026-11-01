@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel, hostControlModel, hostActionPayload, bootControlLabel, newlyInstalledNodes, shouldPollHost } from "./settings.js";
+import { notificationPayload, notificationChanged, configurationAccess, configuredNodeVisibility, portControlModel, portChanges, portCollision, portStatusMessage, portStatusNode, portDraftAfterStatus, portSubmissionOutcome, shouldPollPort, settingsSaveMessage, normalizeDefaultCurrency, applyAppearance, requestSettings, scopedSettingsPayload, splitNodeControlSections, alertPreferenceModel, hostControlModel, hostActionPayload, bootControlLabel, newlyInstalledNodes, shouldPollHost, latestRequestGate } from "./settings.js";
 
 const alertDefaults = {
   alert_monitor_online: true,
@@ -72,6 +72,53 @@ test("completed installs reveal each new node without treating pending work as i
   assert.equal(shouldPollHost(bitcoin), false);
   assert.deepEqual(newlyInstalledNodes(bitcoin, bitcoinAndMonero), ["monero"]);
 });
+
+test("a host mutation ignores an older settings response", async () => {
+  const gate = latestRequestGate();
+  const rendered = [];
+  let resolveOld;
+  let rejectOld;
+  const oldRequest = gate.run(
+    () => new Promise((resolve) => { resolveOld = resolve; }),
+    (value) => rendered.push(value),
+    (error) => rendered.push(error.message),
+  );
+  const oldFailure = gate.run(
+    () => new Promise((resolve, reject) => { rejectOld = reject; }),
+    (value) => rendered.push(value),
+    (error) => rendered.push(error.message),
+  );
+
+  gate.invalidate();
+  resolveOld("stale boot state");
+  rejectOld(new Error("stale poll error"));
+  assert.equal(await oldRequest, false);
+  assert.equal(await oldFailure, false);
+  assert.deepEqual(rendered, []);
+
+  assert.equal(await gate.run(
+    async () => "current boot state",
+    (value) => rendered.push(value),
+    (error) => rendered.push(error.message),
+  ), true);
+  assert.deepEqual(rendered, ["current boot state"]);
+});
+
+test("only the newest host response is displayed", async () => {
+  const gate = latestRequestGate();
+  const rendered = [];
+  let resolveOld;
+  const oldRequest = gate.run(
+    () => new Promise((resolve) => { resolveOld = resolve; }),
+    (value) => rendered.push(value),
+    (error) => rendered.push(error.message),
+  );
+  await gate.run(async () => "new state", (value) => rendered.push(value), (error) => rendered.push(error.message));
+  resolveOld("old state");
+  assert.equal(await oldRequest, false);
+  assert.deepEqual(rendered, ["new state"]);
+});
+
 
 test("global alert preferences default on and accept only bounded thresholds", () => {
   assert.deepEqual(alertPreferenceModel(), alertDefaults);

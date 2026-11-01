@@ -105,6 +105,25 @@ export function shouldPollHost(view) {
   return view?.status?.state === "pending";
 }
 
+export function latestRequestGate() {
+  let generation = 0;
+  return {
+    invalidate() { generation += 1; },
+    async run(request, success, failure) {
+      const current = ++generation;
+      try {
+        const value = await request();
+        if (current !== generation) return false;
+        success(value);
+      } catch (error) {
+        if (current !== generation) return false;
+        failure(error);
+      }
+      return true;
+    },
+  };
+}
+
 export function hostActionPayload(action, value, options) {
   if (action === "install" && allNodes.includes(value)) {
     if (options === undefined) return { action, node: value };
@@ -368,6 +387,8 @@ if (typeof document !== "undefined") {
   let hostPoll;
   let hostView = hostControlModel();
   let hostLoaded = false;
+  let pendingBootEnabled;
+  const hostRequests = latestRequestGate();
   let installNode = "";
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
@@ -481,6 +502,14 @@ if (typeof document !== "undefined") {
 
   const renderHost = (data) => {
     const nextHostView = hostControlModel(data);
+    if (pendingBootEnabled !== undefined) {
+      const failed = nextHostView.status.action === "launch_at_boot" && ["rejected", "failed"].includes(nextHostView.status.state);
+      if (failed || nextHostView.boot_enabled === pendingBootEnabled) pendingBootEnabled = undefined;
+      else {
+        nextHostView.boot_enabled = pendingBootEnabled;
+        nextHostView.status = { action: "launch_at_boot", state: "pending", message: hostView.status.message || "Applying host change…" };
+      }
+    }
     const installed = hostLoaded ? newlyInstalledNodes(hostView, nextHostView) : [];
     hostView = nextHostView;
     hostLoaded = true;
@@ -550,26 +579,28 @@ if (typeof document !== "undefined") {
   };
 
   async function loadHost() {
-    try { renderHost(await requestHost()); }
-    catch (error) {
+    await hostRequests.run(requestHost, renderHost, (error) => {
       hostStatus.textContent = error.message;
       clearTimeout(hostPoll);
       if (shouldPollHost(hostView)) hostPoll = setTimeout(loadHost, 2000);
-    }
+    });
   }
 
   async function submitHost(payload) {
     if (!payload) return;
+    hostRequests.invalidate();
     clearTimeout(hostPoll);
     hostStatus.textContent = "Applying…";
     for (const button of hostNodes.querySelectorAll("button")) button.disabled = true;
     launchAtStart.disabled = applyConfig.disabled = true;
+    if (payload.action === "launch_at_boot") pendingBootEnabled = payload.enabled;
     try {
       const statusView = await requestHost(payload);
       hostView.status = { action: payload.action, state: "pending", message: statusView.message || "Applying host change…" };
       hostStatus.textContent = hostView.status.message;
       hostPoll = setTimeout(loadHost, 1000);
     } catch (error) {
+      if (payload.action === "launch_at_boot") pendingBootEnabled = undefined;
       hostStatus.textContent = error.message;
       await loadHost();
     }

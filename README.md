@@ -388,7 +388,8 @@ The following extra features belong to the Bitcoin card:
   freshness until a result is cached
   ([Watch-only](docs/watch-only.md)).
 - **BTC price** — CoinGecko quotes in USD, EUR, GBP, INR, CAD, AUD, JPY, RUB, or CNY, fetched through
-  Tor every five minutes. The selector remembers your currency; stale quotes are labeled.
+  Tor every five minutes, with early retries while Tor starts. The selector remembers your
+  currency; stale quotes are labeled.
 - **Versions** — Bitcoin Core version in the card, stack version in the footer.
 - **Theme** — follows your system light/dark setting; the top-right toggle cycles
   Auto → Light → Dark and remembers your choice.

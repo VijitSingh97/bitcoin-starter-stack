@@ -32,11 +32,15 @@ func allAssetPriceResponse(t *testing.T, updatedAt int64) string {
 	t.Helper()
 	payload := make(map[string]map[string]any, len(priceAssets))
 	for assetIndex, asset := range priceAssets {
+		providerAsset := asset
+		if mapped := priceProviderAssets[asset]; mapped != "" {
+			providerAsset = mapped
+		}
 		quote := map[string]any{"last_updated_at": updatedAt}
 		for currencyIndex, currency := range priceCurrencies {
 			quote[currency] = float64((assetIndex + 1) * (currencyIndex + 1))
 		}
-		payload[asset] = quote
+		payload[providerAsset] = quote
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -47,7 +51,7 @@ func allAssetPriceResponse(t *testing.T, updatedAt int64) string {
 
 func TestNewPriceCacheUsesFixedCoinGeckoURLAndTorClient(t *testing.T) {
 	cache := NewPriceCache()
-	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,tari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
+	if cache.url != "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,minotari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true" {
 		t.Fatalf("provider URL = %q", cache.url)
 	}
 	if cache.client == nil || cache.client.Transport == nil || cache.client.Timeout != 30*time.Second {
@@ -55,6 +59,9 @@ func TestNewPriceCacheUsesFixedCoinGeckoURLAndTorClient(t *testing.T) {
 	}
 	if cache.refreshEvery != 5*time.Minute {
 		t.Fatalf("refresh interval = %s", cache.refreshEvery)
+	}
+	if cache.startupRetry != 10*time.Second {
+		t.Fatalf("startup retry = %s", cache.startupRetry)
 	}
 }
 
@@ -118,6 +125,32 @@ func TestPriceCachePublishesEveryConfiguredAsset(t *testing.T) {
 		if snapshot["available"] != true || snapshot["stale"] != false || len(snapshot["prices"].(map[string]float64)) != len(priceCurrencies) {
 			t.Fatalf("%s snapshot = %#v", asset, snapshot)
 		}
+	}
+}
+
+func TestPriceCacheMapsMinotariProviderAssetToTari(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	payload := map[string]map[string]any{
+		"bitcoin":  {"last_updated_at": now.Unix()},
+		"minotari": {"last_updated_at": now.Unix()},
+	}
+	for _, currency := range priceCurrencies {
+		payload["bitcoin"][currency] = 70000
+		payload["minotari"][currency] = 0.02
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, string(body)), nil
+	})
+	if err := cache.refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	tari := cache.SnapshotAsset("tari")
+	if tari["available"] != true || tari["stale"] != false || tari["prices"].(map[string]float64)["usd"] != 0.02 {
+		t.Fatalf("Tari snapshot = %#v", tari)
 	}
 }
 
@@ -251,6 +284,70 @@ func TestPriceCacheRunRefreshesOnInterval(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Run did not stop")
+	}
+}
+
+func TestPriceCacheRunRetriesInitialFailure(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	var calls atomic.Int32
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		if calls.Add(1) <= 3 {
+			return nil, errors.New("proxy starting")
+		}
+		return response(http.StatusOK, priceResponse(now.Unix())), nil
+	})
+	cache.startupRetry = time.Millisecond
+	cache.refreshEvery = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		cache.Run(ctx)
+		close(done)
+	}()
+	deadline := time.After(time.Second)
+	for calls.Load() < 4 {
+		select {
+		case <-deadline:
+			t.Fatal("initial price failure was not retried")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop")
+	}
+	if snapshot := cache.Snapshot(); snapshot["available"] != true || snapshot["stale"] != false {
+		t.Fatalf("retry snapshot = %#v", snapshot)
+	}
+}
+
+func TestPriceCacheRunStopsWhileWaitingToRetry(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	failed := make(chan struct{}, 1)
+	cache := priceCacheForTest(now, func(*http.Request) (*http.Response, error) {
+		failed <- struct{}{}
+		return nil, errors.New("proxy starting")
+	})
+	cache.startupRetry = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		cache.Run(ctx)
+		close(done)
+	}()
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("startup refresh did not fail")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop while waiting to retry")
 	}
 }
 

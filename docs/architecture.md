@@ -118,7 +118,8 @@ that makes `tor_egress` Tor's deterministic default route.
   never turns the stack into a clearnet beacon.
 - **All coin prices use the same Tor proxy.** Background CoinGecko requests every five
   minutes cache nine fiat quotes; page loads and currency changes only read the
-  cache. DNS resolves through Tor, TLS is verified, and failures never fall back to
+  cache. Initial failures retry sooner while Tor starts. DNS resolves through Tor,
+  TLS is verified, and failures never fall back to
   a direct connection. Quotes become stale after a failed fetch or fifteen minutes.
 
 ## Trust boundaries — and non-boundaries

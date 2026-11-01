@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	coinGeckoPriceURL     = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,tari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true"
+	coinGeckoPriceURL     = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,monero,minotari,litecoin,dogecoin,bitcoin-cash,zcash&vs_currencies=usd,eur,gbp,inr,cad,aud,jpy,rub,cny&include_last_updated_at=true"
 	priceUserAgent        = "bitcoin-starter-stack-dashboard (+https://github.com/VijitSingh97/bitcoin-starter-stack)"
+	priceStartupRetry     = 10 * time.Second
 	priceRefreshEvery     = 5 * time.Minute
 	priceStaleAfter       = 15 * time.Minute
 	maxPriceResponseBytes = 64 << 10
@@ -22,12 +23,14 @@ const (
 
 var priceCurrencies = []string{"usd", "eur", "gbp", "inr", "cad", "aud", "jpy", "rub", "cny"}
 var priceAssets = []string{"bitcoin", "monero", "tari", "litecoin", "dogecoin", "bitcoin-cash", "zcash"}
+var priceProviderAssets = map[string]string{"tari": "minotari"}
 
 type PriceCache struct {
 	client       *http.Client
 	url          string
 	now          func() time.Time
 	refreshEvery time.Duration
+	startupRetry time.Duration
 
 	mu             sync.RWMutex
 	assetPrices    map[string]map[string]float64
@@ -41,6 +44,7 @@ func NewPriceCache() *PriceCache {
 		url:            coinGeckoPriceURL,
 		now:            time.Now,
 		refreshEvery:   priceRefreshEvery,
+		startupRetry:   priceStartupRetry,
 		assetPrices:    make(map[string]map[string]float64),
 		assetUpdatedAt: make(map[string]int64),
 		assetFailed:    map[string]bool{"bitcoin": true, "monero": true, "tari": true, "litecoin": true, "dogecoin": true, "bitcoin-cash": true, "zcash": true},
@@ -48,18 +52,36 @@ func NewPriceCache() *PriceCache {
 }
 
 func (c *PriceCache) Run(ctx context.Context) {
-	_ = c.refresh(ctx)
-	if ctx.Err() != nil {
-		return
-	}
-	ticker := time.NewTicker(c.refreshEvery)
-	defer ticker.Stop()
+	delay := time.Duration(0)
+	retryDelay := c.startupRetry
+	ready := false
 	for {
-		select {
-		case <-ctx.Done():
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+		err := c.refresh(ctx)
+		if ctx.Err() != nil {
 			return
-		case <-ticker.C:
-			_ = c.refresh(ctx)
+		}
+		if err == nil {
+			ready = true
+			delay = c.refreshEvery
+			continue
+		}
+		if ready {
+			delay = c.refreshEvery
+			continue
+		}
+		delay = retryDelay
+		retryDelay *= 2
+		if retryDelay > c.refreshEvery {
+			retryDelay = c.refreshEvery
 		}
 	}
 }
@@ -134,7 +156,11 @@ func (c *PriceCache) refresh(ctx context.Context) error {
 	prices := make(map[string]map[string]float64, len(priceAssets))
 	updatedAt := make(map[string]int64, len(priceAssets))
 	for _, asset := range priceAssets {
-		assetUpdatedAt, err := payload[asset]["last_updated_at"].Int64()
+		providerAsset := asset
+		if mapped := priceProviderAssets[asset]; mapped != "" {
+			providerAsset = mapped
+		}
+		assetUpdatedAt, err := payload[providerAsset]["last_updated_at"].Int64()
 		if err != nil || assetUpdatedAt <= 0 || time.Unix(assetUpdatedAt, 0).After(now.Add(priceRefreshEvery)) {
 			if asset == "bitcoin" {
 				return c.fail(errors.New("price provider response invalid"))
@@ -144,7 +170,7 @@ func (c *PriceCache) refresh(ctx context.Context) error {
 		assetPrices := make(map[string]float64, len(priceCurrencies))
 		valid := true
 		for _, currency := range priceCurrencies {
-			price, err := payload[asset][currency].Float64()
+			price, err := payload[providerAsset][currency].Float64()
 			if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 {
 				valid = false
 				break

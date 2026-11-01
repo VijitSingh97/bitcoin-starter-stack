@@ -255,6 +255,7 @@ func (a *app) hostControlStatus() (*hostControlStatus, bool) {
 }
 
 func (a *app) hostControlView() hostControlView {
+	status, _ := a.hostControlStatus()
 	capability, available := a.hostControlCapability()
 	nodes := make([]hostControlNode, 0, len(nodeOrder))
 	for _, id := range nodeOrder {
@@ -263,7 +264,6 @@ func (a *app) hostControlView() hostControlView {
 		interfaces := append([]hostInstallInterface(nil), catalog.Interfaces...)
 		nodes = append(nodes, hostControlNode{ID: id, Name: nodeDisplayName(id), Installed: configured, DataDir: capability.DataPaths[id], DiskEstimate: catalog.DiskEstimate, DiskNote: catalog.DiskNote, Interfaces: interfaces})
 	}
-	status, _ := a.hostControlStatus()
 	return hostControlView{Available: available, InstallSupported: available && capability.InstallSupported, BootSupported: available && capability.BootSupported, BootEnabled: capability.BootEnabled, BootKind: capability.BootKind, ConfigPending: capability.ConfigPending, ConfigRevision: capability.ConfigRevision, ConfigPath: capability.ConfigPath, Nodes: nodes, Status: status}
 }
 
