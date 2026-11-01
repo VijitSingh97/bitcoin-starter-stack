@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     curl -fsSLo /tmp/node.tar.gz "https://github.com/litecoin-project/litecoin/releases/download/v0.21.5.8/litecoin-0.21.5.8-${archive}.tar.gz" && \
     printf '%s  %s\n' "$sha" /tmp/node.tar.gz | sha256sum -c - && \
     tar -xzf /tmp/node.tar.gz -C /tmp && install -m 0755 /tmp/litecoin-0.21.5.8/bin/litecoind /tmp/litecoin-0.21.5.8/bin/litecoin-cli /usr/local/bin/ && rm -rf /tmp/*
-COPY entrypoint.sh healthcheck.sh /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh && mkdir /data && chown 1000:1000 /data
+COPY --chmod=0755 entrypoint.sh healthcheck.sh /usr/local/bin/
+RUN mkdir /data && chown 1000:1000 /data
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -11,6 +11,15 @@ config=$tmp/config
 dashboard_state=$tmp/dashboard
 mkdir -p "$root/scripts" "$state" "$config" "$dashboard_state"
 cp scripts/node-control "$root/scripts/"
+: >"$root/scripts/node-port-control"
+cat >"$root/scripts/node-port-control" <<'EOF'
+#!/bin/sh
+if [ "${FAKE_PORT_CHECK_RESULT:-}" != "" ]; then
+  printf '%s\n' "$FAKE_PORT_CHECK_RESULT"
+  exit 1
+fi
+exit 0
+EOF
 : >"$root/docker-compose.yml"
 cat >"$root/configure.sh" <<'EOF'
 #!/bin/sh
@@ -47,10 +56,14 @@ if [ "${1:-}" = apply ] || [ "${1:-}" = approve-rendered-config ]; then
   chmod 600 "$BITCOIN_STACK_STATE_DIR/.approved.env"
 fi
 EOF
-chmod +x "$root/configure.sh" "$root/stack" "$root/scripts/node-control"
+chmod +x "$root/configure.sh" "$root/stack" "$root/scripts/node-control" "$root/scripts/node-port-control"
 cat >"$tmp/docker" <<'EOF'
 #!/usr/bin/env bash
 set -eu
+if [ "$1" = ps ]; then
+  case "$*" in *com.docker.compose.service=dashboard*) [ "${FAKE_DASHBOARD_MISSING:-0}" = 1 ] || printf 'dashboard-id\n' ;; esac
+  exit 0
+fi
 if [ "$1" = inspect ]; then
   case "$3" in
     '{{.Id}}') [ "${FAKE_DASHBOARD_MISSING:-0}" = 1 ] || printf 'dashboard-id\n' ;;
@@ -72,7 +85,7 @@ fi
 shift
 [ "${1:-}" != -i ] || shift
 if [ "${1:-}" = -u ]; then shift 2; fi
-[ "$1" = dashboard ]
+[ "$1" = dashboard-id ]
 shift
 if [ "$1" = sh ] && [ "$2" = -c ]; then
   command=${3//\/state/$FAKE_DASH_STATE}
@@ -87,6 +100,7 @@ cat >"$config/config.json" <<'EOF'
 {"bitcoin":{"enabled":true,"active":true},"monero":{"enabled":true,"active":true},"tari":{"enabled":true,"active":true},"litecoin":{"enabled":false,"data_dir":"/preset/litecoin","resource_profile":"compact","steady_cpus":0.75,"steady_mem_limit_mb":3072},"dogecoin":{"enabled":false},"bitcoincash":{"enabled":false}}
 EOF
 printf 'DASHBOARD_PASSWORD=testpassword\n' >"$state/.env"
+printf 'DASHBOARD_BIND_IP=192.168.1.20\n' >>"$state/.env"
 jq -S . "$config/config.json" >"$state/.approved-config.json"
 cp "$state/.env" "$state/.approved.env"
 export BITCOIN_STACK_ROOT=$root BITCOIN_STACK_STATE_DIR=$state BITCOIN_STACK_CONFIG_DIR=$config
@@ -103,6 +117,10 @@ status() { jq -r "$1" "$dashboard_state/node-control.status"; }
 
 request '{"id":"11111111111111111111111111111111","node":"tari","active":false,"confirmation":"deactivate","requested_at":1000}'
 "$root/scripts/node-control"
+config_real=$(cd "$config" && pwd -P)
+jq -e --arg config_path "$config_real/config.json" --arg bitcoin_path "$root/data/bitcoin" '
+  .config_path==$config_path and .data_paths.bitcoin==$bitcoin_path and .data_paths.monero!=null
+' "$dashboard_state/node-control.capability" >/dev/null || fail "host catalog paths were not published"
 [ "$(jq -r .tari.active "$config/config.json")" = false ] || fail "Tari was not deactivated"
 grep -qx 'stop tari-wallet tari' "$tmp/stack.log" || fail "Tari wallet was not stopped before its node"
 [ "$(status .state)" = applied ] || fail "deactivation status was not applied"
@@ -129,7 +147,7 @@ request '{"id":"33333333333333333333333333333333","node":"litecoin","active":fal
 "$root/scripts/node-control"
 [ "$(status .error_code)" = node_not_configured ] || fail "disabled node was changed"
 
-printf '%2049s' x >"$dashboard_state/node-control.request"
+printf '%4097s' x >"$dashboard_state/node-control.request"
 "$root/scripts/node-control"
 [ "$(status .error_code)" = invalid_request ] || fail "oversized request was not rejected"
 [ ! -e "$dashboard_state/node-control.processing" ] || fail "oversized request remained stuck"
@@ -200,7 +218,7 @@ request '{"action":"launch_at_boot","enabled":true,"id":"76767676767676767676767
 FAKE_DOCKER_UPDATE_FAIL_ONCE=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ "$(status .error_code)" = apply_failed ] || fail "failed launch policy update lacked typed status"
 [ "$(jq -r '.dashboard.launch_at_boot // false' "$config/config.json")" = false ] || fail "failed launch policy update changed config"
-grep -q '^update --restart=on-failure:3 dashboard$' "$tmp/stack.log" || fail "failed launch policy update did not restore retry count"
+grep -q '^update --restart=on-failure:3 dashboard-id$' "$tmp/stack.log" || fail "failed launch policy update did not restore retry count"
 request '{"action":"launch_at_boot","enabled":true,"id":"75757575757575757575757575757575","requested_at":1000}'
 FAKE_DOCKER_UPDATE_FAIL=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ "$(status .error_code)" = rollback_failed ] || fail "failed launch policy rollback lacked typed status"
@@ -208,7 +226,7 @@ FAKE_DOCKER_UPDATE_FAIL=1 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux 
 request '{"action":"launch_at_boot","enabled":true,"id":"77777777777777777777777777777777","requested_at":1000}'
 BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
 [ "$(jq -r .dashboard.launch_at_boot "$config/config.json")" = true ] || fail "launch-at-boot setting was not saved"
-grep -q '^update --restart=unless-stopped dashboard$' "$tmp/stack.log" || fail "running containers did not receive launch policy"
+grep -q '^update --restart=unless-stopped dashboard-id$' "$tmp/stack.log" || fail "running containers did not receive launch policy"
 [ "$(status .enabled)" = true ] || fail "launch status omitted its state"
 
 approved_before=$(shasum -a 256 "$state/.approved-config.json" "$state/.approved.env")
@@ -276,5 +294,53 @@ for interface_case in \
     fail "$node install did not close every optional LAN interface"
   [ "$(status .state)" = applied ] || fail "$node install status was not applied"
 done
+
+jq -n '{bitcoin:{enabled:false},monero:{enabled:false,node_password:"moneropassword1234567890123456"}}' >"$config/config.json"
+jq -S . "$config/config.json" >"$state/.approved-config.json"
+printf 'DASHBOARD_PASSWORD=testpassword\nDASHBOARD_BIND_IP=192.168.1.20\n' >"$state/.env"
+cp "$state/.env" "$state/.approved.env"
+custom_monero_dir="$tmp/Application Support/nodes/monero"
+request "$(jq -nc --arg data_dir "$custom_monero_dir" '{action:"install",data_dir:$data_dir,id:"b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",interfaces:[{enabled:true,host_port:28081,id:"monero_rpc"},{enabled:false,host_port:18083,id:"monero_zmq"}],node:"monero",requested_at:1000}')"
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+custom_monero_real=$(cd "$custom_monero_dir" && pwd -P)
+jq -e --arg data_dir "$custom_monero_real" '.monero.enabled and .monero.active and .monero.data_dir==$data_dir and .monero.rpc_expose and .monero.rpc_bind_ip=="192.168.1.20" and .monero.rpc_port==28081 and (.monero.zmq_expose|not)' "$config/config.json" >/dev/null ||
+  fail "install options were not persisted"
+[ -d "$custom_monero_dir" ] || fail "custom data folder was not prepared"
+
+jq -n '{bitcoin:{enabled:false},zcash:{enabled:false,node_password:"zcashpassword1234567890123456"}}' >"$config/config.json"
+jq -S . "$config/config.json" >"$state/.approved-config.json"
+printf 'DASHBOARD_PASSWORD=testpassword\nDASHBOARD_BIND_IP=192.168.1.20\n' >"$state/.env"
+cp "$state/.env" "$state/.approved.env"
+unsafe_data_dir="$tmp/nonempty-zcash"
+mkdir -p "$unsafe_data_dir"
+: >"$unsafe_data_dir/existing-chain-data"
+before_unsafe=$(shasum -a 256 "$config/config.json")
+request "$(jq -nc --arg data_dir "$unsafe_data_dir" '{action:"install",data_dir:$data_dir,id:"b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",interfaces:[],node:"zcash",requested_at:1000}')"
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+[ "$(status .error_code)" = data_path_invalid ] || fail "non-empty custom data folder was accepted"
+[ "$(shasum -a 256 "$config/config.json")" = "$before_unsafe" ] || fail "unsafe data folder changed configuration"
+
+empty_target="$tmp/empty-target"
+mkdir "$empty_target"
+linked_data_dir="$tmp/linked-zcash"
+ln -s "$empty_target" "$linked_data_dir"
+request "$(jq -nc --arg data_dir "$linked_data_dir" '{action:"install",data_dir:$data_dir,id:"b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",interfaces:[],node:"zcash",requested_at:1000}')"
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+[ "$(status .error_code)" = data_path_invalid ] || fail "symbolic-link data folder was accepted"
+
+request "$(jq -nc --arg data_dir "$config/node-data" '{action:"install",data_dir:$data_dir,id:"b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4",interfaces:[],node:"zcash",requested_at:1000}')"
+BITCOIN_STACK_PACKAGE_MANAGED=brew NODE_CONTROL_OS=Darwin "$root/scripts/node-control"
+[ "$(status .error_code)" = data_path_invalid ] || fail "config-overlapping data folder was accepted"
+
+jq -n '{bitcoin:{enabled:false},litecoin:{enabled:false,node_password:"litecoinpassword1234567890123456"}}' >"$config/config.json"
+jq -S . "$config/config.json" >"$state/.approved-config.json"
+printf 'DASHBOARD_PASSWORD=testpassword\nDASHBOARD_BIND_IP=192.168.1.20\n' >"$state/.env"
+cp "$state/.env" "$state/.approved.env"
+before_conflict=$(shasum -a 256 "$config/config.json")
+request '{"action":"install","data_dir":"/srv/nodes/litecoin","id":"b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1","interfaces":[{"enabled":true,"host_port":29332,"id":"litecoin_rpc"}],"node":"litecoin","requested_at":1000}'
+FAKE_PORT_CHECK_RESULT=port_in_use:litecoin_rpc BITCOIN_STACK_PACKAGE_MANAGED=1 NODE_CONTROL_OS=Linux "$root/scripts/node-control"
+[ "$(status .error_code)" = port_in_use ] || fail "install port conflict lacked typed status"
+[ "$(status .port)" = litecoin_rpc ] || fail "install port conflict lost its interface"
+[ "$(shasum -a 256 "$config/config.json")" = "$before_conflict" ] || fail "install port conflict changed configuration"
 
 echo "PASS: test_node_control.sh"

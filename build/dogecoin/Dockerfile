@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     curl -fsSLo /tmp/node.tar.gz "https://github.com/dogecoin/dogecoin/releases/download/v1.14.9/dogecoin-1.14.9-${archive}.tar.gz" && \
     printf '%s  %s\n' "$sha" /tmp/node.tar.gz | sha256sum -c - && \
     tar -xzf /tmp/node.tar.gz -C /tmp && install -m 0755 /tmp/dogecoin-1.14.9/bin/dogecoind /tmp/dogecoin-1.14.9/bin/dogecoin-cli /usr/local/bin/ && rm -rf /tmp/*
-COPY entrypoint.sh healthcheck.sh /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh && mkdir /data && chown 1000:1000 /data
+COPY --chmod=0755 entrypoint.sh healthcheck.sh /usr/local/bin/
+RUN mkdir /data && chown 1000:1000 /data
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

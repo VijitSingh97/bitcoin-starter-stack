@@ -11,7 +11,6 @@ services:
     # Prebuilt release image; downloads use the host's Docker settings.
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tor:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/tor
-    container_name: tor
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -50,7 +49,6 @@ services:
 
   bitcoin:
     image: bitcoin/bitcoin:32.1@sha256:d2454aaf2ff4ce1ebbc49f4aa05ed044c907b849a80a3f4c0ad23e488e50bbe0
-    container_name: bitcoin
     profiles: ["bitcoin"]
     labels:
       - "io.node-starter-stack.resource-profile=${BITCOIN_RESOURCE_PROFILE:-off}"
@@ -121,7 +119,6 @@ services:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}/build/monero
-    container_name: monero
     profiles: ["monero"]
     labels:
       - "io.node-starter-stack.resource-profile=${MONERO_RESOURCE_PROFILE:-off}"
@@ -160,7 +157,6 @@ services:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-monero:${STACK_VERSION:?Run stack init or configure.sh first}
     build:
       context: ${STACK_ROOT:-.}/build/monero
-    container_name: monero-wallet
     profiles: ["monero"]
     user: "1000:1000"
     read_only: true
@@ -201,7 +197,6 @@ services:
 
   tari:
     image: ghcr.io/tari-project/minotari_node:v6.1.0-mainnet@sha256:ae106cfe2aa117d0015bf61ce1b1bb029df8ef0a02313fda2c8daf68c9f52c63
-    container_name: tari
     profiles: ["tari"]
     labels:
       - "io.node-starter-stack.resource-profile=${TARI_RESOURCE_PROFILE:-off}"
@@ -234,51 +229,9 @@ services:
         ipv4_address: 172.29.0.32
     dns: ["127.0.0.1"]
 
-  tari-wallet:
-    image: ghcr.io/vijitsingh97/bitcoin-starter-stack-tari-wallet:${STACK_VERSION:?Run stack init or configure.sh first}
-    build:
-      context: ${STACK_ROOT:-.}
-      dockerfile: build/tari-wallet/Dockerfile
-    container_name: tari-wallet
-    profiles: ["tari"]
-    user: "1000:1000"
-    init: true
-    read_only: true
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: ["ALL"]
-    pids_limit: 100
-    mem_limit: 512m
-    cpus: 0.5
-    environment:
-      TARI_WALLET_PASSWORD: ${TARI_WALLET_PASSWORD:?run ./configure.sh first}
-      TARI_WALLET_RPC_USER: ${TARI_WALLET_RPC_USER:?run ./configure.sh first}
-      TARI_WALLET_RPC_PASSWORD: ${TARI_WALLET_RPC_PASSWORD:?run ./configure.sh first}
-    volumes:
-      - tari_wallet:/tari-wallet
-      - tari_wallet_data:/tari-wallet/private
-    tmpfs:
-      - /tmp:mode=0700,uid=1000,gid=1000
-    depends_on:
-      tari:
-        condition: service_healthy
-    stop_grace_period: 1m
-    restart: ${STACK_RESTART_POLICY:-on-failure:5}
-    logging: *logging
-    healthcheck:
-      test: ["CMD-SHELL", "test -r /tari-wallet/control/capability.json && find /tari-wallet/control/capability.json -mmin -1 | grep -q ."]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      btc_net:
-        ipv4_address: 172.29.0.37
-    dns: ["127.0.0.1"]
-
   litecoin:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-litecoin:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/litecoin
-    container_name: litecoin
     profiles: ["litecoin"]
     labels:
       - "io.node-starter-stack.resource-profile=${LITECOIN_RESOURCE_PROFILE:-off}"
@@ -309,7 +262,6 @@ services:
   dogecoin:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-dogecoin:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/dogecoin
-    container_name: dogecoin
     profiles: ["dogecoin"]
     labels:
       - "io.node-starter-stack.resource-profile=${DOGECOIN_RESOURCE_PROFILE:-off}"
@@ -340,7 +292,6 @@ services:
   bitcoincash:
     image: ghcr.io/vijitsingh97/bitcoin-starter-stack-bitcoincash:${STACK_VERSION:?Run stack init or configure.sh first}
     build: ${STACK_ROOT:-.}/build/bitcoincash
-    container_name: bitcoincash
     profiles: ["bitcoincash"]
     labels:
       - "io.node-starter-stack.resource-profile=${BITCOINCASH_RESOURCE_PROFILE:-off}"
@@ -370,7 +321,6 @@ services:
 
   zcash:
     image: zakuracore/zakura:1.7.0@sha256:cf3b2d09a0ab3cd3a5e17cbbb676b7abe719607391402ea07d6402e9af897b6b
-    container_name: zcash
     profiles: ["zcash"]
     labels:
       - "io.node-starter-stack.resource-profile=${ZCASH_RESOURCE_PROFILE:-off}"
@@ -411,7 +361,6 @@ services:
     build:
       context: ${STACK_ROOT:-.}
       dockerfile: build/dashboard/Dockerfile
-    container_name: dashboard
     # runs non-root (uid 1000) via USER in build/dashboard/Dockerfile — the
     # exposed service needs no root; it binds an unprivileged port and only
     # writes the /state volume (pre-owned by 1000 in the image)
@@ -533,7 +482,6 @@ services:
       - ${ZCASH_DATA_DIR:-./data/zcash}:/data-zcash:ro
       # writable state (the saved watch-only wallet list); the chain stays read-only
       - dashboard_state:/state
-      - tari_wallet:/tari-wallet
     restart: ${STACK_RESTART_POLICY:-on-failure:5}
     logging: *logging
     healthcheck:
@@ -552,14 +500,12 @@ services:
 networks:
   btc_net:
     driver: bridge
-    name: btc_net
     internal: true
     ipam:
       config:
         - subnet: 172.29.0.0/24
   tor_egress:
     driver: bridge
-    name: tor_egress
 
 volumes:
   tor_data:

@@ -12,7 +12,7 @@ trap 'rm -rf "$tmp"' EXIT
 archive="$tmp/bitcoin-starter-stack.tar.gz"
 payload="$tmp/bitcoin-starter-stack"
 mkdir -p "$payload/build/dashboard" "$payload/build/bitcoin" "$payload/build/tari" "$payload/build/tari-wallet" "$payload/build/zcash" "$payload/scripts"
-for file in stack configure.sh VERSION docker-compose.yml; do
+for file in stack configure.sh VERSION docker-compose.yml docker-compose.tari-wallet.yml; do
   printf 'fixture\n' >"$payload/$file"
 done
 printf 'fixture\n' >"$payload/build/dashboard/Dockerfile"

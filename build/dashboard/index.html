@@ -419,6 +419,11 @@
         <label class="settings-check"><input id="settings-healthchecks-enabled" type="checkbox"> Enable Healthchecks pings</label>
         <label>HTTPS ping URL<input id="settings-healthchecks-url" type="url" autocomplete="off" maxlength="2048"></label>
       </fieldset>
+      <fieldset id="settings-config">
+        <legend>Config</legend>
+        <p class="settings-note">Host config.json</p>
+        <code id="settings-config-path" class="settings-config-path">Loading…</code>
+      </fieldset>
       <fieldset id="settings-node-alerts" hidden>
         <legend>Node settings</legend>
         <details id="settings-bitcoin-alerts"><summary>Bitcoin</summary>
@@ -469,6 +474,20 @@
       </fieldset>
       <div class="settings-actions"><button id="settings-save" type="submit">Save</button><button id="settings-reset" type="button">Use server config</button></div>
       <p id="settings-status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
+  <dialog id="settings-install-dialog" class="settings-dialog" aria-labelledby="settings-install-title">
+    <form id="settings-install-form">
+      <div class="settings-heading"><h2 id="settings-install-title">Install node</h2></div>
+      <p id="settings-install-disk" class="settings-note"></p>
+      <label>Blockchain data folder<input id="settings-install-data-dir" type="text" autocomplete="off" maxlength="1024" required></label>
+      <fieldset>
+        <legend>Private LAN interfaces</legend>
+        <p class="settings-note">All interfaces are closed by default.</p>
+        <div id="settings-install-interfaces"></div>
+      </fieldset>
+      <p id="settings-install-error" class="node-state" role="status" aria-live="polite"></p>
+      <div class="settings-actions"><button id="settings-install-cancel" type="button">Cancel</button><button id="settings-install-submit" type="submit">Install node</button></div>
     </form>
   </dialog>
   <dialog id="credential-reset-dialog" class="settings-dialog" aria-labelledby="credential-reset-title">

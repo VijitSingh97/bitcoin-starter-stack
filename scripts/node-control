@@ -10,25 +10,36 @@ docker_bin=${DOCKER_BIN:-docker}
 now=${NODE_CONTROL_NOW_EPOCH:-$(date +%s)}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
 host_os=${NODE_CONTROL_OS:-$(uname -s)}
+project_name=${BITCOIN_STACK_PROJECT_NAME:-$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$env_file" 2>/dev/null | tail -n 1)}
+if [ -z "$project_name" ]; then
+  case "$package_managed" in brew) project_name=bitcoin-starter-stack-brew ;; 1 | apt) project_name=bitcoin-starter-stack-apt ;; *) project_name=bitcoin-starter-stack ;; esac
+fi
+container_id() {
+  "$docker_bin" ps -aq \
+    --filter "label=com.docker.compose.project=$project_name" \
+    --filter "label=com.docker.compose.service=$1" | head -n 1
+}
+dashboard_id=$(container_id dashboard)
 mkdir -p "$state_root/node-control"
 chmod 700 "$state_root/node-control"
 exec 9>"$state_root/node-control/.lock"
 flock -n 9 || exit 0
-dashboard_exec() { "$docker_bin" exec -u 1000 dashboard "$@"; }
+dashboard_exec() { [ -n "$dashboard_id" ] && "$docker_bin" exec -u 1000 "$dashboard_id" "$@"; }
 write_status() {
   jq -nc --arg id "$1" --arg node "$2" --argjson active "$3" --arg state "$4" --arg message "$5" --arg error_code "${6:-}" \
     '{id:$id,node:$node,active:$active,state:$state,message:$message} | if $error_code=="" then . else .error_code=$error_code end' |
-    $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
+    $docker_bin exec -i -u 1000 "$dashboard_id" sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
 }
 clear_request() { dashboard_exec rm -f /state/node-control.processing >/dev/null 2>&1 || true; }
 write_host_status() {
   jq -nc --arg id "$1" --arg action "$2" --arg state "$3" --arg message "$4" \
-    --arg node "${5:-}" --arg enabled "${6:-}" --arg error_code "${7:-}" '
+    --arg node "${5:-}" --arg enabled "${6:-}" --arg error_code "${7:-}" --arg port "${8:-}" '
     {id:$id,action:$action,state:$state,message:$message} |
     if $node=="" then . else .node=$node end |
     if $enabled=="" then . else .enabled=($enabled=="true") end |
-    if $error_code=="" then . else .error_code=$error_code end' |
-    $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
+    if $error_code=="" then . else .error_code=$error_code end |
+    if $port=="" then . else .port=$port end' |
+    $docker_bin exec -i -u 1000 "$dashboard_id" sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' >/dev/null
 }
 canonical_config() {
   source=$1
@@ -111,12 +122,11 @@ if [ -d "$install_transaction" ]; then
   fi
 fi
 [ "${install_recovery_failed:-false}" = true ] || [ -r "$env_file" ] || exit 0
-dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
 [ -n "$dashboard_id" ] || exit 0
 config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
 case ",$config_files," in *",$stack_root/docker-compose.yml,"*) ;; *) exit 0 ;; esac
 if [ -f "$install_recovery_status" ]; then
-  $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' <"$install_recovery_status" >/dev/null
+  $docker_bin exec -i -u 1000 "$dashboard_id" sh -c 'umask 077; cat > /state/.node-control.status.tmp; mv /state/.node-control.status.tmp /state/node-control.status' <"$install_recovery_status" >/dev/null
   rm -f "$install_recovery_status"
   [ "${install_recovery_failed:-false}" != true ] || exit 0
 fi
@@ -164,6 +174,75 @@ config_pending() {
   [ -f "$approved_config" ] && [ "$current" = "$approved" ] && return 1
   return 0
 }
+env_get() {
+  sed -n "s/^$1=//p" "$env_file" | tail -n 1
+}
+host_absolute_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    ./*) printf '%s/%s\n' "$stack_root" "${1#./}" ;;
+    *) printf '%s/%s\n' "$stack_root" "$1" ;;
+  esac
+}
+prepare_install_data_dir() {
+  prepare_node=$1
+  prepare_directory=$2
+  [ -n "$prepare_directory" ] || return 0
+  prepare_walk=
+  prepare_rest=${prepare_directory#/}
+  while [ -n "$prepare_rest" ]; do
+    prepare_part=${prepare_rest%%/*}
+    prepare_walk=$prepare_walk/$prepare_part
+    [ ! -L "$prepare_walk" ] || return 1
+    [ "$prepare_rest" != "$prepare_part" ] || break
+    prepare_rest=${prepare_rest#*/}
+  done
+  if [ -e "$prepare_directory" ] && [ ! -d "$prepare_directory" ]; then return 1; fi
+  mkdir -p -- "$prepare_directory" || return 1
+  prepare_canonical=$(cd "$prepare_directory" 2>/dev/null && pwd -P) || return 1
+  prepare_expected_variable=$(printf '%s_DATA_DIR' "$(printf '%s' "$prepare_node" | tr '[:lower:]' '[:upper:]')")
+  prepare_expected=$(env_get "$prepare_expected_variable")
+  [ -n "$prepare_expected" ] || prepare_expected=./data/$prepare_node
+  prepare_expected=$(host_absolute_path "$prepare_expected")
+  if [ -d "$prepare_expected" ]; then
+    prepare_expected=$(cd "$prepare_expected" 2>/dev/null && pwd -P) || return 1
+  fi
+  prepare_stack=$(cd "$stack_root" 2>/dev/null && pwd -P) || return 1
+  prepare_state=$(cd "$state_root" 2>/dev/null && pwd -P) || return 1
+  prepare_config=$(cd "$config_root" 2>/dev/null && pwd -P) || return 1
+  if [ "$prepare_canonical" != "$prepare_expected" ]; then
+    for prepare_root in "$prepare_stack" "$prepare_state" "$prepare_config"; do
+      [ "$prepare_canonical" != "$prepare_root" ] || return 1
+      case "$prepare_canonical/" in "$prepare_root/"*) return 1 ;; esac
+      case "$prepare_root/" in "$prepare_canonical/"*) return 1 ;; esac
+    done
+  fi
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+    prepare_home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 1
+    [ "$prepare_canonical" != "$prepare_home" ] || return 1
+    case "$prepare_home/" in "$prepare_canonical/"*) return 1 ;; esac
+  fi
+  prepare_contents=$(find "$prepare_canonical" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || return 1
+  [ -z "$prepare_contents" ] || return 1
+  if [ "$host_os" = Linux ]; then
+    prepare_owner=1000:1000
+    prepare_mode=700
+    if [ "$prepare_node" = zcash ]; then
+      prepare_owner=10001:1000
+      prepare_mode=750
+    fi
+    prepare_actual_owner=$(stat -c '%u:%g' "$prepare_canonical" 2>/dev/null) || return 1
+    prepare_actual_mode=$(stat -c '%a' "$prepare_canonical" 2>/dev/null) || return 1
+    if [ "$prepare_actual_owner" != "$prepare_owner" ] || [ "$prepare_actual_mode" != "$prepare_mode" ]; then
+      chown "$prepare_owner" "$prepare_canonical" || return 1
+      chmod "$prepare_mode" "$prepare_canonical" || return 1
+    fi
+  else
+    [ -w "$prepare_canonical" ] && [ -x "$prepare_canonical" ] || return 1
+    chmod 700 "$prepare_canonical" || return 1
+  fi
+  printf '%s\n' "$prepare_canonical"
+}
 host_platform=source
 boot_kind=unsupported
 boot_supported=false
@@ -186,18 +265,28 @@ if config_pending; then
   pending=true
   revision=$(canonical_config "$config_file" | config_revision)
 fi
+config_path=$(cd "$config_root" && pwd -P)/config.json
+data_paths='{}'
+for node_spec in bitcoin:BITCOIN_DATA_DIR monero:MONERO_DATA_DIR tari:TARI_DATA_DIR litecoin:LITECOIN_DATA_DIR dogecoin:DOGECOIN_DATA_DIR bitcoincash:BITCOINCASH_DATA_DIR zcash:ZCASH_DATA_DIR; do
+  node=${node_spec%%:*}
+  variable=${node_spec#*:}
+  path=$(env_get "$variable")
+  [ -n "$path" ] || path=./data/$node
+  path=$(host_absolute_path "$path")
+  data_paths=$(printf '%s' "$data_paths" | jq -c --arg node "$node" --arg path "$path" '.[$node]=$path')
+done
 jq -nc --argjson timestamp "$now" --arg platform "$host_platform" --arg boot_kind "$boot_kind" \
   --argjson boot_supported "$boot_supported" --argjson boot_enabled "$boot_enabled" --argjson config_pending "$pending" \
-  --arg config_revision "$revision" \
-  '{timestamp:$timestamp,install_supported:true,boot_supported:$boot_supported,boot_enabled:$boot_enabled,config_pending:$config_pending,config_revision:$config_revision,platform:$platform,boot_kind:$boot_kind}' |
-  $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-control.capability.tmp; mv /state/.node-control.capability.tmp /state/node-control.capability' >/dev/null
+  --arg config_revision "$revision" --arg config_path "$config_path" --argjson data_paths "$data_paths" \
+  '{timestamp:$timestamp,install_supported:true,boot_supported:$boot_supported,boot_enabled:$boot_enabled,config_pending:$config_pending,config_revision:$config_revision,platform:$platform,boot_kind:$boot_kind,config_path:$config_path,data_paths:$data_paths}' |
+  $docker_bin exec -i -u 1000 "$dashboard_id" sh -c 'umask 077; cat > /state/.node-control.capability.tmp; mv /state/.node-control.capability.tmp /state/node-control.capability' >/dev/null
 if ! dashboard_exec test -f /state/node-control.processing >/dev/null 2>&1; then
   dashboard_exec test -f /state/node-control.request >/dev/null 2>&1 || exit 0
   dashboard_exec mv /state/node-control.request /state/node-control.processing >/dev/null 2>&1 || exit 0
 fi
 size=$(dashboard_exec sh -c 'wc -c < /state/node-control.processing' 2>/dev/null | tr -d ' ' || true)
-case "$size" in '' | *[!0-9]*) size=2049 ;; esac
-if [ "$size" -gt 2048 ]; then
+case "$size" in '' | *[!0-9]*) size=4097 ;; esac
+if [ "$size" -gt 4096 ]; then
   write_status "" "" false rejected "Invalid request." invalid_request
   clear_request
   exit 0
@@ -212,7 +301,7 @@ host_remember_seen() {
   mv "$host_seen_tmp" "$host_seen_file"
 }
 host_finish() {
-  write_host_status "$host_id" "$host_action" "$1" "$2" "${3:-}" "${4:-}" "${5:-}"
+  write_host_status "$host_id" "$host_action" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}"
   host_remember_seen
   clear_request
   [ -z "${host_cleanup_transaction:-}" ] || rm -rf "$host_cleanup_transaction"
@@ -220,7 +309,28 @@ host_finish() {
 }
 host_request=false
 if printf '%s' "$request" | jq -e --argjson now "$now" '
-  type=="object" and keys==["action","id","node","requested_at"] and .action=="install" and
+  def node_interface($node):
+    if $node=="bitcoin" then "bitcoin_rpc"
+    elif $node=="monero" then "monero_rpc|monero_zmq"
+    elif $node=="tari" then "tari_grpc"
+    elif $node=="litecoin" then "litecoin_rpc"
+    elif $node=="dogecoin" then "dogecoin_rpc"
+    elif $node=="bitcoincash" then "bitcoincash_rpc"
+    else "zcash_rpc" end;
+  . as $request |
+  type=="object" and
+  (keys==["action","id","node","requested_at"] or
+   (keys==["action","data_dir","id","interfaces","node","requested_at"] and
+    (.data_dir|type=="string" and length>1 and length<=1024 and startswith("/") and
+      (explode|all(. != 0 and . != 10 and . != 13)) and
+      (contains("//")|not) and (split("/")|all(. != "." and . != ".."))) and
+    (.interfaces|type=="array" and length<=2 and
+      (([.[].id]|length)==([.[].id]|unique|length)) and
+      all(.[]; type=="object" and keys==["enabled","host_port","id"] and
+        (.id|type=="string" and test("^(" + node_interface($request.node) + ")$")) and
+        (.enabled|type=="boolean") and
+        (.host_port|type=="number" and floor==. and .>=1 and .<=65535))))) and
+  .action=="install" and
   (.id|type=="string" and test("^[0-9a-f]{32}$")) and
   (.node=="bitcoin" or .node=="monero" or .node=="tari" or .node=="litecoin" or .node=="dogecoin" or .node=="bitcoincash" or .node=="zcash") and
   (.requested_at|type=="number" and floor==. and . >= $now-300 and . <= $now+30)
@@ -269,6 +379,9 @@ if [ "$host_request" = true ]; then
   fi
   if [ "$host_action" = install ]; then
     host_node=$(printf '%s' "$request" | jq -r .node)
+    host_data_dir=$(printf '%s' "$request" | jq -r '.data_dir // ""')
+    host_interfaces=$(printf '%s' "$request" | jq -c '.interfaces // []')
+    host_bind_ip=$(env_get DASHBOARD_BIND_IP)
     current='{}'
     [ -f "$config_file" ] && current=$(cat "$config_file")
     configured=$(printf '%s' "$current" | jq -r --arg node "$host_node" 'if $node=="bitcoin" then ((.bitcoin//{}|has("enabled")|not) or .bitcoin.enabled==true) else .[$node].enabled==true end')
@@ -276,13 +389,24 @@ if [ "$host_request" = true ]; then
     memory=4096
     [ "$host_node" != bitcoin ] && [ "$host_node" != monero ] || memory=2048
     candidate=$(mktemp "$config_root/.config.install.XXXXXX")
-    printf '%s' "$current" | jq --arg node "$host_node" --argjson memory "$memory" '
+    printf '%s' "$current" | jq --arg node "$host_node" --arg data_dir "$host_data_dir" --arg bind_ip "$host_bind_ip" --argjson interfaces "$host_interfaces" --argjson memory "$memory" '
       .[$node].enabled=true | .[$node].active=true |
       .[$node].resource_profile //= "compact" |
       .[$node].steady_cpus //= 1 | .[$node].steady_mem_limit_mb //= $memory |
+      if $data_dir!="" then .[$node].data_dir=$data_dir else . end |
       if $node=="monero" then .[$node].rpc_expose=false | .[$node].zmq_expose=false
       elif $node=="tari" then .[$node].grpc_expose=false
-      else .[$node].rpc_expose=false end' >"$candidate"
+      else .[$node].rpc_expose=false end |
+      reduce $interfaces[] as $interface (.;
+        if $interface.id=="bitcoin_rpc" then .bitcoin.rpc_expose=$interface.enabled | if $interface.enabled then .bitcoin.rpc_bind_ip=$bind_ip | .bitcoin.rpc_port=$interface.host_port else . end
+        elif $interface.id=="monero_rpc" then .monero.rpc_expose=$interface.enabled | if $interface.enabled then .monero.rpc_bind_ip=$bind_ip | .monero.rpc_port=$interface.host_port else . end
+        elif $interface.id=="monero_zmq" then .monero.zmq_expose=$interface.enabled | if $interface.enabled then .monero.zmq_bind_ip=$bind_ip | .monero.zmq_port=$interface.host_port else . end
+        elif $interface.id=="tari_grpc" then .tari.grpc_expose=$interface.enabled | if $interface.enabled then .tari.grpc_bind_ip=$bind_ip | .tari.grpc_port=$interface.host_port else . end
+        elif $interface.id=="litecoin_rpc" then .litecoin.rpc_expose=$interface.enabled | if $interface.enabled then .litecoin.rpc_bind_ip=$bind_ip | .litecoin.rpc_port=$interface.host_port else . end
+        elif $interface.id=="dogecoin_rpc" then .dogecoin.rpc_expose=$interface.enabled | if $interface.enabled then .dogecoin.rpc_bind_ip=$bind_ip | .dogecoin.rpc_port=$interface.host_port else . end
+        elif $interface.id=="bitcoincash_rpc" then .bitcoincash.rpc_expose=$interface.enabled | if $interface.enabled then .bitcoincash.rpc_bind_ip=$bind_ip | .bitcoincash.rpc_port=$interface.host_port else . end
+        else .zcash.rpc_expose=$interface.enabled | if $interface.enabled then .zcash.rpc_bind_ip=$bind_ip | .zcash.rpc_port=$interface.host_port else . end
+        end)' >"$candidate"
     validate=$(mktemp -d "$state_root/node-control/.validate.XXXXXX")
     cp "$candidate" "$validate/config.json"
     if ! BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$validate" \
@@ -291,6 +415,28 @@ if [ "$host_request" = true ]; then
       host_finish rejected "Node defaults are invalid." "$host_node" "" validation_failed
     fi
     rm -rf "$validate"
+    host_port_changes=$(printf '%s' "$host_interfaces" | jq -c --arg bind_ip "$host_bind_ip" '[.[]|select(.enabled)|{port:.id,enabled:true,bind_ip:$bind_ip,host_port:.host_port}]')
+    if [ "$(printf '%s' "$host_port_changes" | jq 'length')" -gt 0 ]; then
+      if ! host_port_check=$(BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
+        "$stack_root/scripts/node-port-control" --check-ports "$host_port_changes"); then
+        case "$host_port_check" in
+          port_in_use:*) host_finish rejected "Selected port is already in use." "$host_node" "" port_in_use "${host_port_check#*:}" ;;
+          bind_address_unavailable:*) host_finish rejected "Selected LAN address is not assigned to this host." "$host_node" "" validation_failed ;;
+          *) host_finish failed "Port availability could not be checked." "$host_node" "" validation_failed ;;
+        esac
+      fi
+    fi
+    if ! prepared_data_dir=$(prepare_install_data_dir "$host_node" "$host_data_dir"); then
+      rm -f "$candidate"
+      host_finish rejected "Data folder must be a new or empty writable folder outside app and config roots, without symbolic links." "$host_node" "" data_path_invalid
+    fi
+    if [ -n "$prepared_data_dir" ] && [ "$prepared_data_dir" != "$host_data_dir" ]; then
+      candidate_tmp=$(mktemp "$config_root/.config.install-path.XXXXXX")
+      jq --arg node "$host_node" --arg data_dir "$prepared_data_dir" '.[$node].data_dir=$data_dir' "$candidate" >"$candidate_tmp"
+      chmod 600 "$candidate_tmp"
+      mv "$candidate_tmp" "$candidate"
+      host_data_dir=$prepared_data_dir
+    fi
     transaction_tmp=$(mktemp -d "$state_root/node-control/.install-transaction.XXXXXX")
     had_config=false
     had_env=false
@@ -342,11 +488,13 @@ if [ "$host_request" = true ]; then
     rm -rf "$validate"
     policies=$(mktemp "$state_root/node-control/.restart-policies.XXXXXX")
     for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
-      details=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}|{{.HostConfig.RestartPolicy.Name}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$service" 2>/dev/null || true)
+      service_id=$(container_id "$service")
+      [ -n "$service_id" ] || continue
+      details=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}|{{.HostConfig.RestartPolicy.Name}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$service_id" 2>/dev/null || true)
       [ -n "$details" ] || continue
       case "${details%%|*}" in *"$stack_root/docker-compose.yml"*) ;; *) rm -f "$candidate" "$policies"; host_finish rejected "A running container belongs to another installation." "" "$host_enabled" ownership_conflict ;; esac
       policy_details=${details#*|}
-      printf '%s|%s|%s\n' "$service" "${policy_details%%|*}" "${policy_details#*|}" >>"$policies"
+      printf '%s|%s|%s|%s\n' "$service" "$service_id" "${policy_details%%|*}" "${policy_details#*|}" >>"$policies"
     done
     backup=$(mktemp "$state_root/node-control/.config.backup.XXXXXX")
     printf '%s' "$current" >"$backup"
@@ -355,9 +503,9 @@ if [ "$host_request" = true ]; then
     policy=on-failure:5
     [ "$host_enabled" != true ] || policy=unless-stopped
     boot_failed=false
-    while IFS='|' read -r service old_policy old_retries; do
+    while IFS='|' read -r service service_id old_policy old_retries; do
       [ -n "$service" ] || continue
-      $docker_bin update --restart="$policy" "$service" >/dev/null 2>&1 || { boot_failed=true; break; }
+      $docker_bin update --restart="$policy" "$service_id" >/dev/null 2>&1 || { boot_failed=true; break; }
     done <"$policies"
     if [ "$boot_failed" = false ] && BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
       BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1; then
@@ -370,13 +518,13 @@ if [ "$host_request" = true ]; then
     mv "$backup" "$config_file" || launch_rollback_failed=true
     BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_root" BITCOIN_STACK_CONFIG_DIR="$config_root" \
       BITCOIN_STACK_CONFIG_LOCK_HELD=1 "$stack_root/configure.sh" >/dev/null 2>&1 || launch_rollback_failed=true
-    while IFS='|' read -r service old_policy old_retries; do
+    while IFS='|' read -r service service_id old_policy old_retries; do
       [ -n "$service" ] || continue
       restore_policy=${old_policy:-no}
       if [ "$restore_policy" = on-failure ] && [ "${old_retries:-0}" -gt 0 ]; then
         restore_policy=on-failure:$old_retries
       fi
-      $docker_bin update --restart="$restore_policy" "$service" >/dev/null 2>&1 || launch_rollback_failed=true
+      $docker_bin update --restart="$restore_policy" "$service_id" >/dev/null 2>&1 || launch_rollback_failed=true
     done <"$policies"
     rm -f "$policies"
     [ "$launch_rollback_failed" != true ] ||
@@ -522,7 +670,7 @@ if ! runtime=$(jq -c '
 ' "$config_file"); then
   rollback 1
 fi
-if ! printf '%s\n' "$runtime" | $docker_bin exec -i -u 1000 dashboard sh -c 'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null; then
+if ! printf '%s\n' "$runtime" | $docker_bin exec -i -u 1000 "$dashboard_id" sh -c 'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null; then
   rollback 1
 fi
 approve_config || rollback 1

@@ -118,11 +118,25 @@ images, uses default data directories, and leaves node LAN interfaces closed.
 The dashboard has no password by default, chooses a private LAN address
 automatically, and prints its URL. Use it on a trusted LAN.
 
-Use **Settings → Nodes → Install** to add a chain later. Installation uses
-versioned project images and the normal host Docker connection; it does not route the
-image download through a node container. It retains existing nodes and data.
-The node appears in the overview once the host confirms installation. Errors
-remain visible and can be corrected before retrying.
+Use **Settings → Node set → Install** to add a chain later. A confirmation dialog
+shows the node's estimated post-sync disk use and fills in its default absolute
+host data folder. It also lists the interfaces that node can expose—RPC, ZMQ, or
+gRPC as applicable—with their default ports. Every interface starts closed;
+opening one is an explicit choice in this dialog.
+
+Choose a new or empty data folder. The host rejects symlinked folders and
+locations that overlap application settings or other sensitive application paths;
+it never changes ownership recursively on existing files. To reuse an existing
+chain database, set its path in `config.json` and apply that configuration.
+
+After confirmation, the host validates the folder and checks each enabled port
+for conflicts before it stops or recreates anything. A rejected request leaves
+the current stack running and reports the folder or port problem in Settings.
+An accepted installation uses versioned project images and the normal host
+Docker connection; it does not route the image download through a node
+container. It retains existing nodes and data. The node appears in the overview
+once the host confirms installation, and progress or errors remain visible in
+Settings.
 
 For another combination or storage location on first start, create
 `config.json` before `init`; see [first-start customization](getting-started.md#customize-before-first-start).
@@ -146,7 +160,9 @@ Monero ZMQ and Tari gRPC have no password controls.
 Global Settings also contains launch at boot/login, Appearance, Dashboard
 password, Telegram, and Healthchecks. Launch at boot/login is managed by APT
 and Homebrew installations; source installs show it as unavailable. Turning it
-off does not stop running nodes; it controls future starts.
+off does not stop running nodes; it controls future starts. The read-only
+**Config** section immediately below Healthchecks shows the exact host
+`config.json` path reported by the installed helper.
 
 ## Private-LAN endpoints
 

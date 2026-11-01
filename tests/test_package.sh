@@ -43,6 +43,7 @@ for required in \
   ./usr/lib/bitcoin-starter-stack/stack \
   ./usr/lib/bitcoin-starter-stack/configure.sh \
   ./usr/lib/bitcoin-starter-stack/docker-compose.yml \
+  ./usr/lib/bitcoin-starter-stack/docker-compose.tari-wallet.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.monero-rpc.yml \
   ./usr/lib/bitcoin-starter-stack/docker-compose.monero-zmq.yml \
@@ -127,7 +128,7 @@ if [ "${1:-}" = inspect ]; then
 fi
 if [ "${FAKE_SOURCE_VOLUMES:-}" = 1 ] && [ "${1:-}" = compose ]; then
   case " $* " in
-    *' --project-name bitcoin-starter-stack-apt '*) ;;
+    *' --project-name node-manager-apt '*) ;;
     *) exit 88 ;;
   esac
 fi
@@ -210,7 +211,8 @@ wallets=$(sed -n 's/^WATCH_WALLETS_B64=//p' "$env_file" | base64 -d)
 [ ! -e "$home" ] || fail "package wrote configuration or data under HOME"
 [ ! -e "$runtime/.env" ] || fail "package wrote state into /usr/lib payload"
 grep -q -- "--project-directory $state_dir" "$log" || fail "Compose project directory is not package state"
-grep -q -- "--project-name bitcoin-starter-stack-apt" "$log" || fail "package Compose project is not isolated from source installs"
+grep -q '^COMPOSE_PROJECT_NAME=node-manager-apt$' "$env_file" || fail "fresh package did not persist its Compose identity"
+grep -q -- "--project-name node-manager-apt" "$log" || fail "package Compose project is not isolated from source installs"
 grep -q -- "--env-file $env_file" "$log" || fail "Compose did not use package state env"
 grep -q -- "-f $runtime/docker-compose.yml up -d" "$log" || fail "Compose did not use immutable payload"
 grep -q -- "-f $runtime/docker-compose.rpc.yml" "$log" && fail "default package startup loaded the RPC override"
@@ -249,7 +251,7 @@ grep -q -- "-f $runtime/docker-compose.yml -f $runtime/docker-compose.rpc.yml up
 
 : >"$log"
 FAKE_SOURCE_VOLUMES=1 "$wrapper" apply >/dev/null || fail "stale source volumes blocked the isolated package project"
-grep -q -- "--project-name bitcoin-starter-stack-apt" "$log" || fail "package could reuse source-managed named volumes"
+grep -q -- "--project-name node-manager-apt" "$log" || fail "package could reuse source-managed named volumes"
 
 printf '%s\n' '{"bitcoin":{"prune_mb":0,"rpc_expose":true,"rpc_bind_ip":"192.168.1.117","rpc_port":18332}}' >"$config_dir/config.json"
 : >"$log"

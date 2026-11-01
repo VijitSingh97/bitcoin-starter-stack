@@ -229,6 +229,10 @@ body:not([data-node=""]) .node-close-backdrop { display: block; }
 .settings-host-nodes { display: grid; gap: 8px; }
 .settings-host-node { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .settings-host-node button { min-width: 76px; }
+.settings-config-path { display: block; overflow-wrap: anywhere; color: var(--text); font-size: 0.8rem; }
+.settings-install-interface { padding: 8px 0; border-top: 1px solid var(--border); }
+.settings-install-interface:first-child { border-top: 0; }
+.settings-install-interface > label:last-child { margin-left: 24px; }
 .settings-dialog details { margin: 10px 0; }
 .settings-dialog summary { color: var(--text); cursor: pointer; }
 .node-settings-form { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }

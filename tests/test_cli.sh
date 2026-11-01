@@ -107,12 +107,13 @@ echo "docker $*" >>"$FAKE_LOG"
 case " $* " in
   *' info '*) [ "${FAKE_DOCKER_INFO_FAIL:-0}" != 1 ]; exit ;;
   *' exec dashboard cat /state/dashboard_auth.json '*) [ -f "${FAKE_DASH_AUTH_FILE:-}" ] && cat "$FAKE_DASH_AUTH_FILE"; exit ;;
-  *' compose config --images '*) printf 'example.invalid/stack:test\n' ;;
+  *' compose '*' config --images '*) printf 'example.invalid/stack:test\n' ;;
   *' image inspect '*) [ "${FAKE_IMAGES_MISSING:-0}" != 1 ] || [ -f "$FAKE_IMAGES_READY" ]; exit ;;
-  *' compose pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
-  *' compose up '*) [ "${FAKE_UP_FAIL:-0}" != 1 ]; exit ;;
+  *' compose '*' pull '*) [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1; touch "$FAKE_IMAGES_READY"; exit ;;
+  *' compose '*' up '*) [ "${FAKE_UP_FAIL:-0}" != 1 ]; exit ;;
+  *' ps -aq '*'com.docker.compose.service=dashboard'*) printf 'dashboard-id\n'; exit ;;
   *'com.docker.compose.project.config_files'*) exit 1 ;;
-  *' inspect --format {{.State.Running}} dashboard '*) printf 'true\n' ;;
+  *' inspect --format {{.State.Running}} dashboard-id '*) printf 'true\n' ;;
 esac
 exit 0
 EOS
@@ -170,8 +171,8 @@ rm -f "$FAKE_IMAGES_READY"
   cat "$tmp/wizard-init.log"
   fail "init failed with mocked Linux host controls"
 }
-grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "init did not preserve local images while pulling missing ones"
-grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
+grep -q 'docker compose .* pull --policy missing' "$FAKE_LOG" || fail "init did not preserve local images while pulling missing ones"
+grep -q 'docker compose .* up -d --pull never --no-build' "$FAKE_LOG" || fail "init start allows implicit downloads or builds"
 [ "$(jq -r '.bitcoin.enabled' "$wizard/config.json")" = true ] || fail "init did not default to Bitcoin"
 [ "$(jq -r '.dashboard.password' "$wizard/config.json")" = "" ] || fail "init did not default to a passwordless dashboard"
 [ "$(jq -r '.dashboard.bind_ip' "$wizard/config.json")" = auto ] || fail "init did not keep the dashboard bind dynamic"
@@ -193,8 +194,8 @@ cat >"$wizard_loaded/config.json" <<'EOF'
 {"bitcoin":{"enabled":false},"monero":{"enabled":true,"data_dir":"./custom-monero","node_password":"moneropassword1234567890123456"},"dashboard":{"password":"customdashboardpassword","bind_ip":"192.168.1.118"}}
 EOF
 (cd "$wizard_loaded" && HOME="$tmp" PATH="$stub:$PATH" ./stack init >"$tmp/wizard-loaded.log")
-grep -q 'docker compose pull' "$FAKE_LOG" && fail "init pulled images that were already local"
-grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "init did not start local images"
+grep -q 'docker compose .* pull' "$FAKE_LOG" && fail "init pulled images that were already local"
+grep -q 'docker compose .* up -d --pull never --no-build' "$FAKE_LOG" || fail "init did not start local images"
 [ "$(jq -r '.monero.data_dir' "$wizard_loaded/config.json")" = ./custom-monero ] || fail "init replaced a preseeded data path"
 [ "$(jq -r '.monero.node_password' "$wizard_loaded/config.json")" = moneropassword1234567890123456 ] || fail "init replaced a preseeded credential"
 grep -q '^COMPOSE_PROFILES=monero$' "$wizard_loaded/.env" || fail "init replaced a preseeded node selection"
@@ -214,8 +215,8 @@ rm -f "$FAKE_IMAGES_READY"
 (cd "$wizard_failed" &&
   BITCOIN_STACK_DEFAULT_BIND_IP=192.168.1.116 FAKE_IMAGES_MISSING=1 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init ignored a missing-image pull failure"
-grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "init failure did not attempt a missing-only pull"
-grep -q 'docker compose up -d' "$FAKE_LOG" && fail "init started after a failed pull"
+grep -q 'docker compose .* pull --policy missing' "$FAKE_LOG" || fail "init failure did not attempt a missing-only pull"
+grep -q 'docker compose .* up -d' "$FAKE_LOG" && fail "init started after a failed pull"
 
 wizard_no_docker="$tmp/wizard-no-docker"
 mkdir "$wizard_no_docker"
@@ -260,7 +261,7 @@ cp "$pending/.approved.env" "$pending/approved-env.before"
 grep -q '^DASHBOARD_PORT=8088$' "$pending/.env" || fail "approval failure did not restore the previous runtime environment"
 [ "$(jq -r '.dashboard.port' "$pending/.approved-config.json")" = 8088 ] || fail "approval failure replaced the approved config"
 cmp -s "$pending/.approved.env" "$pending/approved-env.before" || fail "approval failure replaced the approved environment"
-[ "$(grep -c 'docker compose up -d --pull never --no-build' "$FAKE_LOG")" -ge 2 ] || fail "approval failure did not reconcile the previous runtime"
+[ "$(grep -c 'docker compose .* up -d --pull never --no-build' "$FAKE_LOG")" -ge 2 ] || fail "approval failure did not reconcile the previous runtime"
 cp "$pending/config.json" "$pending/config.before-invalid"
 printf '{\n' >"$pending/config.json"
 : >"$FAKE_LOG"
@@ -290,7 +291,7 @@ printf '1.2.3\n' >"$wizard_approval_failed/VERSION"
 : >"$FAKE_LOG"
 (cd "$wizard_approval_failed" && BITCOIN_STACK_DEFAULT_BIND_IP=192.168.1.116 FAKE_APPROVE_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack init >/dev/null 2>&1) &&
   fail "init succeeded after approval failed"
-grep -q 'docker compose down' "$FAKE_LOG" || fail "fresh init approval failure did not stop the unapproved runtime"
+grep -q 'docker compose .* down' "$FAKE_LOG" || fail "fresh init approval failure did not stop the unapproved runtime"
 [ ! -f "$wizard_approval_failed/.env" ] || fail "fresh init approval failure retained an unapproved environment"
 [ ! -f "$wizard_approval_failed/.approved-config.json" ] || fail "fresh init approval failure retained an approved config"
 [ ! -f "$wizard_approval_failed/.approved.env" ] || fail "fresh init approval failure retained an approved environment"
@@ -324,9 +325,9 @@ echo '{"dashboard": {"password": "hunter2", "control": true}}' >config.json
 # control on -> cron entry installed, agent started
 : >"$FAKE_LOG"
 out=$(HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
-awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+awk '/^flock 8$/ { lock=NR } /docker compose .* up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
   fail "apply did not hold the config lock through Compose"
-grep -q 'docker exec -i -u 1000 dashboard sh -c .*node-runtime.json' "$FAKE_LOG" ||
+grep -q 'docker compose .* exec -T -u 1000 dashboard sh -c .*node-runtime.json' "$FAKE_LOG" ||
   fail "apply did not synchronize dashboard node runtime state"
 grep -q "stack upgrade-agent" "$FAKE_CRON" || fail "ensure_agent: no @reboot cron entry installed"
 grep -q "^@reboot" "$FAKE_CRON" || fail "ensure_agent: cron entry is not @reboot"
@@ -341,28 +342,28 @@ printf '%s' "$out" | grep -q "upgrade-agent: started" || fail "ensure_agent: sta
 # idempotent: a second apply must not duplicate the cron entry
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 [ "$(grep -c "stack upgrade-agent" "$FAKE_CRON")" = "1" ] || fail "ensure_agent: cron entry duplicated"
-grep -q 'docker compose up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
+grep -q 'docker compose .* up -d --pull never --no-build' "$FAKE_LOG" || fail "apply allows implicit image downloads or builds"
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack apply-port-settings >/dev/null
-grep -q 'docker compose up -d --pull never --no-build --no-deps tor dashboard' "$FAKE_LOG" ||
+grep -q 'docker compose .* up -d --pull never --no-build --no-deps tor dashboard' "$FAKE_LOG" ||
   fail "port settings apply was not limited to Tor and dashboard"
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up >/dev/null
-awk '/^flock 8$/ { lock=NR } /docker compose up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
+awk '/^flock 8$/ { lock=NR } /docker compose .* up -d --pull never --no-build/ { up=NR } /^flock -u 8$/ { unlock=NR } END { exit !(lock && lock < up && up < unlock) }' "$FAKE_LOG" ||
   fail "up did not hold the config lock through Compose"
 : >"$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up tari-wallet >/dev/null
-grep -q 'docker compose up -d --pull never --no-build tari-wallet' "$FAKE_LOG" || fail "up rejected the Tari wallet service"
+grep -q 'docker compose .* up -d --pull never --no-build tari-wallet' "$FAKE_LOG" || fail "up rejected the Tari wallet service"
 HOME="$tmp" PATH="$stub:$PATH" ./stack up --build >/dev/null 2>&1 && fail "up allows an implicit build"
 
 # Explicit pulls use the host Docker configuration and report pull failures.
 rm -f "$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null || fail "host Docker pull failed"
-grep -q 'docker compose pull' "$FAKE_LOG" || fail "pull did not reach Compose"
+grep -q 'docker compose .* pull' "$FAKE_LOG" || fail "pull did not reach Compose"
 grep -q 'docker info' "$FAKE_LOG" && fail "pull inspected or changed host Docker proxy settings"
 rm -f "$FAKE_LOG"
 HOME="$tmp" PATH="$stub:$PATH" ./stack pull --policy missing >/dev/null || fail "pull policy was rejected"
-grep -q 'docker compose pull --policy missing' "$FAKE_LOG" || fail "pull arguments did not reach Compose"
+grep -q 'docker compose .* pull --policy missing' "$FAKE_LOG" || fail "pull arguments did not reach Compose"
 FAKE_PULL_FAIL=1 HOME="$tmp" PATH="$stub:$PATH" ./stack pull >/dev/null 2>&1 && fail "pull failure was ignored"
 
 cat >"$stub/git" <<'EOS'

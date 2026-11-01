@@ -47,6 +47,7 @@ for required in \
   bitcoin-starter-stack/configure.sh \
   bitcoin-starter-stack/VERSION \
   bitcoin-starter-stack/docker-compose.yml \
+  bitcoin-starter-stack/docker-compose.tari-wallet.yml \
   bitcoin-starter-stack/build/dashboard/Dockerfile \
   bitcoin-starter-stack/build/bitcoin/bitcoin.conf \
   bitcoin-starter-stack/build/tari/config.toml \

@@ -43,6 +43,11 @@ Use the command and paths for your installation:
 | Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` | `bitcoin-stack apply && bitcoin-stack status` |
 | APT | `/etc/bitcoin-starter-stack/config.json` | `/var/lib/bitcoin-starter-stack/.env` and `backups/` | `sudo bitcoin-stack apply && sudo bitcoin-stack status` |
 
+The dashboard repeats the active host path in **Settings → Config**, directly
+below Healthchecks. This is a read-only display from the installed host helper;
+edit that file and use the apply command in the table when a setting is not
+available in the dashboard.
+
 Installation never runs setup. Run `./stack init` for source,
 `bitcoin-stack init` for Homebrew, or `sudo bitcoin-stack init` for APT. This
 noninteractive command downloads missing images and starts the default stack,

@@ -38,6 +38,13 @@ if [ "$1" = inspect ]; then
   esac
   exit 0
 fi
+if [ "$1" = ps ] && [ "$2" = -aq ]; then
+  case "$*" in
+    *com.docker.compose.service=dashboard*) [ "${FAKE_DASHBOARD_MISSING:-0}" = 1 ] || printf '%s\n' dashboard-id ;;
+    *com.docker.compose.service=tor*) printf '%s\n' tor-id ;;
+  esac
+  exit 0
+fi
 if [ "$1" = ps ] && [ "$2" = -q ]; then
   printf '%s\n' tor-id ${FAKE_OTHER_DOCKER_IDS:-}
   exit 0
@@ -52,7 +59,7 @@ fi
 shift
 if [ "${1:-}" = -i ]; then shift; fi
 if [ "${1:-}" = -u ]; then shift 2; fi
-[ "$1" = dashboard ]
+[ "$1" = dashboard-id ]
 shift
 if [ "$1" = sh ] && [ "$2" = -c ]; then
   command=$3
@@ -160,7 +167,7 @@ EOF
   export FAKE_DOCKER_LOG=$case_root/docker.log FAKE_STACK_LOG=$case_root/stack.log
   export PORT_CONTROL_NOW_EPOCH=1000 FAKE_APPLY_FAIL=0 FAKE_APPLY_FAIL_ONCE=0 FAKE_APPLY_FAIL_MARKER=$case_root/apply-failed
   export FAKE_TOR_PORTS='{"8332/tcp":[{"HostIp":"192.168.1.10","HostPort":"8332"}],"18081/tcp":[{"HostIp":"192.168.1.10","HostPort":"18081"}],"18083/tcp":[{"HostIp":"192.168.1.10","HostPort":"18083"}]}'
-  unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL
+  unset FAKE_CONFIG_FILES FAKE_TOR_CONFIG_FILES FAKE_OTHER_DOCKER_IDS FAKE_OTHER_PORTS FAKE_SS_LISTENERS FAKE_SS_FAIL FAKE_DASHBOARD_MISSING
   unset FAKE_IP_FAIL FAKE_NETSTAT_FAIL FAKE_IFCONFIG_FAIL
   unset FAKE_NETSTAT_LISTENERS FAKE_IFCONFIG_ADDRESSES
   unset FAKE_NODE_LIMITS
@@ -193,6 +200,29 @@ credential_status() {
 }
 
 new_case close
+mkdir -p "$case_root/state/port-control"
+exec 7>"$case_root/state/port-control/.lock"
+flock 7
+if check_output=$(scripts/node-port-control --check-ports '[{"port":"bitcoin_rpc","enabled":true,"bind_ip":"8.8.8.8","host_port":28332}]'); then
+  fail "port preflight skipped validation while the normal control lock was held"
+fi
+[ "$check_output" = bind_address_unavailable:bitcoin_rpc ] || fail "port preflight returned the wrong typed error"
+flock -u 7
+exec 7>&-
+FAKE_CONFIG_FILES=/tmp/not-this-stack.yml
+export FAKE_CONFIG_FILES
+if check_output=$(scripts/node-port-control --check-ports '[{"port":"bitcoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":28332}]'); then
+  fail "port preflight accepted a dashboard owned by another stack"
+fi
+[ "$check_output" = port_check_failed ] || fail "foreign dashboard preflight returned the wrong error"
+unset FAKE_CONFIG_FILES
+FAKE_DASHBOARD_MISSING=1
+export FAKE_DASHBOARD_MISSING
+if check_output=$(scripts/node-port-control --check-ports '[{"port":"bitcoin_rpc","enabled":true,"bind_ip":"192.168.1.20","host_port":28332}]'); then
+  fail "port preflight accepted a missing dashboard"
+fi
+[ "$check_output" = port_check_failed ] || fail "missing dashboard preflight returned the wrong error"
+unset FAKE_DASHBOARD_MISSING
 request '{"id":"11111111111111111111111111111111","changes":[{"port":"bitcoin_rpc","enabled":false},{"port":"monero_zmq","enabled":false}],"requested_at":1000}'
 scripts/node-port-control
 [ "$(jq -r '.bitcoin.rpc_expose' "$case_root/config/config.json")" = false ] || fail "Bitcoin RPC remained enabled"

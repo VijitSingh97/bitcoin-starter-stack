@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     tar -xzf /tmp/node.tar.gz -C /tmp && \
     install -m 0755 /tmp/bitcoin-cash-node-29.2.0/bin/bitcoind /tmp/bitcoin-cash-node-29.2.0/bin/bitcoin-cli /usr/local/bin/ && \
     rm -rf /tmp/*
-COPY entrypoint.sh healthcheck.sh /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh && mkdir /data && chown 1000:1000 /data
+COPY --chmod=0755 entrypoint.sh healthcheck.sh /usr/local/bin/
+RUN mkdir /data && chown 1000:1000 /data
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

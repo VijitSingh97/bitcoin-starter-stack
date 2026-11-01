@@ -33,7 +33,7 @@ install -m 644 packaging/systemd/bitcoin-starter-stack-resource-profile.service 
   packaging/systemd/bitcoin-starter-stack-node-control.service packaging/systemd/bitcoin-starter-stack-node-control.timer \
   "$package/usr/lib/systemd/system/"
 install -m 644 docker-compose.yml docker-compose.rpc.yml docker-compose.monero-rpc.yml docker-compose.monero-zmq.yml \
-  docker-compose.tari-grpc.yml docker-compose.litecoin-rpc.yml docker-compose.dogecoin-rpc.yml docker-compose.bitcoincash-rpc.yml \
+  docker-compose.tari-wallet.yml docker-compose.tari-grpc.yml docker-compose.litecoin-rpc.yml docker-compose.dogecoin-rpc.yml docker-compose.bitcoincash-rpc.yml \
   docker-compose.zcash-rpc.yml VERSION .dockerignore "$root/"
 printf '%s\n' "$version" >"$root/VERSION"
 cp -R build "$root/"

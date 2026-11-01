@@ -22,29 +22,49 @@ credential_request_path=/state/credential-control.request
 credential_processing_path=/state/credential-control.processing
 credential_capability_path=/state/credential-control.capability
 now=${PORT_CONTROL_NOW_EPOCH:-$(date +%s)}
+check_ports_mode=false
+[ "${1:-}" = --check-ports ] && check_ports_mode=true
+preflight_unavailable() {
+  if [ "$check_ports_mode" = true ]; then
+    printf 'port_check_failed\n'
+    exit 1
+  fi
+  exit 0
+}
 
-[ -r "$env_file" ] || exit 0
-mkdir -p "$control_state"
-chmod 700 "$control_state"
-mkdir -p "$credential_state"
-chmod 700 "$credential_state"
-exec 9>"$control_state/.lock"
-flock -n 9 || exit 0
+[ -r "$env_file" ] || preflight_unavailable
+if [ "$check_ports_mode" = false ]; then
+  mkdir -p "$control_state"
+  chmod 700 "$control_state"
+  mkdir -p "$credential_state"
+  chmod 700 "$credential_state"
+  exec 9>"$control_state/.lock"
+  flock -n 9 || exit 0
+fi
 
 env_get() {
   sed -n "s/^$1=//p" "$env_file" | tail -n 1
 }
 
-dashboard_id=$($docker_bin inspect --format '{{.Id}}' dashboard 2>/dev/null || true)
-[ -n "$dashboard_id" ] || exit 0
+project_name=${BITCOIN_STACK_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}
+if [ -z "$project_name" ]; then
+  case "${BITCOIN_STACK_PACKAGE_MANAGED:-0}" in brew) project_name=bitcoin-starter-stack-brew ;; 1 | apt) project_name=bitcoin-starter-stack-apt ;; *) project_name=bitcoin-starter-stack ;; esac
+fi
+container_id() {
+  "$docker_bin" ps -aq \
+    --filter "label=com.docker.compose.project=$project_name" \
+    --filter "label=com.docker.compose.service=$1" | head -n 1
+}
+dashboard_id=$(container_id dashboard)
+[ -n "$dashboard_id" ] || preflight_unavailable
 config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$dashboard_id" 2>/dev/null || true)
 case ",$config_files," in
   *",$stack_root/docker-compose.yml,"*) ;;
-  *) exit 0 ;;
+  *) preflight_unavailable ;;
 esac
 
 dashboard_exec() {
-  "$docker_bin" exec -u 1000 dashboard "$@"
+  "$docker_bin" exec -u 1000 "$dashboard_id" "$@"
 }
 
 write_status() {
@@ -53,7 +73,7 @@ write_status() {
       {id:$id,state:$state,message:$message,affected_services:["tor","dashboard"]} |
       if $error_code == "" then . else . + {error_code:$error_code} end |
       if $port == "" then . else . + {port:$port} end')
-  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 "$dashboard_id" sh -c \
     'umask 077; cat >/state/.port-control.status.tmp; mv /state/.port-control.status.tmp /state/port-control.status' >/dev/null
 }
 
@@ -106,7 +126,7 @@ write_port_candidate() {
 write_credential_status() {
   status=$(jq -nc --arg id "$1" --arg node "$2" --arg state "$3" --arg message "$4" --argjson affected_services "${5:-[]}" \
     '{id:$id,node:$node,state:$state,message:$message,affected_services:$affected_services}')
-  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+  printf '%s\n' "$status" | "$docker_bin" exec -i -u 1000 "$dashboard_id" sh -c \
     'umask 077; cat >/state/.credential-control.status.tmp; mv /state/.credential-control.status.tmp /state/credential-control.status' >/dev/null
 }
 
@@ -119,7 +139,7 @@ remove_credential_capability() {
 }
 
 write_credential_capability() {
-  jq -nc --argjson timestamp "$now" '{timestamp:$timestamp}' | "$docker_bin" exec -i -u 1000 dashboard sh -c \
+  jq -nc --argjson timestamp "$now" '{timestamp:$timestamp}' | "$docker_bin" exec -i -u 1000 "$dashboard_id" sh -c \
     'umask 077; cat >/state/.credential-control.capability.tmp; mv /state/.credential-control.capability.tmp /state/credential-control.capability' >/dev/null
 }
 
@@ -283,6 +303,56 @@ host_ipv4_addresses() {
   [ -n "$addresses" ] || return 1
   printf '%s\n' "$addresses"
 }
+
+check_requested_ports() {
+  requested_changes=$1
+  printf '%s' "$requested_changes" | jq -e 'type=="array" and length<=8 and all(.[];
+    type=="object" and keys==["bind_ip","enabled","host_port","port"] and
+    (.port=="bitcoin_rpc" or .port=="monero_rpc" or .port=="monero_zmq" or .port=="tari_grpc" or
+     .port=="litecoin_rpc" or .port=="dogecoin_rpc" or .port=="bitcoincash_rpc" or .port=="zcash_rpc") and
+    .enabled==true and (.bind_ip|type=="string") and
+    (.host_port|type=="number" and floor==. and .>=1 and .<=65535))' >/dev/null 2>&1 || {
+      printf 'invalid_request\n'
+      return 1
+    }
+  [ "$(printf '%s' "$requested_changes" | jq 'length')" -gt 0 ] || return 0
+  tor_id=$(container_id tor)
+  inspection_ok=1
+  own_bindings=
+  other_bindings=
+  host_bindings=
+  if [ -z "$tor_id" ] || ! own_bindings=$(published_ports "$tor_id"); then inspection_ok=0; fi
+  tor_config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$tor_id" 2>/dev/null || true)
+  case ",$tor_config_files," in *",$stack_root/docker-compose.yml,"*) ;; *) inspection_ok=0 ;; esac
+  if ! container_ids=$($docker_bin ps -q --no-trunc 2>/dev/null); then inspection_ok=0; container_ids=; fi
+  for container_id in $container_ids; do
+    [ "$container_id" = "$tor_id" ] && continue
+    if ! bindings=$(published_ports "$container_id"); then inspection_ok=0; break; fi
+    [ -z "$bindings" ] || other_bindings=$(printf '%s\n%s' "$other_bindings" "$bindings")
+  done
+  if ! host_bindings=$(host_tcp_listeners); then inspection_ok=0; host_bindings=; fi
+  if ! host_ipv4s=$(host_ipv4_addresses); then inspection_ok=0; host_ipv4s=; fi
+  if [ "$inspection_ok" != 1 ]; then printf 'port_check_failed\n'; return 1; fi
+  while IFS="$(printf '\t')" read -r port bind_ip host_port; do
+    [ -n "$port" ] || continue
+    if ! private_ipv4 "$bind_ip" || ! printf '%s\n' "$host_ipv4s" | grep -Fxq "$bind_ip"; then
+      printf 'bind_address_unavailable:%s\n' "$port"
+      return 1
+    fi
+    if ! port_available "$bind_ip" "$host_port"; then
+      printf 'port_in_use:%s\n' "$port"
+      return 1
+    fi
+  done <<EOF
+$(printf '%s' "$requested_changes" | jq -r '.[] | [.port, .bind_ip, (.host_port|tostring)] | @tsv')
+EOF
+}
+
+if [ "${1:-}" = --check-ports ]; then
+  [ "$#" -eq 2 ] || { printf 'invalid_request\n'; exit 1; }
+  check_requested_ports "$2"
+  exit $?
+fi
 
 process_credential_request() {
   if ! dashboard_exec test -f "$credential_processing_path" >/dev/null 2>&1; then
@@ -777,81 +847,16 @@ while [ "$attempt" -lt 3 ]; do
   fi
   rm -rf "$validate_dir"
   if printf '%s' "$changes" | jq -e 'any(.[]; .enabled)' >/dev/null; then
-    tor_id=$($docker_bin inspect --format '{{.Id}}' tor 2>/dev/null || true)
-    own_bindings=
-    other_bindings=
-    host_bindings=
-    inspection_ok=1
-    if [ -z "$tor_id" ] || ! own_bindings=$(published_ports "$tor_id"); then
-      inspection_ok=0
-    fi
-    tor_config_files=$($docker_bin inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' \
-      "$tor_id" 2>/dev/null || true)
-    case ",$tor_config_files," in
-      *",$stack_root/docker-compose.yml,"*) ;;
-      *) inspection_ok=0 ;;
-    esac
-    if ! container_ids=$($docker_bin ps -q --no-trunc 2>/dev/null); then
-      inspection_ok=0
-      container_ids=
-    fi
-    for container_id in $container_ids; do
-      [ "$container_id" = "$tor_id" ] && continue
-      if ! bindings=$(published_ports "$container_id"); then
-        inspection_ok=0
-        break
-      fi
-      if [ -n "$bindings" ]; then
-        other_bindings=$(printf '%s\n%s' "$other_bindings" "$bindings")
-      fi
-    done
-    if ! host_bindings=$(host_tcp_listeners); then
-      inspection_ok=0
-      host_bindings=
-    fi
-    if ! host_ipv4s=$(host_ipv4_addresses); then
-      inspection_ok=0
-      host_ipv4s=
-    fi
-    if [ "$inspection_ok" != 1 ]; then
+    enabled_changes=$(printf '%s' "$changes" | jq -c '[.[]|select(.enabled)]')
+    if ! port_check=$(check_requested_ports "$enabled_changes"); then
       rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
       remember_seen
       clear_processing
-      write_status "$request_id" failed "Port availability could not be checked." port_check_failed
-      exit 0
-    fi
-    unavailable_address_port=
-    while IFS="$(printf '\t')" read -r port bind_ip; do
-      [ -n "$port" ] || continue
-      if ! printf '%s\n' "$host_ipv4s" | grep -Fxq "$bind_ip"; then
-        unavailable_address_port=$port
-        break
-      fi
-    done <<EOF
-$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip] | @tsv')
-EOF
-    if [ -n "$unavailable_address_port" ]; then
-      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
-      remember_seen
-      clear_processing
-      write_status "$request_id" rejected "Selected LAN address is not assigned to this host." bind_address_unavailable "$unavailable_address_port"
-      exit 0
-    fi
-    conflict_port=
-    while IFS="$(printf '\t')" read -r port bind_ip host_port; do
-      [ -n "$port" ] || continue
-      if ! port_available "$bind_ip" "$host_port"; then
-        conflict_port=$port
-        break
-      fi
-    done <<EOF
-$(printf '%s' "$changes" | jq -r '.[] | select(.enabled) | [.port, .bind_ip, (.host_port | tostring)] | @tsv')
-EOF
-    if [ -n "$conflict_port" ]; then
-      rm -rf "$config_snapshot" "$config_tmp" "$inflight_file"
-      remember_seen
-      clear_processing
-      write_status "$request_id" rejected "Selected port is already in use." port_in_use "$conflict_port"
+      case "$port_check" in
+        port_in_use:*) write_status "$request_id" rejected "Selected port is already in use." port_in_use "${port_check#*:}" ;;
+        bind_address_unavailable:*) write_status "$request_id" rejected "Selected LAN address is not assigned to this host." bind_address_unavailable "${port_check#*:}" ;;
+        *) write_status "$request_id" failed "Port availability could not be checked." port_check_failed ;;
+      esac
       exit 0
     fi
   fi

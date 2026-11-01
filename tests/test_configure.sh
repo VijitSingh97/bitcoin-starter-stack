@@ -183,6 +183,7 @@ grep -q '^BITCOIN_INBOUND_ONION=0$' "$tmp/.env" || fail "inbound_onion should de
 grep -q '^BITCOIN_BLOCKFILTERINDEX=0$' "$tmp/.env" || fail "blockfilterindex default not applied"
 grep -q '^BITCOIN_RPC_EXPOSE=0$' "$tmp/.env" || fail "LAN RPC exposure default not applied"
 grep -q '^COMPOSE_FILE=docker-compose.yml$' "$tmp/.env" || fail "default compose file selection is wrong"
+grep -q '^COMPOSE_PROJECT_NAME=bitcoin-starter-stack$' "$tmp/.env" || fail "existing source install did not preserve its legacy Compose project"
 grep -q '^DASHBOARD_PASSWORD=$' "$tmp/.env" || fail "dashboard password should default to disabled"
 grep -qE '^MONERO_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero RPC password was not independently generated"
 grep -qE '^MONERO_WALLET_RPC_PASSWORD=[a-zA-Z0-9]{16,}$' "$tmp/.env" || fail "Monero wallet RPC password was not generated"
@@ -417,6 +418,13 @@ grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.zcash-rpc.yml$' "$multi
 grep -q '^ZCASH_RPC_URL=http://172.29.0.36:8232$' "$multi/.env" || fail "Zcash internal RPC URL changed"
 grep -q '^ZCASH_STEADY_MEM_LIMIT_MB=4096$' "$multi/.env" || fail "Zcash post-sync memory budget changed"
 grep -q '^ZCASH_DATA_DIR=./data/zcash$' "$multi/.env" || fail "Zcash data path default changed"
+
+cat >"$multi/config.json" <<'EOF'
+{"bitcoin":{"enabled":false},"tari":{"enabled":true,"grpc_expose":false}}
+EOF
+(cd "$multi" && ./configure.sh) >/dev/null
+grep -q '^COMPOSE_FILE=docker-compose.yml:docker-compose.tari-wallet.yml$' "$multi/.env" ||
+  fail "Tari did not select its private dashboard control mount"
 
 # 14. Version string: release number for a clean tagged checkout, branch-commit
 #     for a dev build (drives the dashboard's version display).

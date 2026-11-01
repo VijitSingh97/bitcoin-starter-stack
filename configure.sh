@@ -549,7 +549,8 @@ if [ "$rpc_expose" = "1" ] && [ "$monero_zmq_expose" = "1" ] && [ "$rpc_bind_ip:
 fi
 
 compose_file=docker-compose.yml
-[ "$rpc_expose" = "1" ] && compose_file=docker-compose.yml:docker-compose.rpc.yml
+[ "$tari_enabled" = "1" ] && compose_file=$compose_file:docker-compose.tari-wallet.yml
+[ "$rpc_expose" = "1" ] && compose_file=$compose_file:docker-compose.rpc.yml
 [ "$monero_rpc_expose" = "1" ] && compose_file=$compose_file:docker-compose.monero-rpc.yml
 [ "$monero_zmq_expose" = "1" ] && compose_file=$compose_file:docker-compose.monero-zmq.yml
 [ "$tari_grpc_expose" = "1" ] && compose_file=$compose_file:docker-compose.tari-grpc.yml
@@ -682,7 +683,13 @@ fi
 
 env_tmp=$(mktemp "$state_dir/.env.tmp.XXXXXX")
 trap 'rm -f "$env_tmp"' EXIT
+compose_project_name=${BITCOIN_STACK_PROJECT_NAME:-}
+if [ -z "$compose_project_name" ] && [ -f "$env_file" ]; then
+  compose_project_name=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$env_file" 2>/dev/null | tail -n 1)
+fi
+[ -n "$compose_project_name" ] || { [ -f "$env_file" ] && compose_project_name=bitcoin-starter-stack || compose_project_name='node-manager-source'; }
 cat >"$env_tmp" <<EOF
+COMPOSE_PROJECT_NAME=$compose_project_name
 COMPOSE_FILE=$compose_file
 COMPOSE_PROFILES=$compose_profiles
 BITCOIN_ENABLED=$bitcoin_enabled

@@ -29,10 +29,13 @@ env_get() {
   sed -n "s/^$1=//p" "$env_file" | tail -n 1
 }
 
+project_name=${BITCOIN_STACK_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}
+[ -n "$project_name" ] || project_name=bitcoin-starter-stack-apt
+
 compose() {
   "$docker_bin" compose \
     --project-directory "$state_root" \
-    --project-name "${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-apt}" \
+    --project-name "$project_name" \
     --env-file "$env_file" \
     -f "$stack_root/docker-compose.yml" "$@"
 }

@@ -154,12 +154,19 @@ when a password is set. See the [privacy model](privacy.md).
 
 Open the printed URL, then use the gear menu to install additional nodes and
 configure Appearance, the dashboard password, Telegram, Healthchecks, and
-launch at boot/login where the installation manages that feature. Installing a
-node starts it with its default data path,
-pruned mode where supported, and LAN interfaces closed. It preserves the data
-of every existing node. Watch progress or correct a failed installation in the
-same panel. View-only wallets are added in the relevant tower; setup does not
-ask for wallet keys or seed phrases.
+launch at boot/login where the installation manages that feature. **Install**
+first opens a confirmation dialog. It fills in that node's default host data
+folder, shows its estimated post-sync disk use, and lists the optional LAN
+interfaces and ports. All interface toggles default off. Change the folder or
+opt into an interface before confirming; the host validates the folder and
+checks enabled ports for conflicts before it changes the running stack. The
+install preserves every existing node and its data. Watch progress or correct a
+failed installation in the same panel. View-only wallets are added in the
+relevant tower; setup does not ask for wallet keys or seed phrases.
+
+The **Config** section directly below Healthchecks shows the actual host
+`config.json` path reported by the installed helper. Use that path when following
+the file-edit instructions below; the display itself is read-only.
 
 On a macOS source checkout, `./stack init` starts a host helper for the current
 login session so dashboard node installs and LAN-port changes work. Source
@@ -231,13 +238,15 @@ this possible; never delete it as a way to apply an edit.
 1. **Tor bootstraps** (a minute or two):
 
    ```bash
-   docker logs -f tor    # wait for "Bootstrapped 100% (done)"
+   bitcoin-stack logs tor    # package install; wait for "Bootstrapped 100% (done)"
+   ./stack logs tor          # source install
    ```
 
 2. **Bitcoin Core finds onion peers and syncs headers**, then blocks:
 
    ```bash
-   docker logs -f bitcoin
+   bitcoin-stack logs bitcoin    # package install
+   ./stack logs bitcoin          # source install
    ```
 
 3. **Monero**, if selected, starts a pruned sync through Tor. Its node status

@@ -22,13 +22,11 @@ RUN apt-get update \
     && install -m 0755 /tmp/monero/monerod /tmp/monero/monero-wallet-rpc /usr/local/bin/ \
     && rm -rf /tmp/monero "/tmp/$archive" /var/lib/apt/lists/*
 
-COPY entrypoint.sh /usr/local/bin/monero-entrypoint
-COPY healthcheck.sh /usr/local/bin/monero-healthcheck
-COPY wallet-entrypoint.sh /usr/local/bin/monero-wallet-entrypoint
-COPY wallet-healthcheck.sh /usr/local/bin/monero-wallet-healthcheck
-RUN chmod 0755 /usr/local/bin/monero-entrypoint /usr/local/bin/monero-healthcheck \
-      /usr/local/bin/monero-wallet-entrypoint /usr/local/bin/monero-wallet-healthcheck \
-    && mkdir -p /data /wallets \
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/monero-entrypoint
+COPY --chmod=0755 healthcheck.sh /usr/local/bin/monero-healthcheck
+COPY --chmod=0755 wallet-entrypoint.sh /usr/local/bin/monero-wallet-entrypoint
+COPY --chmod=0755 wallet-healthcheck.sh /usr/local/bin/monero-wallet-healthcheck
+RUN mkdir -p /data /wallets \
     && chown 1000:1000 /data /wallets \
     && chmod 0700 /wallets
 

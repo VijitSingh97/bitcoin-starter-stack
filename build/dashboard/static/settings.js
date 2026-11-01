@@ -60,10 +60,23 @@ export function configurationAccess(data) {
 }
 
 export function hostControlModel(data = {}) {
-  const nodes = Object.fromEntries(allNodes.map((id) => [id, { id, name: id, installed: false }]));
+  const nodes = Object.fromEntries(allNodes.map((id) => [id, { id, name: id, installed: false, data_dir: "", disk_estimate: "", disk_note: "", interfaces: [] }]));
   for (const node of Array.isArray(data.nodes) ? data.nodes : []) {
     if (!allNodes.includes(node?.id)) continue;
-    nodes[node.id] = { id: node.id, name: String(node.name || node.id), installed: node.installed === true };
+    const interfaces = (Array.isArray(node.interfaces) ? node.interfaces : []).flatMap((item) => {
+      const hostPort = Number(item?.host_port);
+      if (!nodePortIDs[node.id].includes(item?.id) || !Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65535) return [];
+      return [{ id: item.id, name: String(item.name || item.id), enabled: false, host_port: hostPort }];
+    });
+    nodes[node.id] = {
+      id: node.id,
+      name: String(node.name || node.id),
+      installed: node.installed === true,
+      data_dir: typeof node.data_dir === "string" && node.data_dir.startsWith("/") ? node.data_dir : "",
+      disk_estimate: String(node.disk_estimate || ""),
+      disk_note: String(node.disk_note || ""),
+      interfaces,
+    };
   }
   const action = ["install", "launch_at_boot", "apply_config"].includes(data?.status?.action) ? data.status.action : "";
   const state = ["pending", "applied", "rejected", "failed"].includes(data?.status?.state) ? data.status.state : "";
@@ -77,6 +90,7 @@ export function hostControlModel(data = {}) {
     boot_kind: bootKind,
     config_pending: !!revision,
     config_revision: revision,
+    config_path: typeof data.config_path === "string" && data.config_path.startsWith("/") ? data.config_path : "",
     nodes,
     status: { action, state, message: state ? String(data.status?.message || "") : "" },
   };
@@ -91,8 +105,15 @@ export function shouldPollHost(view) {
   return view?.status?.state === "pending";
 }
 
-export function hostActionPayload(action, value) {
-  if (action === "install" && allNodes.includes(value)) return { action, node: value };
+export function hostActionPayload(action, value, options) {
+  if (action === "install" && allNodes.includes(value)) {
+    if (options === undefined) return { action, node: value };
+    const dataDir = String(options?.data_dir || "");
+    const interfaces = Array.isArray(options?.interfaces) ? options.interfaces : [];
+    if (!dataDir.startsWith("/") || dataDir.includes("\n") || dataDir.includes("\r") || interfaces.some((item) =>
+      !nodePortIDs[value].includes(item?.id) || typeof item.enabled !== "boolean" || !Number.isInteger(item.host_port) || item.host_port < 1 || item.host_port > 65535)) return undefined;
+    return { action, node: value, data_dir: dataDir, interfaces };
+  }
   if (action === "launch_at_boot" && typeof value === "boolean") return { action, enabled: value };
   if (action === "apply_config" && /^[0-9a-f]{64}$/.test(String(value || ""))) return { action, config_revision: value };
   return undefined;
@@ -292,6 +313,15 @@ if (typeof document !== "undefined") {
   const configChange = byId("config-change");
   const applyConfig = byId("apply-config");
   const hostStatus = byId("host-status");
+  const configPath = byId("config-path");
+  const installDialog = byId("install-dialog");
+  const installForm = byId("install-form");
+  const installTitle = byId("install-title");
+  const installDisk = byId("install-disk");
+  const installDataDir = byId("install-data-dir");
+  const installInterfaces = byId("install-interfaces");
+  const installError = byId("install-error");
+  const installSubmit = byId("install-submit");
   const nodeViews = {};
   for (const node of allNodes) {
     const details = byId(`${node}-alerts`);
@@ -338,6 +368,7 @@ if (typeof document !== "undefined") {
   let hostPoll;
   let hostView = hostControlModel();
   let hostLoaded = false;
+  let installNode = "";
   try { portRequestID = localStorage.getItem("nodeStackPortRequest") || ""; } catch {}
 
   const portRows = {
@@ -463,8 +494,8 @@ if (typeof document !== "undefined") {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = node.installed ? "Installed" : "Install";
-      button.disabled = node.installed || !hostView.available || !hostView.install_supported || hostView.config_pending || busy;
-      button.addEventListener("click", () => submitHost(hostActionPayload("install", node.id)));
+      button.disabled = node.installed || !node.data_dir || !hostView.available || !hostView.install_supported || hostView.config_pending || busy;
+      button.addEventListener("click", () => openInstall(node.id));
       row.append(name, button);
       hostNodes.append(row);
     }
@@ -475,9 +506,47 @@ if (typeof document !== "undefined") {
     configChange.hidden = !hostView.config_pending;
     applyConfig.disabled = !hostView.available || busy;
     hostStatus.textContent = hostView.status.message || (!hostView.available ? "Host controls require the installed helper." : "");
+    configPath.textContent = hostView.config_path || "Unavailable until the installed helper reports it.";
     clearTimeout(hostPoll);
     if (shouldPollHost(hostView)) hostPoll = setTimeout(loadHost, 2000);
     if (installed.length) window.dispatchEvent(new CustomEvent("node-catalog-updated", { detail: { installed } }));
+  };
+
+  const openInstall = (nodeID) => {
+    const node = hostView.nodes[nodeID];
+    if (!node || node.installed || !node.data_dir) return;
+    installNode = nodeID;
+    installTitle.textContent = `Install ${node.name}`;
+    installDisk.textContent = `Estimated disk after sync: ${node.disk_estimate}. ${node.disk_note}`;
+    installDataDir.value = node.data_dir;
+    installInterfaces.replaceChildren();
+    for (const item of node.interfaces) {
+      const row = document.createElement("div");
+      row.className = "settings-install-interface";
+      row.dataset.interface = item.id;
+      const toggle = document.createElement("label");
+      toggle.className = "settings-check";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.interfaceEnabled = "";
+      toggle.append(checkbox, ` Open ${item.name} to the private LAN`);
+      const portLabel = document.createElement("label");
+      portLabel.textContent = "Port";
+      const port = document.createElement("input");
+      port.type = "number";
+      port.min = "1";
+      port.max = "65535";
+      port.step = "1";
+      port.value = String(item.host_port);
+      port.dataset.interfacePort = "";
+      port.disabled = true;
+      checkbox.addEventListener("change", () => { port.disabled = !checkbox.checked; });
+      portLabel.append(port);
+      row.append(toggle, portLabel);
+      installInterfaces.append(row);
+    }
+    installError.textContent = "";
+    installDialog.showModal();
   };
 
   async function loadHost() {
@@ -617,6 +686,23 @@ if (typeof document !== "undefined") {
   }
   byId("open").addEventListener("click", () => { dialog.showModal(); credentialSettings.openPassword(); load(); loadHost(); });
   byId("close").addEventListener("click", () => dialog.close());
+  byId("install-cancel").addEventListener("click", () => installDialog.close());
+  installForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const interfaces = Array.from(installInterfaces.children).map((row) => ({
+      id: row.dataset.interface,
+      enabled: row.querySelector("[data-interface-enabled]").checked,
+      host_port: Number(row.querySelector("[data-interface-port]").value),
+    }));
+    const payload = hostActionPayload("install", installNode, { data_dir: installDataDir.value.trim(), interfaces });
+    if (!payload) {
+      installError.textContent = "Choose an absolute host folder and valid ports from 1 to 65535.";
+      return;
+    }
+    installSubmit.disabled = true;
+    installDialog.close();
+    submitHost(payload).finally(() => { installSubmit.disabled = false; });
+  });
   dialog.addEventListener("close", () => { clearSecrets(); credentialSettings.closePassword(); delete saved.telegram_bot_token; delete saved.telegram_chat_id; delete saved.healthchecks_url; });
   window.addEventListener("node-selected", (event) => {
     credentialSettings.closeNode();

@@ -43,6 +43,13 @@ tower for its block alerts, optional LAN interfaces, and RPC credentials.
 Personal view-only wallet material is separate from these service logins;
 never enter a seed phrase or private spend key.
 
+Choosing **Install** opens a confirmation dialog before anything is downloaded.
+It shows the default Homebrew data folder, the node's estimated post-sync disk
+use, and its optional LAN interfaces and ports. Every interface is closed by
+default. The host rejects an invalid folder or an enabled port that is already
+in use before it changes the running stack. The **Config** section directly
+below Healthchecks shows the exact `config.json` path used by this installation.
+
 The default user-owned paths survive Homebrew upgrades:
 
 - configuration: `~/Library/Application Support/bitcoin-starter-stack/config/config.json`
@@ -199,8 +206,12 @@ For an existing test tap, use its name, skip `brew tap-new`, and use `brew reins
 in place of `brew install`. This installs committed `HEAD`; uncommitted source
 changes are excluded.
 
-The Compose services use fixed container names, so run only one Node Manager
-installation on a Docker host. On an existing test installation, do not run a
-fresh `init`; use `bitcoin-stack apply` after reinstalling so its configuration
-and chain data remain selected. For a genuinely fresh test, run
-`bitcoin-stack init` only after the matching images above are present.
+Fresh Homebrew installations use the `node-manager-brew` Compose project, which
+gives their containers and named volumes project-scoped names. Existing
+installations keep their saved `bitcoin-starter-stack-brew` project and volumes,
+so reinstalling does not silently select an empty replacement chain. Use
+`bitcoin-stack` commands instead of addressing containers by generated name.
+On an existing test installation, do not run a fresh `init`; use
+`bitcoin-stack apply` after reinstalling so its configuration and chain data
+remain selected. For a genuinely fresh test, run `bitcoin-stack init` only
+after the matching images above are present.

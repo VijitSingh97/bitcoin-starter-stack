@@ -222,9 +222,13 @@ Run the installation's `init` command once. Setup uses these defaults:
 Open the printed URL. The gear menu lets you install another supported node,
 choose launch at boot/login where supported, add a dashboard password, and set Appearance,
 Telegram, and Healthchecks. Each tower's **Node controls** contains its block
-alerts and optional LAN interfaces. Installing another node downloads its versioned
-images and starts it with default storage and closed LAN ports; progress and
-errors appear in Settings.
+alerts and optional LAN interfaces. Installing another node opens a confirmation
+dialog with its default host data folder, estimated post-sync disk use, and its
+optional LAN interfaces and ports. Every interface starts closed. Before changing
+the running stack, the host validates the folder and checks enabled ports for
+conflicts. Progress and errors remain visible in Settings. The read-only
+**Config** section directly below Healthchecks shows the exact host `config.json`
+path for this installation.
 
 Container downloads use the host's normal Docker connection. Once running,
 node peers, prices, alerts, and dashboard update checks use Tor. Setup does not
@@ -268,6 +272,11 @@ installed later from the dashboard selects the compact profile. See
 | Homebrew on macOS | `~/Library/Application Support/bitcoin-starter-stack/config/config.json` | sibling `state/` directory | `bitcoin-stack apply` / `bitcoin-stack up` / `bitcoin-stack status` |
 | Linuxbrew | `${XDG_CONFIG_HOME:-~/.config}/bitcoin-starter-stack/config.json` | `${XDG_DATA_HOME:-~/.local/share}/bitcoin-starter-stack/state/` | same Homebrew commands |
 | APT | `/etc/bitcoin-starter-stack/config.json` | `/var/lib/bitcoin-starter-stack/.env` and `backups/` | `sudo bitcoin-stack apply` / `up` / `status` |
+
+Fresh installations use a Node Manager Compose project name, so container and
+named-volume identities are scoped to that installation. Existing installations
+retain their saved legacy project name and volumes during an upgrade; the
+rebrand does not create an empty replacement chain.
 
 `config.json` and `.env` are mode 600. Setup prints the configured dashboard
 login, if any, and selected node endpoint credentials once; the same values remain in those

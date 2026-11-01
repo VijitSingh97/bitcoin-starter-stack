@@ -44,6 +44,7 @@ export DASHBOARD_BIND_IP=127.0.0.1
 export STACK_VERSION=test
 
 rendered=$(docker compose --env-file /dev/null config)
+[ "$(grep -c 'container_name:' docker-compose.yml || true)" = 0 ] || fail "Compose services still use global container names"
 restart_rendered=$(STACK_RESTART_POLICY=unless-stopped docker compose --env-file /dev/null config)
 legacy_cache_rendered=$(env -u BITCOIN_DBCACHE docker compose --env-file /dev/null config)
 
@@ -67,7 +68,8 @@ for chain in TARI LITECOIN DOGECOIN BITCOINCASH ZCASH; do
 done
 echo "$rendered" | grep -q 'WATCH_WALLETS_B64: watchblob' || fail "WATCH_WALLETS_B64 not interpolated"
 echo "$rendered" | grep -q 'SETTINGS_PORT: "8001"' || fail "internal settings listener is not configured"
-[ "$(grep -Fc "restart: \${STACK_RESTART_POLICY:-on-failure:5}" docker-compose.yml)" = 11 ] || fail "not every application container uses the launch policy"
+[ "$({ grep -Fh "restart: \${STACK_RESTART_POLICY:-on-failure:5}" docker-compose.yml docker-compose.tari-wallet.yml || true; } | wc -l | tr -d ' ')" = 11 ] ||
+  fail "not every application container uses the launch policy"
 [ "$(echo "$rendered" | grep -c 'restart: on-failure:5')" = 3 ] || fail "active containers do not use bounded crash recovery"
 [ "$(echo "$restart_rendered" | grep -c 'restart: unless-stopped')" = 3 ] || fail "launch-at-boot policy did not reach active containers"
 grep -qF 'HiddenServicePort 80 172.29.0.27:8001' build/tor/entrypoint.sh || fail "onion dashboard does not use the management listener"
@@ -111,6 +113,10 @@ published=$(echo "$rendered" | grep -c 'published:' || true)
 [ "$published" = "1" ] || fail "expected exactly 1 published port, got $published"
 echo "$rendered" | grep -q 'published: "8332"' && fail "default config publishes Bitcoin RPC"
 echo "$rendered" | grep -q 'host_ip: 127.0.0.1' || fail "dashboard does not bind loopback by default"
+echo "$rendered" | grep -q 'name: btc_net' && fail "internal network uses a global name instead of the Compose project"
+echo "$rendered" | grep -q 'name: tor_egress' && fail "egress network uses a global name instead of the Compose project"
+echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'target: /tari-wallet' &&
+  fail "dashboard creates Tari wallet storage when Tari is not selected"
 tor_port=$(echo "$rendered" | sed -n '/^  tor:$/,/^networks:$/p' | awk '$1 == "host_ip:" { print $2 }')
 [ "$tor_port" = "127.0.0.1" ] || fail "dashboard forwarder port is not owned by Tor"
 echo "$rendered" | sed -n '/^  dashboard:$/,/^  tor:$/p' | grep -q 'host_ip:' &&
@@ -214,7 +220,7 @@ echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_
 echo "$monero_lan" | sed -n '/^  dashboard:$/,/^  monero:$/p' | grep -q 'MONERO_ZMQ_PORT: "28083"' || fail "dashboard did not receive Monero ZMQ port"
 [ "$(echo "$monero_lan" | grep -c 'published:' || true)" = "3" ] || fail "Monero overrides published an unexpected port"
 
-all_nodes=$(COMPOSE_PROFILES=bitcoin,monero,tari,litecoin,dogecoin,bitcoincash,zcash TARI_ENABLED=1 TARI_WALLET_ENABLED=1 LITECOIN_ENABLED=1 DOGECOIN_ENABLED=1 BITCOINCASH_ENABLED=1 ZCASH_ENABLED=1 docker compose --env-file /dev/null config)
+all_nodes=$(COMPOSE_PROFILES=bitcoin,monero,tari,litecoin,dogecoin,bitcoincash,zcash TARI_ENABLED=1 TARI_WALLET_ENABLED=1 LITECOIN_ENABLED=1 DOGECOIN_ENABLED=1 BITCOINCASH_ENABLED=1 ZCASH_ENABLED=1 docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.tari-wallet.yml config)
 for service in tari litecoin dogecoin bitcoincash zcash; do
   echo "$all_nodes" | grep -q "^  $service:" || fail "$service profile did not render"
   echo "$all_nodes" | sed -n "/^  $service:$/,/^  [a-z]/p" | grep -q '127.0.0.1' || fail "$service DNS is not fail-closed"

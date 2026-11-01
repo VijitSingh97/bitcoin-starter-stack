@@ -10,8 +10,19 @@ approved_config_file=$state_dir/.approved-config.json
 approved_env_file=$state_dir/.approved.env
 stack_command=${BITCOIN_STACK_COMMAND:-./stack}
 package_managed=${BITCOIN_STACK_PACKAGE_MANAGED:-0}
-project_name=${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-apt}
-[ "$package_managed" != brew ] || project_name=${BITCOIN_STACK_PROJECT_NAME:-bitcoin-starter-stack-brew}
+legacy_project=bitcoin-starter-stack
+fresh_project='node-manager-source'
+case "$package_managed" in
+  brew) legacy_project=bitcoin-starter-stack-brew; fresh_project='node-manager-brew' ;;
+  1 | apt) legacy_project=bitcoin-starter-stack-apt; fresh_project='node-manager-apt' ;;
+esac
+project_name=${BITCOIN_STACK_PROJECT_NAME:-}
+if [ -z "$project_name" ] && [ -f "$env_file" ]; then
+  project_name=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$env_file" 2>/dev/null | tail -n 1)
+fi
+if [ -z "$project_name" ]; then
+  if [ -f "$env_file" ]; then project_name=$legacy_project; else project_name=$fresh_project; fi
+fi
 export BITCOIN_STACK_PROJECT_NAME="$project_name"
 config_lock_owned=0
 
@@ -183,7 +194,7 @@ cd "$state_dir"
 
 compose() {
   if [ "$state_dir" = "$stack_root" ]; then
-    docker compose "$@"
+    docker compose --project-name "$project_name" "$@"
   else
     local compose_file compose_files=()
     compose_file=$(env_get COMPOSE_FILE)
@@ -192,7 +203,7 @@ compose() {
     local compose_args=()
     for compose_file in "${compose_files[@]}"; do
       case "$compose_file" in
-        docker-compose.yml | docker-compose.rpc.yml | docker-compose.monero-rpc.yml | docker-compose.monero-zmq.yml | docker-compose.tari-grpc.yml | docker-compose.litecoin-rpc.yml | docker-compose.dogecoin-rpc.yml | docker-compose.bitcoincash-rpc.yml | docker-compose.zcash-rpc.yml)
+        docker-compose.yml | docker-compose.tari-wallet.yml | docker-compose.rpc.yml | docker-compose.monero-rpc.yml | docker-compose.monero-zmq.yml | docker-compose.tari-grpc.yml | docker-compose.litecoin-rpc.yml | docker-compose.dogecoin-rpc.yml | docker-compose.bitcoincash-rpc.yml | docker-compose.zcash-rpc.yml)
           compose_args+=( -f "$stack_root/$compose_file" )
           ;;
         *)
@@ -207,11 +218,19 @@ compose() {
   fi
 }
 
+container_id() {
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=$project_name" \
+    --filter "label=com.docker.compose.service=$1" | head -n 1
+}
+
 guard_package_containers() {
   [ "$package_managed" != 0 ] || return 0
-  local service config working_dir
+  local service id config working_dir
   for service in tor bitcoin monero monero-wallet tari tari-wallet litecoin dogecoin bitcoincash zcash dashboard; do
-    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$service" 2>/dev/null) || continue
+    id=$(container_id "$service")
+    [ -n "$id" ] || continue
+    config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$id" 2>/dev/null) || continue
     case ",$config," in
       *",$stack_root/docker-compose.yml,"*) ;;
       *)
@@ -220,7 +239,7 @@ guard_package_containers() {
         return 1
         ;;
     esac
-    working_dir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$service" 2>/dev/null) || return 1
+    working_dir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id" 2>/dev/null) || return 1
     if [ "$working_dir" != "$state_dir" ]; then
       echo "Existing $service container belongs to another installation; this installation will not replace it." >&2
       return 1
@@ -401,7 +420,10 @@ ensure_node_control_timer() {
 }
 
 sync_node_runtime() {
-  [ "$(docker inspect --format '{{.State.Running}}' dashboard 2>/dev/null || true)" = true ] || return 0
+  local dashboard_id
+  dashboard_id=$(container_id dashboard)
+  [ -n "$dashboard_id" ] || return 0
+  [ "$(docker inspect --format '{{.State.Running}}' "$dashboard_id" 2>/dev/null || true)" = true ] || return 0
   local runtime='{}' node prefix enabled active
   for node in bitcoin monero tari litecoin dogecoin bitcoincash zcash; do
     prefix=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
@@ -412,7 +434,7 @@ sync_node_runtime() {
     runtime=$(jq -c --arg node "$node" --argjson active "$active" '. + {($node):$active}' <<<"$runtime")
   done
   for _ in 1 2 3 4 5; do
-    if printf '%s\n' "$runtime" | docker exec -i -u 1000 dashboard sh -c \
+    if printf '%s\n' "$runtime" | compose exec -T -u 1000 dashboard sh -c \
       'umask 077; cat > /state/.node-runtime.json.tmp; mv /state/.node-runtime.json.tmp /state/node-runtime.json' >/dev/null 2>&1; then
       return 0
     fi
@@ -538,7 +560,12 @@ status() {
     [ "$(env_get "${node}_ENABLED")" = 1 ] && [ "$(env_get "${node}_ACTIVE")" != 0 ] && services="$services $(printf '%s' "$node" | tr '[:upper:]' '[:lower:]')"
   done
   for svc in $services; do
-    st=$(docker inspect "$svc" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+    id=$(container_id "$svc")
+    if [ -n "$id" ]; then
+      st=$(docker inspect "$id" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || echo missing)
+    else
+      st=missing
+    fi
     case "$st" in
       "running healthy") echo "OK    $svc" ;;
       "running health: starting" | "running starting") echo "WAIT  $svc (health check warming up)" ;;
@@ -596,13 +623,13 @@ doctor() {
 
   echo "== Nodes"
   if [ "$(env_get BITCOIN_ENABLED)" != "0" ]; then
-    if docker exec bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
+    if compose exec -T bitcoin bitcoin-cli -datadir=/data getblockchaininfo 2>/dev/null |
       jq -r '"      Bitcoin: blocks \(.blocks)/\(.headers)  progress \((.verificationprogress*100*100|round)/100)%  ibd \(.initialblockdownload)  pruned \(.pruned)"'; then :; else
       echo "      Bitcoin RPC unreachable (normal during startup; if it persists, check $stack_command logs bitcoin)"
     fi
   fi
   if [ "$(env_get MONERO_ENABLED)" = "1" ]; then
-    if docker exec monero /usr/local/bin/monero-healthcheck >/dev/null 2>&1; then
+    if compose exec -T monero /usr/local/bin/monero-healthcheck >/dev/null 2>&1; then
       echo "      Monero RPC reachable"
     else
       echo "      Monero RPC unreachable (normal during startup; if it persists, check $stack_command logs monero)"
@@ -612,7 +639,8 @@ doctor() {
     upper=$(printf '%s' "$node" | tr '[:lower:]' '[:upper:]')
     [ "$(env_get "${upper}_ENABLED")" = 1 ] || continue
     [ "$(env_get "${upper}_ACTIVE")" != 0 ] || continue
-    if docker inspect "$node" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null | grep -q '^running healthy$'; then
+    node_id=$(container_id "$node")
+    if [ -n "$node_id" ] && docker inspect "$node_id" --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null | grep -q '^running healthy$'; then
       echo "      $node RPC reachable"
     else
       echo "      $node unavailable (normal during startup; if it persists, check $stack_command logs $node)"
@@ -620,12 +648,12 @@ doctor() {
   done
 
   echo "== Tor"
-  docker logs tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
+  compose logs --no-color tor 2>&1 | grep "Bootstrapped" | tail -1 | sed 's/^/      /' || echo "      no bootstrap log yet"
   if [ "$(env_get DASHBOARD_ONION)" = "1" ]; then
-    echo "      dashboard onion: $(docker exec tor cat /var/lib/tor/dashboard_onion/hostname 2>/dev/null || echo 'not provisioned yet')"
+    echo "      dashboard onion: $(compose exec -T tor cat /var/lib/tor/dashboard_onion/hostname 2>/dev/null || echo 'not provisioned yet')"
   fi
   if [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_INBOUND_ONION)" = "1" ]; then
-    echo "      node onion: $(docker exec bitcoin bitcoin-cli -datadir=/data getnetworkinfo 2>/dev/null | jq -r '.localaddresses[0].address // "not registered yet"')"
+    echo "      node onion: $(compose exec -T bitcoin bitcoin-cli -datadir=/data getnetworkinfo 2>/dev/null | jq -r '.localaddresses[0].address // "not registered yet"')"
   fi
 }
 
@@ -819,8 +847,8 @@ upgrade_agent() {
       "$stack_root/scripts/node-control" || echo "upgrade-agent: node control check failed; still watching"
     BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
       "$stack_root/scripts/node-port-control" || echo "upgrade-agent: LAN port control check failed; still watching"
-    if docker exec dashboard test -f /state/upgrade.request 2>/dev/null; then
-      docker exec -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
+    if compose exec -T dashboard test -f /state/upgrade.request 2>/dev/null; then
+      compose exec -T -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
       if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
         # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
@@ -947,7 +975,7 @@ case "$cmd" in
     unlock_config
     ;;
   logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
-  events) guard_package_containers && docker exec dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
+  events) guard_package_containers && compose exec -T dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
     lock_config
     previous_env=$(mktemp "$state_dir/.env.before-apply.XXXXXX")
@@ -1034,7 +1062,12 @@ case "$cmd" in
     }
     credential_limits=${BITCOIN_STACK_CREDENTIAL_LIMITS:-}
     if [ "$node" != zcash ] && [ -z "$credential_limits" ]; then
-      credential_limits=$(docker inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$node")
+      node_id=$(container_id "$node")
+      [ -n "$node_id" ] || {
+        echo "Current node container could not be found." >&2
+        exit 1
+      }
+      credential_limits=$(docker inspect --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$node_id")
     fi
     if [ "$node" != zcash ] && [[ ! "$credential_limits" =~ ^[0-9]+\ [0-9]+\ -?[0-9]+$ ]]; then
       echo "Current node resource limits could not be preserved." >&2
@@ -1056,7 +1089,7 @@ case "$cmd" in
         echo "Current node resource limits are inconsistent." >&2
         exit 1
       fi
-      [ "${#update_args[@]}" = 0 ] || docker update "${update_args[@]}" "$node" >/dev/null || {
+      [ "${#update_args[@]}" = 0 ] || docker update "${update_args[@]}" "$node_id" >/dev/null || {
         echo "Current node resource limits could not be restored." >&2
         exit 1
       }
@@ -1070,7 +1103,8 @@ case "$cmd" in
     while true; do
       credential_ready=1
       for service in "${services[@]}"; do
-        [ "$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$service" 2>/dev/null || true)" = "running healthy" ] || credential_ready=0
+        service_id=$(container_id "$service")
+        [ -n "$service_id" ] && [ "$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$service_id" 2>/dev/null || true)" = "running healthy" ] || credential_ready=0
       done
       [ "$credential_ready" = 0 ] || break
       [ "$SECONDS" -lt "$credential_deadline" ] || {

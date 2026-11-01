@@ -26,15 +26,25 @@ test("host controls expose installed nodes, platform startup wording, and revisi
   const view = hostControlModel({
     available: true, install_supported: true, boot_supported: true, boot_enabled: true, boot_kind: "login",
     config_pending: true, config_revision: revision,
-    nodes: [{ id: "bitcoin", name: "Bitcoin", installed: true }, { id: "unknown", installed: true }],
+    config_path: "/etc/bitcoin-starter-stack/config.json",
+    nodes: [{ id: "bitcoin", name: "Bitcoin", installed: true, data_dir: "/var/lib/bitcoin-starter-stack/data/bitcoin", disk_estimate: "28–56 GiB", disk_note: "Estimate", interfaces: [{ id: "bitcoin_rpc", name: "RPC", host_port: 8332 }] }, { id: "unknown", installed: true }],
     status: { action: "install", state: "pending", message: "Installing…" },
   });
   assert.equal(view.nodes.bitcoin.installed, true);
   assert.equal(view.nodes.monero.installed, false);
   assert.equal(view.config_pending, true);
   assert.equal(view.boot_kind, "login");
+  assert.equal(view.config_path, "/etc/bitcoin-starter-stack/config.json");
+  assert.deepEqual(view.nodes.bitcoin.interfaces, [{ id: "bitcoin_rpc", name: "RPC", enabled: false, host_port: 8332 }]);
   assert.equal(bootControlLabel(view.boot_kind), "Launch at login");
   assert.deepEqual(hostActionPayload("install", "monero"), { action: "install", node: "monero" });
+  assert.deepEqual(hostActionPayload("install", "monero", { data_dir: "/srv/monero", interfaces: [
+    { id: "monero_rpc", enabled: false, host_port: 18081 }, { id: "monero_zmq", enabled: true, host_port: 28083 },
+  ] }), { action: "install", node: "monero", data_dir: "/srv/monero", interfaces: [
+    { id: "monero_rpc", enabled: false, host_port: 18081 }, { id: "monero_zmq", enabled: true, host_port: 28083 },
+  ] });
+  assert.equal(hostActionPayload("install", "monero", { data_dir: "../monero", interfaces: [] }), undefined);
+  assert.equal(hostActionPayload("install", "monero", { data_dir: "/srv/monero", interfaces: [{ id: "bitcoin_rpc", enabled: true, host_port: 8332 }] }), undefined);
   assert.deepEqual(hostActionPayload("launch_at_boot", false), { action: "launch_at_boot", enabled: false });
   assert.deepEqual(hostActionPayload("apply_config", revision), { action: "apply_config", config_revision: revision });
   assert.equal(hostActionPayload("install", "unknown"), undefined);
