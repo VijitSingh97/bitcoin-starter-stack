@@ -20,14 +20,14 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Minimal wire-compatible subset of Tari v6.1.0 applications/minotari_app_grpc/proto/wallet.proto.
-// Upstream: https://github.com/tari-project/tari/blob/v6.1.0/applications/minotari_app_grpc/proto/wallet.proto
+// Minimal wire-compatible subset of Tari v6.2.0 applications/minotari_app_grpc/proto/wallet.proto.
+// Upstream: https://github.com/tari-project/tari/blob/v6.2.0/applications/minotari_app_grpc/proto/wallet.proto
 
 syntax = "proto3";
 
 package tari.rpc;
 
-option go_package = "github.com/VijitSingh97/bitcoin-starter-stack/dashboard;main";
+option go_package = "github.com/VijitSingh97/node-manager/dashboard;main";
 
 enum TariWalletConnectivityStatus {
   TARI_WALLET_INITIALIZING = 0;

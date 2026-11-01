@@ -27,8 +27,6 @@ fixture.RESULTS["listwallets"] = []
 
 
 class Preview(BaseHTTPRequestHandler):
-    update_pending = False
-
     def log_message(self, _format, *_args):
         pass
 
@@ -50,13 +48,6 @@ class Preview(BaseHTTPRequestHandler):
             self.wfile.write(result)
 
     def do_POST(self):
-        if self.path == "/api/upgrade":
-            type(self).update_pending = True
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"ok":true}')
-            return
         if self.path != "/api/settings":
             self.send_error(404)
             return
@@ -93,10 +84,6 @@ class Preview(BaseHTTPRequestHandler):
                 "total_state": "pending",
             }).encode()
             content_type = "application/json"
-        elif self.path == "/api/upgrade":
-            body = json.dumps({"enabled": True, "update": "",
-                               "pending": type(self).update_pending}).encode()
-            content_type = "application/json"
         elif self.path == "/api/prices":
             body = json.dumps({
                 "available": True,
@@ -130,7 +117,7 @@ if __name__ == "__main__":
         env = dict(os.environ, RPC_URL="http://127.0.0.1:18091", RPC_USER="go", RPC_PASSWORD="fakepw",
                    STATE_DIR=directory, DATA_DIR=directory, PORT="18092", WATCH_WALLETS_B64="W10=",
                    STACK_VERSION="Go dashboard preview", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="",
-                   HEALTHCHECKS_URL="", DASHBOARD_PASSWORD="fakepw", DASHBOARD_CONTROL="0")
+                   HEALTHCHECKS_URL="", DASHBOARD_PASSWORD="fakepw")
         process = subprocess.Popen([str(binary)], cwd=dashboard, env=env)
         try:
             print("Sanitized screenshot preview: http://127.0.0.1:18090", flush=True)

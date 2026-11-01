@@ -642,17 +642,22 @@ hr {
   border-color: var(--accent);
 }
 
-/* opt-in upgrade button (dashboard.control) */
-.upgrade-btn {
-  font: inherit;
-  cursor: pointer;
-  padding: 2px 8px;
-  border: 1px solid #f2a900;
-  border-radius: 4px;
-  background: transparent;
-  color: #f2a900;
+.update-notice { margin-top: 14px; color: #f2a900; font-size: 0.8rem; }
+.update-notice a { color: var(--accent); }
+.update-notice-global {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 20;
+  max-width: min(560px, calc(100vw - 88px));
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: var(--shadow);
 }
-.upgrade-btn:disabled { opacity: 0.5; cursor: default; }
+#settings-update pre { overflow-x: auto; color: var(--text); font: inherit; line-height: 1.5; }
 
 .monero-wallets { --accent: var(--monero); }
 #monero-fees { white-space: pre-line; text-align: right; }

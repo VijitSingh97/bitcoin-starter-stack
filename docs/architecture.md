@@ -131,14 +131,10 @@ that makes `tor_egress` Tor's deterministic default route.
   no password and an automatically selected private LAN address. Trusted LAN
   clients can view personal wallets and manage nodes; same-origin, Host, and
   private-client checks protect passwordless mutations. Add a password in
-  Settings to restrict access. Credential reveal/reset, dashboard upgrades, and
-  onion access still require authentication. See [SECURITY.md](../SECURITY.md).
-- The opt-in Upgrade button keeps the container↔host boundary intact: the
-  dashboard writes a fixed marker file to its own volume — content never read,
-  no Docker socket, no host access — and the host-side `upgrade-agent` polls
-  for the marker and runs the same predetermined `./stack upgrade` you would.
-  That upgrade marker can only request the latest release
-  ([Upgrade button](operations.md#upgrade-button-opt-in)).
+  Settings to restrict access. Credential reveal/reset and onion access still
+  require authentication. See [SECURITY.md](../SECURITY.md).
+- Release checks are informational. The dashboard cannot request a host update;
+  users install releases themselves through APT, Homebrew, or GitHub.
 - LAN port controls use a separate typed request in the same private volume.
   A host helper validates the request, private LAN bind, ports, saved RPC
   credentials, Compose ownership, and host/Docker port availability before any

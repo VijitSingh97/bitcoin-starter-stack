@@ -7,10 +7,11 @@ or start Docker, download images, run setup, or start a node.
 Homebrew installs Bash, flock, jq, and OpenSSL for the host commands; Linuxbrew
 also installs iproute2. Docker remains an external prerequisite.
 
-The current published release, `v1.31.1`, has only a source tarball. It does not
-contain a Homebrew formula, so the tap and install commands below are a preview
-of the next package release. Do not use them until a release publishes the
-generated formula.
+Version `v1.32.0` is the first Homebrew release. The release workflow publishes
+the runtime archive and all required container images before it opens the
+generated formula PR. The version becomes available from the tap only after
+that PR is reviewed and merged. The tap keeps its legacy name for compatibility
+but uses the canonical `node-manager` repository URL below.
 
 ## macOS
 
@@ -20,10 +21,15 @@ Desktop must have enough disk space and memory for the nodes you configure; see 
 Docker Desktop's start-at-login option if nodes should return after a reboot.
 
 ```sh
-brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
+brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/node-manager.git
 brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
 bitcoin-stack init
 ```
+
+If the formula update PR has not merged yet, `brew install` cannot install
+`v1.32.0`; use the release tarball instead or wait for the tap update. Do not
+substitute an unreleased branch or a locally generated formula for a public
+installation.
 
 Installation is intentionally inert. `bitcoin-stack init` starts a default
 pruned Bitcoin node without questions. It preserves a `config.json` created

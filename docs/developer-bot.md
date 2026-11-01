@@ -11,7 +11,7 @@ Register the App with webhooks disabled and only these repository permissions:
 - Workflows: read and write
 
 Install it for `VijitSingh97` with **Only select repositories** and select only
-`bitcoin-starter-stack`. The owner then configures the helper with the App ID and
+`node-manager`. The owner then configures the helper with the App ID and
 downloaded private key:
 
 ```bash

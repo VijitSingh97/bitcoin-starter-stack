@@ -30,12 +30,13 @@ On Ubuntu, install `jq`, `openssl`, `curl`, `iproute2`, and optionally
 
 ### Homebrew on macOS or Linux
 
-Homebrew support starts with the first release that contains the formula;
-current release `v1.31.1` does not include it and the tap is not live yet. Once
-published, install it with:
+Version `v1.32.0` is the first Homebrew release. The release workflow publishes
+the archive and images first, then opens a PR that updates the formula in this
+legacy-named tap. The commands below install `v1.32.0` after that formula PR is
+reviewed and merged:
 
 ```bash
-brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/bitcoin-starter-stack.git
+brew tap vijitsingh97/bitcoin-starter-stack https://github.com/VijitSingh97/node-manager.git
 brew install vijitsingh97/bitcoin-starter-stack/bitcoin-starter-stack
 bitcoin-stack init
 ```
@@ -71,10 +72,11 @@ unqualified.
 
 ### APT on Ubuntu
 
-The Ubuntu 24.04 APT package will become available with the next release, after
-matching amd64 and arm64 dashboard images are published. It installs the
-`bitcoin-stack` command globally and keeps mutable files in standard system
-locations:
+Version `v1.32.0` is the first Ubuntu 24.04 APT release. Its release workflow
+publishes the package only after the matching amd64 and arm64 images pass the
+release gate, verifies the signed feed with APT, and then deploys it to GitHub
+Pages. It installs the `bitcoin-stack` command globally and keeps mutable files
+in standard system locations:
 
 - configuration: `/etc/bitcoin-starter-stack/config.json`
 - generated credentials and backups: `/var/lib/bitcoin-starter-stack/`
@@ -88,12 +90,35 @@ Existing package installations retain their saved Compose project and volumes.
 A source-managed deployment keeps its own configuration and upgrade commands;
 installing the package does not migrate it automatically. Package mode refuses
 to operate on services owned by another installation.
-Until the feed is live, use the release tarball section below. When the package
-is released, verify and install its signing key as described in
-[Package feed](privacy.md#package-feed), then add the feed:
+
+After the `v1.32.0` APT job and Pages deployment succeed, verify and install the
+dedicated feed key before adding the repository:
 
 ```bash
-echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/bitcoin-starter-stack ./' \
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+
+expected='72FD656754BD7534E274360A37070C2730C0B4EA'
+key=$(mktemp)
+trap 'rm -f "$key"' EXIT
+curl --fail --show-error --silent \
+  https://vijitsingh97.github.io/node-manager/bitcoin-starter-stack.asc \
+  --output "$key"
+listing=$(gpg --batch --show-keys --with-colons "$key") || {
+  echo 'Unable to parse the APT signing key.' >&2
+  exit 1
+}
+actual=$(awk -F: '
+  $1 == "pub" { primary_keys++ }
+  $1 == "fpr" && primary_fingerprint == "" { primary_fingerprint = $10 }
+  END { print primary_keys ":" primary_fingerprint }
+' <<<"$listing") || exit 1
+[ "$actual" = "1:$expected" ] || {
+  echo 'APT signing key does not contain exactly the expected primary key.' >&2
+  exit 1
+}
+sudo install -m 0644 "$key" /usr/share/keyrings/bitcoin-starter-stack.asc
+echo 'deb [signed-by=/usr/share/keyrings/bitcoin-starter-stack.asc] https://vijitsingh97.github.io/node-manager ./' \
   | sudo tee /etc/apt/sources.list.d/bitcoin-starter-stack.list
 sudo apt update
 sudo apt install bitcoin-starter-stack
@@ -111,15 +136,15 @@ For the current release-tarball installation:
 
 ```bash
 curl --fail --location --output bitcoin-starter-stack.tar.gz \
-  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest/download/bitcoin-starter-stack.tar.gz
+  https://github.com/VijitSingh97/node-manager/releases/latest/download/bitcoin-starter-stack.tar.gz
 tar -xzf bitcoin-starter-stack.tar.gz
 cd bitcoin-starter-stack
 ./stack init
 ```
 
-The tarball's semantic version matches its published container images. The
-current `v1.31.1` tarball uses an interactive `./stack init` wizard; follow its
-bundled README. The no-question defaults below describe the next release.
+The tarball's semantic version matches its published container images. Starting
+with `v1.32.0`, `./stack init` uses the no-question defaults below; customize
+`config.json` before running it when you need different first-boot settings.
 Development branches use unpublished image tags and require images built in a
 separate development environment; do not use a branch checkout for installation.
 
@@ -128,7 +153,19 @@ locally. `init` sees that they are present and starts without downloading.
 Routine `up` and `apply` never download or build implicitly; `pull` is the
 explicit command for obtaining images ahead of time.
 
-## Default first start in the next release
+### Existing Git checkouts after the repository rename
+
+GitHub redirects the old repository URL, but an existing checkout can record the
+canonical URL once:
+
+```bash
+git remote set-url origin https://github.com/VijitSingh97/node-manager.git
+```
+
+Package installs do not need this step. Their package, command, and data-path
+names intentionally remain `bitcoin-starter-stack` and `bitcoin-stack`.
+
+## Default first start
 
 Run `bitcoin-stack init` for Homebrew, `sudo bitcoin-stack init` for APT, or
 `./stack init` for source. A fresh run:
@@ -173,7 +210,7 @@ On a macOS source checkout, `./stack init` starts a host helper for the current
 login session so dashboard node installs and LAN-port changes work. Source
 installs do not register a login service, so **Launch at login** is unavailable;
 run `./stack up` after signing in again. The Homebrew package registers the
-managed user service once that package is released.
+managed user service when it is installed.
 
 Fresh APT and Homebrew installs select `resource_profile: compact`. The host
 helper waits for three spaced, healthy, current sync checks before applying

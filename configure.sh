@@ -274,7 +274,6 @@ done
 dashboard_onion=$(jq -r 'if ((.dashboard // {}) | has("onion")) then if .dashboard.onion == true then 1 else 0 end else empty end' <<<"$config")
 [ -n "$dashboard_onion" ] || dashboard_onion=$(sed -n 's/^DASHBOARD_ONION=//p' "$env_file" 2>/dev/null || true)
 [ -n "$dashboard_onion" ] || dashboard_onion=0
-dashboard_control=$(flag '.dashboard.control')
 dashboard_bind_setting=$(get '.dashboard.bind_ip')
 if [ "$dashboard_bind_setting" = auto ]; then
   dashboard_bind_ip=$(detect_dashboard_bind_ip)
@@ -299,10 +298,6 @@ alert_new_block_litecoin=$(flag '.notifications.alert_new_block_litecoin')
 alert_new_block_dogecoin=$(flag '.notifications.alert_new_block_dogecoin')
 alert_new_block_bitcoincash=$(flag '.notifications.alert_new_block_bitcoincash')
 alert_new_block_zcash=$(flag '.notifications.alert_new_block_zcash')
-if [ "$package_managed" != "0" ] && [ "$dashboard_control" = "1" ]; then
-  echo "dashboard.control is unavailable for package installations; use your package manager, then $stack_command apply." >&2
-  exit 1
-fi
 # Watch-only public keys travel as a base64 JSON blob so xpubs/descriptors
 # pass through .env untouched (no quoting or $-expansion footguns).
 default_wallets='[{"name":"Binance (public)","key":"34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo","birthday":""}]'
@@ -601,11 +596,6 @@ if [ "$dashboard_onion" = "1" ] && [ -z "$dashboard_password" ]; then
   exit 1
 fi
 
-if [ "$dashboard_control" = "1" ] && [ -z "$dashboard_password" ]; then
-  echo "WARNING: dashboard.control is enabled without dashboard.password —"
-  echo "         set a password so only you can trigger upgrades from the dashboard."
-fi
-
 # bitcoind rejects prune targets between 1 and 549 MB
 case "$prune" in *[!0-9]*) prune=-1 ;; esac
 if [ "$prune" -lt 0 ] || { [ "$prune" -ne 0 ] && [ "$prune" -lt 550 ]; }; then
@@ -798,7 +788,6 @@ ZCASH_STEADY_CPUS=$zcash_steady_cpus
 ZCASH_STEADY_MEM_LIMIT_MB=$zcash_steady_mem_limit_mb
 DASHBOARD_PASSWORD=$dashboard_password
 DASHBOARD_ONION=$dashboard_onion
-DASHBOARD_CONTROL=$dashboard_control
 DASHBOARD_BIND_IP=$dashboard_bind_ip
 DASHBOARD_PORT=$dashboard_port
 TELEGRAM_BOT_TOKEN=$telegram_bot_token

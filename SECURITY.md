@@ -3,7 +3,7 @@
 ## Reporting
 
 Report vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/VijitSingh97/bitcoin-starter-stack/security/advisories/new).
+[GitHub Security Advisories](https://github.com/VijitSingh97/node-manager/security/advisories/new).
 Please don't open public issues for security problems.
 
 ## Threat model (what this stack does and doesn't protect)

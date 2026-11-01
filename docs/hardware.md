@@ -50,7 +50,7 @@ a 10-minute sample after warmup, the stack advanced 1,200 blocks with 15/15 RPC
 checks succeeding, no HTTP failures, and no application-container swap, OOM
 kills, or restarts. This trial did not cover a full initial sync, sustained full
 mempool, or wallet-scan load. See the
-[resource-cap experiment](https://github.com/VijitSingh97/bitcoin-starter-stack/blob/5dc960cb91873bcc09f599805cdc5bf1d6ec103a/experiments/go-dashboard-results/mini-1-resource-caps-2026-10-29/README.md)
+[resource-cap experiment](https://github.com/VijitSingh97/node-manager/blob/5dc960cb91873bcc09f599805cdc5bf1d6ec103a/experiments/go-dashboard-results/mini-1-resource-caps-2026-10-29/README.md)
 for the method, exact temporary caps, and the 2 CPU/4 GB profile results.
 
 The trial's settings were caps, not recorded average CPU/RAM measurements.

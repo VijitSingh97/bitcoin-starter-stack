@@ -257,9 +257,9 @@ Usage: $stack_command <command> [args]
   logs [svc]                 Follow logs (all services, or one)
   events                     Incident history (down/recovered, failed pings) — survives restarts
   apply                      Re-render .env from config.json and apply changes
-  upgrade                    Fetch the latest release and apply it (backs up first)
-  upgrade-agent              Watch for source-install dashboard requests (auto-managed)
-  host-service               Supervise configured nodes and host controls (Homebrew service)
+  upgrade                    Show manual APT, Homebrew, and GitHub update steps
+  upgrade-agent              Compatibility alias for host-service
+  host-service               Supervise configured nodes and host controls
   status                     Container + health summary; warns on anything down
   doctor                     Read-only health report (deps, disk, sync, tor)
   backup                     Save config, credentials, and onion keys to backups/
@@ -305,6 +305,7 @@ init() {
       exit 1
     }
   done
+  migrate_legacy_upgrade_agent
 
   if [ ! -f "$config_file" ]; then
     config_source=$(mktemp)
@@ -594,14 +595,6 @@ doctor() {
   else
     echo "OK    config.json rendered into .env"
   fi
-  if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
-    if pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
-      echo "OK    upgrade-agent (dashboard Upgrade button)"
-    else
-      echo "WARN  upgrade-agent not running — $stack_command up starts it"
-    fi
-  fi
-
   echo "== Disk"
   if [ "$(env_get BITCOIN_ENABLED)" != "0" ] && [ "$(env_get BITCOIN_ACTIVE)" != "0" ]; then
     data_dir=$(env_get BITCOIN_DATA_DIR)
@@ -741,130 +734,35 @@ do_restore() {
   echo "Done. Apply with: $stack_command apply"
 }
 
-# One-command upgrade: fetch the latest release tag and apply it. Backs up
-# first, only ever moves forward (never downgrades), and prints a rollback line.
 do_upgrade() {
-  if [ "$package_managed" = brew ]; then
-    cat <<EOF
-This installation is managed by Homebrew. Upgrade manually:
+  cat <<EOF
+Node Manager does not update itself. Install the new version with the method you originally used:
+
+Back up first if you want a restore point:
   $stack_command backup
-  brew update
-  brew upgrade bitcoin-starter-stack
-  $stack_command pull
-  $stack_command apply
+
+  Ubuntu / APT
+    sudo apt update
+    sudo apt install --only-upgrade bitcoin-starter-stack
+    $stack_command pull
+    $stack_command apply
+
+  macOS / Homebrew
+    brew update
+    brew upgrade bitcoin-starter-stack
+    $stack_command pull
+    $stack_command apply
+
+  GitHub release or source install
+    https://github.com/VijitSingh97/node-manager/releases/latest
 EOF
-    return 0
-  fi
-  if [ "$package_managed" = "1" ]; then
-    cat <<EOF
-This installation is managed by APT. Upgrade manually:
-  $stack_command backup
-  sudo apt update
-  sudo apt install --only-upgrade bitcoin-starter-stack
-  $stack_command pull
-  $stack_command apply
-EOF
-    return 0
-  fi
-  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "Not a git checkout — upgrade by unpacking the latest release tarball:"
-    echo "  https://github.com/VijitSingh97/bitcoin-starter-stack/releases/latest"
-    exit 1
-  fi
-  current=$(cat "$stack_root/VERSION" 2>/dev/null || echo 0)
-  echo "Current: v$current — fetching release tags..."
-  origin=$(git remote get-url origin 2>/dev/null || true)
-  case "$origin" in
-    https://*)
-      NO_PROXY='' no_proxy='' GIT_SSL_NO_VERIFY=false git \
-        -c http.proxy=socks5h://172.29.0.25:9050 -c "http.$origin.proxy=socks5h://172.29.0.25:9050" \
-        -c http.sslVerify=true -c "http.$origin.sslVerify=true" \
-        -c http.followRedirects=false -c "http.$origin.followRedirects=false" \
-        -c protocol.allow=never -c protocol.https.allow=always \
-        fetch --tags --quiet "$origin" 2>/dev/null || {
-        echo "git fetch through Tor failed — check Tor, then retry."
-        exit 1
-      }
-      ;;
-    /* | file:///*)
-      git -c protocol.allow=never -c protocol.file.allow=always fetch --tags --quiet "$origin" 2>/dev/null || {
-        echo "Local git fetch failed."
-        exit 1
-      }
-      ;;
-    *)
-      echo "Upgrade requires an HTTPS origin (fetched through Tor) or an absolute local repository path."
-      exit 1
-      ;;
-  esac
-  latest=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-  latest=${latest#v}
-  [ -n "$latest" ] || {
-    echo "No release tags found on the remote."
-    exit 1
-  }
-  if [ "$latest" = "$current" ]; then
-    echo "Already on the latest release (v$current). Nothing to do."
-    return 0
-  fi
-  if [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" != "$latest" ]; then
-    echo "Installed v$current is newer than the latest release v$latest — nothing to do."
-    return 0
-  fi
-  echo "Upgrading v$current -> v$latest"
-  echo "== Backing up first (safety net)"
-  do_backup
-  echo "== Checking out v$latest"
-  git checkout --quiet "v$latest" || {
-    echo "checkout failed — commit or stash local changes to tracked files, then retry."
-    exit 1
-  }
-  echo "== Applying (pull new images, recreate changed containers)"
-  lock_config
-  "$stack_root/configure.sh"
-  images_available || pull_images
-  offline_up
-  unlock_config
-  echo
-  echo "Upgraded to v$latest. Verify with: ./stack status"
-  echo "Roll back if needed:  git checkout \"v$current\" && ./stack apply"
 }
 
-# Host-side agent for the opt-in dashboard Upgrade button. The dashboard (which
-# has no host/docker access) only drops a marker file in its state volume; this
-# runs on the host, sees the marker, and performs the upgrade with the right
-# privileges. up/apply manage it automatically via ensure_agent below; running
-# it by hand just watches in the foreground.
 upgrade_agent() {
-  if [ "$package_managed" != "0" ]; then
-    echo "Use the package manager to upgrade this installation." >&2
-    exit 1
-  fi
-  echo "upgrade-agent: watching for dashboard host-control requests (Ctrl-C to stop)."
-  echo "  Host controls require same-origin dashboard requests; upgrades also require dashboard.control=true."
-  while true; do
-    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
-      "$stack_root/scripts/node-control" || echo "upgrade-agent: node control check failed; still watching"
-    BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
-      "$stack_root/scripts/node-port-control" || echo "upgrade-agent: LAN port control check failed; still watching"
-    if compose exec -T dashboard test -f /state/upgrade.request 2>/dev/null; then
-      compose exec -T -u 1000 dashboard rm -f /state/upgrade.request 2>/dev/null || true
-      if [ "$(env_get DASHBOARD_CONTROL)" = "1" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') upgrade-agent: request received — upgrading"
-        # subshell so do_upgrade's exit on a bad fetch/checkout doesn't kill the agent
-        (do_upgrade) || echo "upgrade-agent: upgrade did not complete (see above); still watching"
-      else
-        echo "upgrade-agent: ignored an upgrade request because dashboard.control is off"
-      fi
-    fi
-    sleep 10
-  done
+  echo "upgrade-agent is now host-service; application updates are manual."
+  exec "$stack_root/stack" host-service
 }
 
-# Keep the source-install host agent running and install a @reboot cron entry.
-# Skips entirely if the operator runs the agent under systemd (docs/operations.md).
-# ponytail: cron can't restart a crashed agent until reboot — use the systemd
-# unit if that matters to you.
 ensure_agent() {
   if [ "$package_managed" = brew ]; then
     command -v brew >/dev/null 2>&1 || {
@@ -879,32 +777,91 @@ ensure_agent() {
     return 0
   fi
   [ "$package_managed" = "1" ] && return 0
-  if [ "$(uname -s)" = Darwin ]; then
-    exec 9>"$state_dir/.host-service.lock"
-    if flock -n 9; then
-      flock -u 9
-      host_log=$state_dir/host-service.log
-      touch "$host_log"
-      chmod 600 "$host_log"
-      nohup env BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
-        "$stack_root/stack" host-service >>"$host_log" 2>&1 </dev/null &
-      echo $! >"$state_dir/.host-service.pid"
-      echo "host-service: started for this login session (log: $host_log)"
-    else
-      echo "host-service: already running"
-    fi
+  if [ "$(uname -s)" != Darwin ] && {
+    systemctl is-enabled bitcoin-stack-host-service >/dev/null 2>&1 ||
+      systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1
+  }; then
     return 0
   fi
-  if systemctl is-enabled bitcoin-stack-upgrade-agent >/dev/null 2>&1; then
-    return 0 # managed by systemd — stay out of its way
+  exec 9>"$state_dir/.host-service.lock"
+  if flock -n 9; then
+    flock -u 9
+    host_log=$state_dir/host-service.log
+    touch "$host_log"
+    chmod 600 "$host_log"
+    nohup env BITCOIN_STACK_ROOT="$stack_root" BITCOIN_STACK_STATE_DIR="$state_dir" BITCOIN_STACK_CONFIG_DIR="$config_dir" \
+      "$stack_root/stack" host-service >>"$host_log" 2>&1 </dev/null &
+    echo $! >"$state_dir/.host-service.pid"
+    echo "host-service: started for this login session (log: $host_log)"
+  else
+    echo "host-service: already running"
   fi
-  line="@reboot sleep 60 && cd $PWD && ./stack upgrade-agent >> \$HOME/upgrade-agent.log 2>&1"
-  (crontab -l 2>/dev/null | grep -vF "stack upgrade-agent"; echo "$line") | crontab - 2>/dev/null ||
-    echo "WARN  could not install the upgrade-agent @reboot cron entry"
-  if ! pgrep -f "stack upgrade-agent" >/dev/null 2>&1; then
-    (setsid ./stack upgrade-agent >>"$HOME/upgrade-agent.log" 2>&1 </dev/null &)
-    echo "upgrade-agent: started (log: ~/upgrade-agent.log; restarts on reboot via cron)"
-  fi
+  [ "$(uname -s)" = Darwin ] && return 0
+  printf -v quoted_root '%q' "$stack_root"
+  printf -v quoted_state '%q' "$state_dir"
+  line="@reboot sleep 60 && cd $quoted_root && ./stack host-service >> $quoted_state/host-service.log 2>&1"
+  existing_cron=$(crontab -l 2>/dev/null || true)
+  { printf '%s\n' "$existing_cron" |
+      grep -vF "cd $stack_root && ./stack upgrade-agent" |
+      grep -vF "cd $quoted_root && ./stack upgrade-agent" |
+      grep -vF "cd $quoted_root && ./stack host-service" || true; echo "$line"; } | crontab - 2>/dev/null ||
+    echo "WARN  could not install the host-service @reboot cron entry"
+}
+
+legacy_upgrade_agent_matches() {
+  local process=$1 canonical_root=$2 process_cwd argument candidate candidate_dir index
+  local -a arguments=()
+  [ -r "$process/cmdline" ] || return 1
+  process_cwd=$(readlink "$process/cwd" 2>/dev/null || true)
+  [ -n "$process_cwd" ] && process_cwd=$(cd "$process_cwd" 2>/dev/null && pwd -P || true)
+  [ "$process_cwd" = "$canonical_root" ] || return 1
+  while IFS= read -r -d '' argument; do arguments+=("$argument"); done <"$process/cmdline"
+  for ((index = 0; index + 1 < ${#arguments[@]}; index++)); do
+    [ "${arguments[index + 1]}" = upgrade-agent ] || continue
+    case "${arguments[index]}" in
+      /*) candidate=${arguments[index]} ;;
+      *) candidate=$process_cwd/${arguments[index]} ;;
+    esac
+    candidate_dir=$(cd "${candidate%/*}" 2>/dev/null && pwd -P) || continue
+    [ "$candidate_dir/${candidate##*/}" = "$canonical_root/stack" ] && return 0
+  done
+  return 1
+}
+
+migrate_legacy_upgrade_agent() {
+  [ "$package_managed" = "0" ] || return 0
+  [ "$(uname -s)" = Linux ] || return 0
+  local proc_root=${BITCOIN_STACK_PROC_ROOT:-/proc} canonical_root process pid attempt failed=0
+  local -a legacy_pids=()
+  canonical_root=$(cd "$stack_root" && pwd -P)
+  for process in "$proc_root"/[0-9]*; do
+    pid=${process##*/}
+    [ "$pid" != "$$" ] || continue
+    legacy_upgrade_agent_matches "$process" "$canonical_root" || continue
+    if ! kill -TERM "$pid" 2>/dev/null; then
+      if legacy_upgrade_agent_matches "$process" "$canonical_root"; then
+        echo "WARN  could not stop legacy upgrade-agent process $pid for this installation." >&2
+        failed=1
+      fi
+      continue
+    fi
+    legacy_pids+=("$pid")
+  done
+  for pid in "${legacy_pids[@]}"; do
+    for ((attempt = 0; attempt < 20; attempt++)); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null && legacy_upgrade_agent_matches "$proc_root/$pid" "$canonical_root"; then
+      kill -KILL "$pid" 2>/dev/null || true
+      sleep 0.1
+    fi
+    if kill -0 "$pid" 2>/dev/null && legacy_upgrade_agent_matches "$proc_root/$pid" "$canonical_root"; then
+      echo "WARN  could not stop legacy upgrade-agent process $pid for this installation." >&2
+      failed=1
+    fi
+  done
+  return "$failed"
 }
 
 host_service() {
@@ -952,6 +909,7 @@ cmd=${1:-help}
 
 case "$cmd" in
   up)
+    migrate_legacy_upgrade_agent
     lock_config
     prepare_config_for_start
     offline_up "$@"
@@ -977,6 +935,7 @@ case "$cmd" in
   logs) guard_package_containers && compose logs -f --tail=100 "$@" ;;
   events) guard_package_containers && compose exec -T dashboard sh -c 'cat /state/events.log 2>/dev/null || echo "no events yet"' ;;
   apply)
+    migrate_legacy_upgrade_agent
     lock_config
     previous_env=$(mktemp "$state_dir/.env.before-apply.XXXXXX")
     previous_approved_config=$(mktemp "$state_dir/.approved-config.before-apply.XXXXXX")

@@ -1,6 +1,6 @@
 class BitcoinStarterStack < Formula
   desc "Run private cryptocurrency nodes behind Tor"
-  homepage "https://github.com/VijitSingh97/bitcoin-starter-stack"
+  homepage "https://github.com/VijitSingh97/node-manager"
   url "@RELEASE_URL@"
   version "@VERSION@"
   sha256 "@SHA256@"

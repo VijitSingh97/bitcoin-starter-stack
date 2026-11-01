@@ -609,7 +609,7 @@ const file_build_dashboard_node_stack_tari_wallet_proto_rawDesc = "" +
 	"\bGetState\x12\x1d.tari.rpc.TariGetStateRequest\x1a\x1e.tari.rpc.TariGetStateResponse\x12Y\n" +
 	"\x12GetCompleteAddress\x12\x19.tari.rpc.TariWalletEmpty\x1a(.tari.rpc.TariGetCompleteAddressResponse\x12O\n" +
 	"\n" +
-	"GetBalance\x12\x1f.tari.rpc.TariGetBalanceRequest\x1a .tari.rpc.TariGetBalanceResponseB>Z<github.com/VijitSingh97/bitcoin-starter-stack/dashboard;mainb\x06proto3"
+	"GetBalance\x12\x1f.tari.rpc.TariGetBalanceRequest\x1a .tari.rpc.TariGetBalanceResponseB5Z3github.com/VijitSingh97/node-manager/dashboard;mainb\x06proto3"
 
 var (
 	file_build_dashboard_node_stack_tari_wallet_proto_rawDescOnce sync.Once

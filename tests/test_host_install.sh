@@ -96,7 +96,7 @@ cat >"$tmp/bin/docker" <<'SH'
 case "$1" in
   info) test -f "$HOST_TEST_DOCKER_READY" ;;
   inspect) exit 1 ;;
-  compose) printf 'compose\n' >>"$HOST_TEST_LOG" ;;
+  compose) shift; printf 'compose %s\n' "$*" >>"$HOST_TEST_LOG" ;;
   exec) exit 0 ;;
   *) echo "unexpected Docker action" >&2; exit 1 ;;
 esac
@@ -115,9 +115,10 @@ for ((attempt=0; attempt<15; attempt++)); do
   sleep 1
 done
 [ -f "$HOST_TEST_LOG" ] || { cat "$tmp/service.log"; fail "host service did not start configured nodes"; }
-for action in configure compose node-control node-port-control node-resource-profile; do
+for action in configure node-control node-port-control node-resource-profile; do
   grep -q "^$action$" "$HOST_TEST_LOG" || { cat "$tmp/service.log"; fail "host service did not run $action"; }
 done
+grep -q '^compose .* up ' "$HOST_TEST_LOG" || { cat "$tmp/service.log"; fail "host service did not start configured nodes"; }
 "$root/scripts/bitcoin-stack" host-service >/dev/null 2>&1 && fail "host service allowed duplicate supervision"
 kill "$service_pid"
 wait "$service_pid"
@@ -133,7 +134,7 @@ for ((attempt=0; attempt<15; attempt++)); do
   sleep 1
 done
 grep -q '^node-control$' "$HOST_TEST_LOG" || { cat "$tmp/service-off.log"; fail "host controls stopped when launch at login was off"; }
-! grep -q '^compose$' "$HOST_TEST_LOG" || fail "launch-at-login off started application containers"
+! grep -q '^compose .* up ' "$HOST_TEST_LOG" || fail "launch-at-login off started application containers"
 kill "$service_pid"
 wait "$service_pid"
 service_pid=

@@ -6,7 +6,6 @@ import sys
 os.environ.update({
     "RPC_USER": "py",
     "RPC_PASSWORD": "fakepw",
-    "DASHBOARD_CONTROL": "0",
     "TELEGRAM_BOT_TOKEN": "",
     "TELEGRAM_CHAT_ID": "",
     "HEALTHCHECKS_URL": "",

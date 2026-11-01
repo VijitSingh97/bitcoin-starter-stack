@@ -785,7 +785,7 @@ func TestUpdateCheckKeepsBadgeAndDoesNotRepeatAlert(t *testing.T) {
 	m := configuredMonitor(t, func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
 		case "api.github.com":
-			if strings.Contains(r.URL.Path, "bitcoin-starter-stack") {
+			if r.URL.Path == "/repos/VijitSingh97/node-manager/releases/latest" {
 				stackChecks++
 				return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
 			}

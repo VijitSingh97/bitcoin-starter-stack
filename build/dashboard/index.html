@@ -19,6 +19,7 @@
   <div id="tower-overview-label-bitcoincash" class="tower-overview-label tower-overview-label-bitcoincash" style="--node-accent:#36a852" hidden>loading block <b></b></div>
   <div id="tower-overview-label-zcash" class="tower-overview-label tower-overview-label-zcash" style="--node-accent:#d69c35" hidden>loading block <b></b></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+  <aside id="update-notice" class="update-notice update-notice-global" role="status"{{if not .UpdateNote}} hidden{{end}}>{{if .UpdateNote}}<strong>🆕 {{.UpdateNote}}</strong> <a href="https://github.com/VijitSingh97/node-manager/blob/main/docs/operations.md#upgrading" target="_blank" rel="noopener noreferrer">Update instructions</a>{{end}}</aside>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1><p id="node-overview-status" role="status">Loading node set…</p>
     <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" hidden data-node-active="1" style="--node-accent:#f2a900" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Bitcoin</b><small data-tower-price-asset="bitcoin">Price unavailable</small></span></button>
@@ -67,6 +68,7 @@
   <div id="tower-overview-label-bitcoincash" class="tower-overview-label tower-overview-label-bitcoincash" style="--node-accent:#36a852" hidden>loading block <b></b></div>
   <div id="tower-overview-label-zcash" class="tower-overview-label tower-overview-label-zcash" style="--node-accent:#d69c35" hidden>loading block <b></b></div>
   <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+  <aside id="update-notice" class="update-notice update-notice-global" role="status"{{if not .UpdateNote}} hidden{{end}}>{{if .UpdateNote}}<strong>🆕 {{.UpdateNote}}</strong> <a href="https://github.com/VijitSingh97/node-manager/blob/main/docs/operations.md#upgrading" target="_blank" rel="noopener noreferrer">Update instructions</a>{{end}}</aside>
   <main id="node-overview" class="node-overview" aria-label="Choose a node">
     <h1 class="node-set-title">{{.NodeName}} Node Set</h1><p id="node-overview-status" role="status">Loading node set…</p>
     <button class="node-choice node-choice-bitcoin" type="button" data-select-node="bitcoin" hidden data-node-active="1" style="--node-accent:#f2a900" aria-label="Bitcoin" aria-controls="bitcoin-panel" aria-expanded="false"><span class="node-choice-label" aria-hidden="true"><b>Bitcoin</b><small data-tower-price-asset="bitcoin">Price unavailable</small></span></button>
@@ -120,7 +122,6 @@
         <div class="row"><span class="label">Open ports:</span> <span></span></div>
         <div class="row"><span class="label">Bitcoin RPC:</span> <span>{{if .BitcoinRPCEndpoint}}{{.BitcoinRPCEndpoint}} · LAN{{else}}Disabled{{end}}</span></div>
         <p class="node-state">Configured LAN access. Use your Bitcoin RPC login.</p>
-        <div id="upgrade" class="row" hidden></div>
         <div class="footer"><span>Updated: {{.LastUpdate}}</span><span>{{.Version}}</span><span>Auto-refresh: 30s</span></div>
       </div>
     </div>
@@ -424,6 +425,22 @@
         <p class="settings-note">Host config.json</p>
         <code id="settings-config-path" class="settings-config-path">Loading…</code>
       </fieldset>
+      <fieldset id="settings-update"{{if not .UpdateNote}} hidden{{end}}>
+        <legend>Update available</legend>
+        {{if .UpdateNote}}<p><strong>{{.UpdateNote}}</strong></p>
+        <p class="settings-note">Back up first, then use the same installation method you used originally.</p>
+        <p><b>Ubuntu / APT</b></p><pre><code>sudo bitcoin-stack backup
+sudo apt update
+sudo apt install --only-upgrade bitcoin-starter-stack
+sudo bitcoin-stack pull
+sudo bitcoin-stack apply</code></pre>
+        <p><b>macOS / Homebrew</b></p><pre><code>bitcoin-stack backup
+brew update
+brew upgrade bitcoin-starter-stack
+bitcoin-stack pull
+bitcoin-stack apply</code></pre>
+        <p><a href="https://github.com/VijitSingh97/node-manager/releases/latest" target="_blank" rel="noopener noreferrer">Download the latest GitHub release</a> · <a href="https://github.com/VijitSingh97/node-manager/blob/main/docs/operations.md#upgrading" target="_blank" rel="noopener noreferrer">Full upgrade instructions</a></p>{{end}}
+      </fieldset>
       <fieldset id="settings-node-alerts" hidden>
         <legend>Node settings</legend>
         <details id="settings-bitcoin-alerts"><summary>Bitcoin</summary>
@@ -519,7 +536,6 @@
   <script type="module" src="/static/tari-watch.js"></script>
   <script type="module" src="/static/family-watch.js"></script>
   <script type="module" src="/static/settings.js"></script>
-  {{if and .BitcoinEnabled (not .Loading)}}<script type="module" src="/static/watch.js"></script>
-  <script type="module" src="/static/upgrade.js"></script>{{end}}
+  {{if and .BitcoinEnabled (not .Loading)}}<script type="module" src="/static/watch.js"></script>{{end}}
 </body>
 </html>

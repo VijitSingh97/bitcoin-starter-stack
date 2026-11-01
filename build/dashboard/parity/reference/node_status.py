@@ -24,11 +24,6 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 RPC_USER = os.environ["RPC_USER"]
 RPC_PASSWORD = os.environ["RPC_PASSWORD"]
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
-# Opt-in: show an Upgrade button that asks the host-side agent to run ./stack
-# upgrade. Off unless the operator sets dashboard.control (the dashboard has no
-# host/docker access — it only writes the request marker below).
-DASHBOARD_CONTROL = os.environ.get("DASHBOARD_CONTROL", "") not in ("", "0", "false", "False")
-UPGRADE_REQUEST = "/state/upgrade.request"
 RPC_URL = 'http://172.29.0.26:8332'
 BITCOIN_DIR = '/data'
 DISK_WARN_FREE_GB = 50
@@ -268,32 +263,6 @@ def api_watch_remove(name):
     return Response("no such wallet", 404)
 
 
-@app.route('/api/upgrade', methods=['GET'])
-def api_upgrade_status():
-    return jsonify({
-        "enabled": DASHBOARD_CONTROL,
-        "update": monitor.update_available,
-        "pending": os.path.exists(UPGRADE_REQUEST),
-    })
-
-
-@app.route('/api/upgrade', methods=['POST'])
-def api_upgrade_request():
-    # The dashboard can't upgrade itself (no host access) — it drops a marker the
-    # host-side `./stack upgrade-agent` picks up. Off unless dashboard.control set.
-    if not DASHBOARD_CONTROL:
-        return Response("upgrade control is disabled — set dashboard.control", 403)
-    bad = _reject_csrf()
-    if bad:
-        return bad
-    try:
-        with open(UPGRADE_REQUEST, "w") as f:
-            f.write("requested\n")
-    except OSError as e:
-        return Response(f"could not write upgrade request: {e}", 500)
-    return jsonify({"ok": True})
-
-
 @app.route('/')
 def index():
     # Fetch core data
@@ -318,6 +287,7 @@ def index():
                 <canvas id="tower"></canvas>
                 <div id="tower-label"></div>
                 <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+                <aside id="update-notice" class="update-notice update-notice-global" role="status"{% if not update_note %} hidden{% endif %}>{% if update_note %}<strong>🆕 {{update_note}}</strong> <a href="https://github.com/VijitSingh97/node-manager/blob/main/docs/operations.md#upgrading" target="_blank" rel="noopener noreferrer">Update instructions</a>{% endif %}</aside>
                 <div id="live">
                 <div class="loading-card">
                     <h2>Bitcoin Node Initializing</h2>
@@ -333,7 +303,7 @@ def index():
                 <script type="module" src="/static/refresh.js"></script>
             </body>
             </html>
-        """, version=version_label())
+        """, version=version_label(), update_note=monitor.update_available)
 
     # Calculate Inbound vs Outbound
     inbound, outbound = 0, 0
@@ -398,6 +368,7 @@ def index():
         <canvas id="tower"></canvas>
                 <div id="tower-label"></div>
                 <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">Auto</button>
+                <aside id="update-notice" class="update-notice update-notice-global" role="status"{% if not stats.update_note %} hidden{% endif %}>{% if stats.update_note %}<strong>🆕 {{stats.update_note}}</strong> <a href="https://github.com/VijitSingh97/node-manager/blob/main/docs/operations.md#upgrading" target="_blank" rel="noopener noreferrer">Update instructions</a>{% endif %}</aside>
         <div class="stack-col">
         <div id="tower-stats" class="tower-stats" hidden></div>
         <div id="live" data-blocks="{{stats.blocks}}" data-next-block="{{stats.next_block}}">
@@ -425,8 +396,6 @@ def index():
             <div class="row"><span class="label">Fee sat/vB (next/30m/1h):</span> <span>{{ stats.fee_next if stats.fee_next is not none else '—' }} / {{ stats.fee_30m if stats.fee_30m is not none else '—' }} / {{ stats.fee_hour if stats.fee_hour is not none else '—' }}</span></div>
             <div class="spark-row"><span class="label">Fee (24h)</span><canvas class="spark" id="spark-fee"></canvas></div>
             {% endif %}
-            {% if stats.update_note %}<div class="row" style="color: #f2a900; font-size: 0.8rem;">🆕 {{stats.update_note}}</div>{% endif %}
-            <div id="upgrade" class="row" style="font-size: 0.8rem;" hidden></div>
             <div class="footer">
                 <span>Updated: {{stats.last_update}}</span>
                 <span>{{stats.stack_version}}</span>
@@ -441,7 +410,6 @@ def index():
         <script type="module" src="/static/sparkline.js"></script>
         <script type="module" src="/static/refresh.js"></script>
         <script type="module" src="/static/watch.js"></script>
-        <script type="module" src="/static/upgrade.js"></script>
     </body>
     </html>
     """, stats=stats)

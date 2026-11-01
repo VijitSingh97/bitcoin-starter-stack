@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -98,7 +99,7 @@ type dashboardFixture struct {
 	rpc    *dashboardRPC
 }
 
-func newDashboardFixture(t *testing.T, control bool) *dashboardFixture {
+func newDashboardFixture(t *testing.T) *dashboardFixture {
 	t.Helper()
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("TELEGRAM_CHAT_ID", "")
@@ -112,8 +113,8 @@ func newDashboardFixture(t *testing.T, control bool) *dashboardFixture {
 	root := filepath.Dir(sourceFile(t))
 	cfg := config{
 		rpcURL: rpcServer.URL, rpcUser: "rpc-user", rpcPassword: "rpc-password",
-		dashboardPassword: "dashboard-secret", control: control,
-		dataDir: t.TempDir(), stateDir: t.TempDir(), version: "1.2.0",
+		dashboardPassword: "dashboard-secret",
+		dataDir:           t.TempDir(), stateDir: t.TempDir(), version: "1.2.0",
 	}
 	a, err := newApp(cfg, &rpcClient{url: rpcServer.URL, user: cfg.rpcUser, password: cfg.rpcPassword, client: rpcServer.Client()}, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0))
 	if err != nil {
@@ -168,7 +169,7 @@ func responseJSON(t *testing.T, resp *http.Response) map[string]any {
 }
 
 func TestDashboardNodePageTransitionsFromSyncedToInitializing(t *testing.T) {
-	fixture := newDashboardFixture(t, false)
+	fixture := newDashboardFixture(t)
 	resp := fixture.request(t, http.MethodGet, "/")
 	body := responseBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
@@ -176,7 +177,7 @@ func TestDashboardNodePageTransitionsFromSyncedToInitializing(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Bitcoin Node Status", "900000 / 900001", "42 tx · 2.0 MB", "1.2 / 1.2 / 1.2",
-		`id="btc-price"`, `id="watch"`, `/static/prices.js`, `/static/watch.js`, `/static/upgrade.js`,
+		`id="btc-price"`, `id="watch"`, `/static/prices.js`, `/static/watch.js`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synced page missing %q", want)
@@ -192,7 +193,7 @@ func TestDashboardNodePageTransitionsFromSyncedToInitializing(t *testing.T) {
 }
 
 func TestDashboardKeepsOnlyLastConfirmedInProgressSyncForRPCFailures(t *testing.T) {
-	fixture := newDashboardFixture(t, false)
+	fixture := newDashboardFixture(t)
 	fixture.rpc.setChain(blockchainInfo{Blocks: 300000, Headers: 900001, VerificationProgress: 0.25, InitialBlockDownload: true, Pruned: true})
 
 	body := responseBody(t, fixture.request(t, http.MethodGet, "/"))
@@ -232,7 +233,7 @@ func TestDashboardKeepsOnlyLastConfirmedInProgressSyncForRPCFailures(t *testing.
 }
 
 func TestDashboardPricesExposeFreshUnavailableAndCachedStaleStates(t *testing.T) {
-	fixture := newDashboardFixture(t, false)
+	fixture := newDashboardFixture(t)
 	now := time.Unix(1_800_000_000, 0)
 	fixture.app.prices.now = func() time.Time { return now }
 	providerStatus := http.StatusOK
@@ -264,7 +265,7 @@ func TestDashboardPricesExposeFreshUnavailableAndCachedStaleStates(t *testing.T)
 		t.Fatalf("cached stale prices = %#v", cached)
 	}
 
-	empty := newDashboardFixture(t, false)
+	empty := newDashboardFixture(t)
 	unavailable := responseJSON(t, empty.request(t, http.MethodGet, "/api/prices"))
 	if unavailable["available"] != false || unavailable["stale"] != true || unavailable["updated_at"] != float64(0) {
 		t.Fatalf("unavailable prices = %#v", unavailable)
@@ -272,7 +273,7 @@ func TestDashboardPricesExposeFreshUnavailableAndCachedStaleStates(t *testing.T)
 }
 
 func TestDashboardWalletViewFormatsBalancesAndPersonalTotal(t *testing.T) {
-	fixture := newDashboardFixture(t, false)
+	fixture := newDashboardFixture(t)
 	entries := []WatchEntry{
 		{Name: "Savings", Key: genesisAddress},
 		{Name: "Pending", Key: "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"},
@@ -321,40 +322,97 @@ func TestDashboardWalletViewFormatsBalancesAndPersonalTotal(t *testing.T) {
 	}
 }
 
-func TestDashboardUpgradeStatusAndRequest(t *testing.T) {
-	for _, test := range []struct {
-		name    string
-		control bool
-		post    int
-	}{
-		{name: "control disabled", control: false, post: http.StatusForbidden},
-		{name: "request pending", control: true, post: http.StatusOK},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newDashboardFixture(t, test.control)
-			fixture.app.monitor.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Host != "api.github.com" {
-					return nil, errors.New("unexpected external request: " + r.URL.String())
-				}
-				if strings.Contains(r.URL.Path, "bitcoin-starter-stack") {
-					return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
-				}
-				return response(http.StatusOK, `{"tag_name":"v31.1.0"}`), nil
-			})}
-			fixture.app.monitor.checkUpdates(t.Context())
+func TestDashboardStartupRemovesOnlyLegacyUpgradeRequest(t *testing.T) {
+	root := filepath.Dir(sourceFile(t))
+	stateDir := t.TempDir()
+	marker := filepath.Join(stateDir, "upgrade.request")
+	other := filepath.Join(stateDir, "unrelated.json")
+	if err := os.WriteFile(marker, []byte("requested\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{stateDir: stateDir, dataDir: t.TempDir(), version: "1.2.0"}
+	if _, err := newApp(cfg, &rpcClient{}, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0)); err != nil {
+		t.Fatalf("start dashboard: %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy marker still exists: %v", err)
+	}
+	if data, err := os.ReadFile(other); err != nil || string(data) != "keep\n" {
+		t.Fatalf("unrelated state changed: %q, %v", data, err)
+	}
+}
 
-			status := responseJSON(t, fixture.request(t, http.MethodGet, "/api/upgrade"))
-			if status["enabled"] != test.control || status["pending"] != false || status["update"] != "stack v1.3.0 available (running v1.2.0)" {
-				t.Fatalf("upgrade status = %#v", status)
+func TestDashboardStartupFailsWhenLegacyUpgradeRequestCannotBeRemoved(t *testing.T) {
+	root := filepath.Dir(sourceFile(t))
+	stateDir := t.TempDir()
+	marker := filepath.Join(stateDir, "upgrade.request")
+	if err := os.Mkdir(marker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(marker, "unexpected"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{stateDir: stateDir, dataDir: t.TempDir(), version: "1.2.0"}
+	_, err := newApp(cfg, &rpcClient{}, filepath.Join(root, "index.html"), filepath.Join(root, "static"), log.New(io.Discard, "", 0))
+	if err == nil || err.Error() != "legacy upgrade request cleanup unavailable" {
+		t.Fatalf("startup error = %v", err)
+	}
+}
+
+func TestDashboardUpdateNoticeIsInformational(t *testing.T) {
+	fixture := newDashboardFixture(t)
+	fixture.app.monitor.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" || r.URL.Path != "/repos/VijitSingh97/node-manager/releases/latest" {
+			return nil, errors.New("unexpected external request: " + r.URL.String())
+		}
+		return response(http.StatusOK, `{"tag_name":"v1.3.0"}`), nil
+	})}
+	fixture.app.monitor.checkUpdates(t.Context())
+
+	page := responseBody(t, fixture.request(t, http.MethodGet, "/"))
+	for _, want := range []string{
+		"stack v1.3.0 available (running v1.2.0)",
+		"sudo apt install --only-upgrade bitcoin-starter-stack",
+		"sudo bitcoin-stack pull",
+		"brew upgrade bitcoin-starter-stack",
+		"bitcoin-stack apply",
+		"https://github.com/VijitSingh97/node-manager/releases/latest",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("update notice missing %q", want)
+		}
+	}
+	if strings.Contains(page, "Upgrade now") || strings.Contains(page, "/static/upgrade.js") {
+		t.Fatal("page still offers an in-app upgrade")
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		resp := fixture.request(t, method, "/api/upgrade")
+		if resp.StatusCode < 400 {
+			t.Errorf("%s /api/upgrade = %d", method, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	if _, err := os.Stat(filepath.Join(fixture.app.cfg.stateDir, "upgrade.request")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("upgrade marker exists: %v", err)
+	}
+
+	for _, state := range []string{"bitcoin disabled", "bitcoin loading"} {
+		t.Run(state, func(t *testing.T) {
+			fixture := newDashboardFixture(t)
+			fixture.app.monitor.updateNote = "stack v1.3.0 available (running v1.2.0)"
+			if state == "bitcoin disabled" {
+				fixture.app.cfg.bitcoinDisabled = true
+			} else {
+				fixture.rpc.setUnavailable(true)
 			}
-			resp := fixture.request(t, http.MethodPost, "/api/upgrade")
-			body := responseBody(t, resp)
-			if resp.StatusCode != test.post {
-				t.Fatalf("upgrade request = %d %q", resp.StatusCode, body)
-			}
-			status = responseJSON(t, fixture.request(t, http.MethodGet, "/api/upgrade"))
-			if status["pending"] != test.control {
-				t.Fatalf("pending after request = %#v", status)
+			page := responseBody(t, fixture.request(t, http.MethodGet, "/"))
+			for _, want := range []string{`id="update-notice"`, `id="settings-update"`, "stack v1.3.0 available", "docs/operations.md#upgrading"} {
+				if !strings.Contains(page, want) {
+					t.Errorf("%s page missing %q", state, want)
+				}
 			}
 		})
 	}
