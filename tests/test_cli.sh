@@ -346,7 +346,7 @@ printf '/bin/bash\0./stack\0upgrade-agent\0' >"$proc_fixture/$unrelated_pid/cmdl
 out=$(BITCOIN_STACK_PROC_ROOT="$proc_fixture" HOME="$tmp" PATH="$stub:$PATH" ./stack apply)
 kill -0 "$legacy_pid" 2>/dev/null && fail "legacy upgrade-agent for this root survived migration"
 wait "$legacy_pid" 2>/dev/null || true
-rm -rf "$proc_fixture/$legacy_pid"
+rm -rf "${proc_fixture:?}/${legacy_pid:?}"
 legacy_pid=
 kill -0 "$unrelated_pid" 2>/dev/null || fail "legacy migration stopped another installation"
 kill "$unrelated_pid"
@@ -373,7 +373,7 @@ printf '/bin/bash\0./stack\0upgrade-agent\0' >"$proc_fixture/$legacy_pid/cmdline
 FAKE_FLOCK_BUSY=1 BITCOIN_STACK_PROC_ROOT="$proc_fixture" HOME="$tmp" PATH="$stub:$PATH" ./stack apply >/dev/null
 kill -0 "$legacy_pid" 2>/dev/null && fail "legacy upgrade-agent survived while host-service lock was held"
 wait "$legacy_pid" 2>/dev/null || true
-rm -rf "$proc_fixture/$legacy_pid"
+rm -rf "${proc_fixture:?}/${legacy_pid:?}"
 legacy_pid=
 
 # idempotent: a second apply must not duplicate the cron entry

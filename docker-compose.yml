@@ -196,7 +196,7 @@ services:
       - 127.0.0.1
 
   tari:
-    image: ghcr.io/tari-project/minotari_node:v6.1.0-mainnet@sha256:ae106cfe2aa117d0015bf61ce1b1bb029df8ef0a02313fda2c8daf68c9f52c63
+    image: ghcr.io/tari-project/minotari_node:v6.2.0-mainnet@sha256:427a0b9caef47a5ed9a31dba1def13437e2567c66a6c6fa34b6fe6cdcbffaf9c
     profiles: ["tari"]
     labels:
       - "io.node-starter-stack.resource-profile=${TARI_RESOURCE_PROFILE:-off}"
